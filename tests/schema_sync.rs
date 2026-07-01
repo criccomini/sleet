@@ -25,41 +25,11 @@ fn fleet_spec_schema_is_current() {
 }
 
 #[test]
-fn validate_response_schema_is_current() {
+fn response_schema_is_current() {
     assert_current(
-        include_str!("../schema/validate.schema.json"),
-        response::validate_schema_json(),
-        "validate",
-        "validate.schema.json",
-    );
-}
-
-#[test]
-fn status_response_schema_is_current() {
-    assert_current(
-        include_str!("../schema/status.schema.json"),
-        response::status_schema_json(),
-        "status",
-        "status.schema.json",
-    );
-}
-
-#[test]
-fn db_list_response_schema_is_current() {
-    assert_current(
-        include_str!("../schema/db-list.schema.json"),
-        response::db_list_schema_json(),
-        "db-list",
-        "db-list.schema.json",
-    );
-}
-
-#[test]
-fn db_edit_response_schema_is_current() {
-    assert_current(
-        include_str!("../schema/db-edit.schema.json"),
-        response::db_edit_schema_json(),
-        "db-edit",
-        "db-edit.schema.json",
+        include_str!("../schema/response.schema.json"),
+        response::response_schema_json(),
+        "response",
+        "response.schema.json",
     );
 }

@@ -97,14 +97,9 @@ enum DbCommand {
 enum SchemaKind {
     /// The fleet spec TOML format.
     FleetSpec,
-    /// The `validate --format json` response.
-    Validate,
-    /// The `status --format json` response.
-    Status,
-    /// The `db list --format json` response.
-    DbList,
-    /// The `db add`/`db remove` `--format json` response.
-    DbEdit,
+    /// Subcommand `--format json` responses, one `$defs` entry per
+    /// command.
+    Response,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -135,10 +130,7 @@ fn main() -> ExitCode {
         Command::Schema { kind } => {
             let json = match kind {
                 SchemaKind::FleetSpec => sleet::spec::schema_json(),
-                SchemaKind::Validate => sleet::response::validate_schema_json(),
-                SchemaKind::Status => sleet::response::status_schema_json(),
-                SchemaKind::DbList => sleet::response::db_list_schema_json(),
-                SchemaKind::DbEdit => sleet::response::db_edit_schema_json(),
+                SchemaKind::Response => sleet::response::response_schema_json(),
             };
             println!("{json}");
             ExitCode::SUCCESS

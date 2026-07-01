@@ -17,24 +17,23 @@ fn pretty<T: JsonSchema>() -> String {
     serde_json::to_string_pretty(&schema).expect("schema serializes")
 }
 
-/// The `sleet validate` response JSON Schema, pretty-printed.
-pub fn validate_schema_json() -> String {
-    pretty::<ValidateResponse>()
+/// The subcommand response JSON Schema, pretty-printed.
+pub fn response_schema_json() -> String {
+    pretty::<Response>()
 }
 
-/// The `sleet status` response JSON Schema, pretty-printed.
-pub fn status_schema_json() -> String {
-    pretty::<StatusResponse>()
-}
-
-/// The `sleet db list` response JSON Schema, pretty-printed.
-pub fn db_list_schema_json() -> String {
-    pretty::<DbListResponse>()
-}
-
-/// The `sleet db add`/`db remove` response JSON Schema, pretty-printed.
-pub fn db_edit_schema_json() -> String {
-    pretty::<DbEditResponse>()
+/// A response from any subcommand run with `--format json`, one variant
+/// per command. Exists to generate the single response schema: each
+/// command's response is a named definition under `$defs`, so consumers
+/// validate against e.g. `#/$defs/StatusResponse`.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+#[schemars(title = "sleet response")]
+pub enum Response {
+    Validate(ValidateResponse),
+    Status(StatusResponse),
+    DbList(DbListResponse),
+    DbEdit(DbEditResponse),
 }
 
 /// The `sleet validate` response.
