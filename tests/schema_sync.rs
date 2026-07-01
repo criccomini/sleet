@@ -15,21 +15,21 @@ fn assert_current(checked_in: &str, generated: String, kind: &str, file: &str) {
 }
 
 #[test]
-fn fleet_spec_schema_is_current() {
+fn config_schema_is_current() {
     assert_current(
         include_str!("../schema/config.schema.json"),
         spec::schema_json(),
-        "fleet-spec",
+        "config",
         "config.schema.json",
     );
 }
 
 #[test]
-fn response_schema_is_current() {
+fn cli_schema_is_current() {
     assert_current(
         include_str!("../schema/cli.schema.json"),
-        response::response_schema_json(),
-        "response",
+        response::schema_json(),
+        "cli",
         "cli.schema.json",
     );
 }

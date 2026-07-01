@@ -18,7 +18,7 @@ fn pretty<T: JsonSchema>() -> String {
 }
 
 /// The subcommand response JSON Schema, pretty-printed.
-pub fn response_schema_json() -> String {
+pub fn schema_json() -> String {
     pretty::<Response>()
 }
 

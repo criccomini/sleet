@@ -7,10 +7,10 @@ Arguments:
           Which schema to print
 
           Possible values:
-          - fleet-spec: The fleet spec TOML format
-          - response:   Subcommand `--format json` responses, one `$defs` entry per command
+          - config: The fleet spec TOML format (schema/config.schema.json)
+          - cli:    Subcommand `--format json` responses, one `$defs` entry per command (schema/cli.schema.json)
           
-          [default: fleet-spec]
+          [default: config]
 
 Options:
   -h, --help

@@ -11,7 +11,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
 
@@ -130,7 +130,7 @@ fn default_node_timeout() -> HumanDuration {
 pub const DEFAULT_HTTP_ADDR: &str = "127.0.0.1:7533";
 
 fn default_http_addr() -> SocketAddr {
-    SocketAddr::from((Ipv4Addr::LOCALHOST, 7533))
+    DEFAULT_HTTP_ADDR.parse().expect("default addr parses")
 }
 
 /// A per-database service.

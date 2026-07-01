@@ -50,7 +50,7 @@ enum Command {
     /// Print a JSON Schema.
     Schema {
         /// Which schema to print.
-        #[arg(value_enum, default_value = "fleet-spec")]
+        #[arg(value_enum, default_value = "config")]
         kind: SchemaKind,
     },
 }
@@ -95,11 +95,11 @@ enum DbCommand {
 
 #[derive(Clone, Copy, ValueEnum)]
 enum SchemaKind {
-    /// The fleet spec TOML format.
-    FleetSpec,
+    /// The fleet spec TOML format (schema/config.schema.json).
+    Config,
     /// Subcommand `--format json` responses, one `$defs` entry per
-    /// command.
-    Response,
+    /// command (schema/cli.schema.json).
+    Cli,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -129,8 +129,8 @@ fn main() -> ExitCode {
         Command::Validate { spec, format } => validate(&spec, format),
         Command::Schema { kind } => {
             let json = match kind {
-                SchemaKind::FleetSpec => sleet::spec::schema_json(),
-                SchemaKind::Response => sleet::response::response_schema_json(),
+                SchemaKind::Config => sleet::spec::schema_json(),
+                SchemaKind::Cli => sleet::response::schema_json(),
             };
             println!("{json}");
             ExitCode::SUCCESS
