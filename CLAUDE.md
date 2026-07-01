@@ -14,9 +14,9 @@ defined by the serde structs in `src/spec.rs`, which generate
 
 - `cargo test` — all tests, including schema drift checks and CLI
   snapshots.
-- `cargo run -- schema > schema/fleet.schema.json` — regenerate the spec
-  schema after changing `src/spec.rs`; `cargo run -- schema validate >
-  schema/validate.schema.json` after changing `src/response.rs`.
+- `cargo run -- schema <kind> > schema/<file>` — regenerate a schema
+  after changing `src/spec.rs` or `src/response.rs`; the kind/file pairs
+  are listed in `tests/schema_sync.rs`.
 - `cargo run -- validate --spec examples/fleet.toml` — validate a spec.
 - `TRYCMD=overwrite cargo test --test cli` — update CLI snapshots in
   `tests/cmd/` after changing command-line behavior.
