@@ -1,5 +1,4 @@
 use std::io;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -9,7 +8,7 @@ use sleet::render::Render;
 use sleet::response::{
     DbEditAction, DbEditResponse, DbListResponse, StatusResponse, ValidateResponse,
 };
-use sleet::spec::{DEFAULT_HTTP_ADDR, LoadError, Service};
+use sleet::spec::{LoadError, Service};
 
 #[derive(Parser)]
 #[command(name = "sleet", about = "SlateDB fleet manager", version)]
@@ -26,11 +25,12 @@ enum Command {
         #[arg(long)]
         spec: PathBuf,
     },
-    /// Show fleet nodes, service assignments, and service health.
+    /// Show fleet nodes, service assignments, and service health,
+    /// derived from object storage.
     Status {
-        /// Status endpoint of a sleet node (`fleet.http_addr`).
-        #[arg(long, default_value = DEFAULT_HTTP_ADDR)]
-        addr: SocketAddr,
+        /// Path to the fleet spec TOML file.
+        #[arg(long)]
+        spec: PathBuf,
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
@@ -124,7 +124,7 @@ fn parse_service(s: &str) -> Result<Service, String> {
 fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Run { spec } => run(&spec),
-        Command::Status { addr, format } => status(addr, format),
+        Command::Status { spec, format } => status(&spec, format),
         Command::Db(cmd) => db(cmd),
         Command::Validate { spec, format } => validate(&spec, format),
         Command::Schema { kind } => {
@@ -150,10 +150,17 @@ fn run(spec: &Path) -> ExitCode {
     }
 }
 
-fn status(_addr: SocketAddr, format: Format) -> ExitCode {
-    // TODO: GET the status endpoint at `addr` once `sleet run` serves it.
-    eprintln!("note: stub response; the node status endpoint is not implemented");
-    emit(&StatusResponse::stub(), format)
+fn status(spec: &Path, format: Format) -> ExitCode {
+    // TODO: LIST heartbeat objects under `fleet.heartbeats`, read the
+    // assignments and service states each carries, and take compaction
+    // queue depth from `.compactions`.
+    match sleet::spec::load(spec) {
+        Ok(_) => {
+            eprintln!("note: stub response; status from object storage is not implemented");
+            emit(&StatusResponse::stub(), format)
+        }
+        Err(e) => fail(e),
+    }
 }
 
 fn db(cmd: DbCommand) -> ExitCode {

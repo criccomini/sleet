@@ -1,2 +1,2 @@
 bin.name = "sleet"
-args = ["status", "--format", "json"]
+args = ["status", "--spec", "fleet.toml", "--format", "json"]

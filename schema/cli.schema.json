@@ -220,7 +220,7 @@
     },
     "StatusResponse": {
       "title": "sleet status response",
-      "description": "The `sleet status` response.",
+      "description": "The `sleet status` response, derived from object storage: node\nliveness from heartbeat ages, assignments and service states from\nheartbeat contents.",
       "type": "object",
       "properties": {
         "databases": {
@@ -229,10 +229,6 @@
           "items": {
             "$ref": "#/$defs/DatabaseStatus"
           }
-        },
-        "node_id": {
-          "description": "The node that served the request.",
-          "type": "string"
         },
         "nodes": {
           "description": "Every fleet member with a heartbeat object.",
@@ -243,7 +239,6 @@
         }
       },
       "required": [
-        "node_id",
         "nodes",
         "databases"
       ]

@@ -7,7 +7,6 @@ node_id = "sleet-1"                    # default: hostname
 heartbeats = "s3://ops/sleet/nodes/"   # omit if single-node
 heartbeat_interval = "10s"
 node_timeout = "30s"
-http_addr = "127.0.0.1:7533"           # status + Prometheus metrics
 
 # Applied to every database unless a discovery root or [[database]] entry
 # overrides a field. Unset fields use SlateDB's defaults.

@@ -1,12 +1,10 @@
-Show fleet nodes, service assignments, and service health
+Show fleet nodes, service assignments, and service health, derived from object storage
 
-Usage: sleet status [OPTIONS]
+Usage: sleet status [OPTIONS] --spec <SPEC>
 
 Options:
-      --addr <ADDR>
-          Status endpoint of a sleet node (`fleet.http_addr`)
-          
-          [default: 127.0.0.1:7533]
+      --spec <SPEC>
+          Path to the fleet spec TOML file
 
       --format <FORMAT>
           Output format

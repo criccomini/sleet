@@ -1,0 +1,2 @@
+[[database]]
+url = "s3://bucket/db"

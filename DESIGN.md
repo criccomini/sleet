@@ -59,7 +59,6 @@ node_id = "sleet-1"                          # default: hostname
 heartbeats = "s3://ops/sleet/nodes/"         # omit if single-node
 heartbeat_interval = "10s"
 node_timeout = "30s"
-http_addr = "127.0.0.1:7533"                 # status + metrics endpoint
 
 [defaults]
 services = ["gc", "compactor", "workers"]
@@ -107,7 +106,9 @@ previous layer.
 ### Assignment and failover
 
 Each node PUTs a heartbeat object at `<heartbeats>/<node_id>` every
-`heartbeat_interval`. The live set is nodes whose heartbeat `LastModified`
+`heartbeat_interval`; the body is JSON carrying the node's current
+assignments and service states, so fleet state is observable from object
+storage alone. The live set is nodes whose heartbeat `LastModified`
 (object-store clock) is younger than `node_timeout`. `(database, service)`
 pairs are rendezvous-hashed over the live set, recomputed each tick — a dead
 node's databases redistribute within ~`node_timeout`, and rebalance when it
@@ -124,8 +125,8 @@ only member. On a failed spec reload, a node keeps its last good spec.
 
 `sleet run` is a tokio process. Each `(database, service)` is a supervised
 task built on the `slatedb::Admin` API, restarted with backoff on failure.
-One-shot subcommands read/edit the fleet spec and query node status over a
-local HTTP endpoint.
+One-shot subcommands read/edit the fleet spec and object storage; nodes
+serve no API.
 
 ## Services
 
@@ -168,12 +169,11 @@ depth across the fleet.
 
 ## Observability
 
-- Prometheus metrics per `(database, service)` via SlateDB's
-  `MetricsRecorder` (RFC-0021) plus `sleet`'s own: GC deletes, compaction
-  queue depth, worker utilization.
-- `sleet status` shows assignments and service health.
-- Alerts worth shipping with defaults: `.compactions` queue growth, repeated
-  fencing.
+- Nodes run no HTTP server and export no metrics API. `sleet status`
+  derives fleet state from object storage: node liveness from heartbeat
+  ages, assignments and service states from heartbeat bodies, and
+  compaction queue depth from `.compactions`.
+- Structured logs per `(database, service)`.
 
 ## Crate layout
 

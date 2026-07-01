@@ -11,7 +11,6 @@
 
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
 
@@ -100,10 +99,6 @@ pub struct Fleet {
     /// Nodes whose heartbeat is older than this are treated as dead.
     #[serde(default = "default_node_timeout")]
     pub node_timeout: HumanDuration,
-
-    /// Local HTTP endpoint serving node status and Prometheus metrics.
-    #[serde(default = "default_http_addr")]
-    pub http_addr: SocketAddr,
 }
 
 impl Default for Fleet {
@@ -113,7 +108,6 @@ impl Default for Fleet {
             heartbeats: None,
             heartbeat_interval: default_heartbeat_interval(),
             node_timeout: default_node_timeout(),
-            http_addr: default_http_addr(),
         }
     }
 }
@@ -124,13 +118,6 @@ fn default_heartbeat_interval() -> HumanDuration {
 
 fn default_node_timeout() -> HumanDuration {
     Duration::from_secs(30).into()
-}
-
-/// Default `fleet.http_addr`, shared with subcommands that dial a node.
-pub const DEFAULT_HTTP_ADDR: &str = "127.0.0.1:7533";
-
-fn default_http_addr() -> SocketAddr {
-    DEFAULT_HTTP_ADDR.parse().expect("default addr parses")
 }
 
 /// A per-database service.

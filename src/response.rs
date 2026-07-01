@@ -63,12 +63,12 @@ impl ValidateResponse {
     }
 }
 
-/// The `sleet status` response.
+/// The `sleet status` response, derived from object storage: node
+/// liveness from heartbeat ages, assignments and service states from
+/// heartbeat contents.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[schemars(title = "sleet status response")]
 pub struct StatusResponse {
-    /// The node that served the request.
-    pub node_id: String,
     /// Every fleet member with a heartbeat object.
     pub nodes: Vec<NodeStatus>,
     /// Managed databases and their service assignments.
@@ -121,7 +121,7 @@ impl ServiceState {
 }
 
 impl StatusResponse {
-    /// Placeholder until nodes serve status over `fleet.http_addr`.
+    /// Placeholder until status is derived from object storage.
     pub fn stub() -> Self {
         let assign = |service, node_id: &str, state| ServiceStatus {
             service,
@@ -129,7 +129,6 @@ impl StatusResponse {
             state,
         };
         Self {
-            node_id: "sleet-1".into(),
             nodes: vec![
                 NodeStatus {
                     node_id: "sleet-1".into(),

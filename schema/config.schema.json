@@ -28,7 +28,6 @@
       "$ref": "#/$defs/Fleet",
       "default": {
         "heartbeat_interval": "10s",
-        "http_addr": "127.0.0.1:7533",
         "node_timeout": "30s"
       }
     }
@@ -264,11 +263,6 @@
             "string",
             "null"
           ]
-        },
-        "http_addr": {
-          "description": "Local HTTP endpoint serving node status and Prometheus metrics.",
-          "type": "string",
-          "default": "127.0.0.1:7533"
         },
         "node_id": {
           "description": "Node identity within the fleet. Default: hostname.",
