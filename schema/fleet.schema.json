@@ -1,0 +1,650 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sleet fleet spec",
+  "description": "The sleet fleet spec: the set of managed databases and which services\neach gets.",
+  "type": "object",
+  "properties": {
+    "database": {
+      "description": "Explicitly managed databases; an entry wins over discovery for the\nsame URL.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DatabaseEntry"
+      }
+    },
+    "defaults": {
+      "description": "Service settings applied to every database.",
+      "$ref": "#/$defs/ServiceOverrides",
+      "default": {}
+    },
+    "discover": {
+      "description": "Roots scanned for databases.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DiscoverRoot"
+      }
+    },
+    "fleet": {
+      "description": "Node identity and fleet membership.",
+      "$ref": "#/$defs/Fleet",
+      "default": {
+        "heartbeat_interval": "10s",
+        "http_addr": "127.0.0.1:7533",
+        "node_timeout": "30s"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "CompactorOverrides": {
+      "description": "Compaction coordinator settings (SlateDB `CompactorOptions`; sleet\nalways runs the coordinator without an embedded worker).",
+      "type": "object",
+      "properties": {
+        "commit_compacted_interval": {
+          "description": "How often `Compacted` results are committed to the manifest.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "manifest_update_timeout": {
+          "description": "How long manifest updates are retried before giving up.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_concurrent_compactions": {
+          "description": "Maximum compactions scheduled concurrently.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "poll_interval": {
+          "description": "How often the coordinator polls the manifest to schedule compactions.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scheduler": {
+          "description": "Size-tiered compaction scheduler settings.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SchedulerOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "worker_heartbeat_timeout": {
+          "description": "Reclaim a `Running` job whose worker heartbeat is older than this.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "CompressionCodec": {
+      "description": "SST compression codec.",
+      "type": "string",
+      "enum": [
+        "snappy",
+        "zlib",
+        "lz4",
+        "zstd"
+      ]
+    },
+    "DatabaseEntry": {
+      "description": "An explicitly managed database.",
+      "type": "object",
+      "properties": {
+        "compactor": {
+          "description": "Compaction coordinator settings for this database.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompactorOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gc": {
+          "description": "Garbage collection settings for this database.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "services": {
+          "description": "Which services run for this database.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Service"
+          }
+        },
+        "url": {
+          "description": "Object-store URL of the database root, e.g. `\"gs://analytics/events\"`.",
+          "type": "string"
+        },
+        "workers": {
+          "description": "Compaction worker pool settings for this database.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkersOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ]
+    },
+    "DiscoverRoot": {
+      "description": "A root prefix scanned for databases every `rescan`.",
+      "type": "object",
+      "properties": {
+        "compactor": {
+          "description": "Compaction coordinator settings for databases under this root.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompactorOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exclude": {
+          "description": "Glob patterns for prefixes to skip.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gc": {
+          "description": "Garbage collection settings for databases under this root.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_depth": {
+          "description": "Maximum prefix depth below the root to descend.",
+          "type": "integer",
+          "format": "uint32",
+          "default": 3,
+          "minimum": 0
+        },
+        "rescan": {
+          "description": "How often the root is rescanned.",
+          "$ref": "#/$defs/HumanDuration",
+          "default": "5m"
+        },
+        "services": {
+          "description": "Which services run for databases under this root.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Service"
+          }
+        },
+        "url": {
+          "description": "Object-store URL to scan, e.g. `\"s3://prod-us/\"`.",
+          "type": "string"
+        },
+        "workers": {
+          "description": "Compaction worker pool settings for databases under this root.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkersOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ]
+    },
+    "Fleet": {
+      "description": "Node identity and fleet membership.",
+      "type": "object",
+      "properties": {
+        "heartbeat_interval": {
+          "description": "How often this node writes its heartbeat object.",
+          "$ref": "#/$defs/HumanDuration",
+          "default": "10s"
+        },
+        "heartbeats": {
+          "description": "Object-store prefix for node heartbeats. Omit to run single-node.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http_addr": {
+          "description": "Local HTTP endpoint serving node status and Prometheus metrics.",
+          "type": "string",
+          "default": "127.0.0.1:7533"
+        },
+        "node_id": {
+          "description": "Node identity within the fleet. Default: hostname.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "node_timeout": {
+          "description": "Nodes whose heartbeat is older than this are treated as dead.",
+          "$ref": "#/$defs/HumanDuration",
+          "default": "30s"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GcDetachOverrides": {
+      "description": "Settings for the clone-detach GC pass (no file-age threshold).",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Set false to disable the detach pass.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interval": {
+          "description": "How often the detach pass runs.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "GcDirectoryOverrides": {
+      "description": "GC settings for one resource directory.",
+      "type": "object",
+      "properties": {
+        "dry_run": {
+          "description": "Log deletions without performing them.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "enabled": {
+          "description": "Set false to disable GC for this directory.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interval": {
+          "description": "How often the GC pass runs.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_age": {
+          "description": "Minimum object age before deletion.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "GcOverrides": {
+      "description": "Garbage collection settings, per SlateDB resource directory.",
+      "type": "object",
+      "properties": {
+        "compacted": {
+          "description": "The compacted SST directory.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcDirectoryOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compactions": {
+          "description": "The compactions directory (`.compactions` job state).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcDirectoryOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detach": {
+          "description": "Detaching clones whose parent references are no longer needed.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcDetachOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "manifest": {
+          "description": "The manifest directory.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcDirectoryOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wal": {
+          "description": "The WAL directory.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcDirectoryOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wal_fence": {
+          "description": "Zero-byte WAL fence objects. Deleting fences too young can lose\nwrites; dry-run by default.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcDirectoryOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "HumanDuration": {
+      "description": "A duration in humantime form, e.g. \"10s\", \"5m\", \"1h 30m\".",
+      "type": "string",
+      "pattern": "^([0-9]+ *[a-zµ]+ *)+$"
+    },
+    "SchedulerOverrides": {
+      "description": "Size-tiered compaction scheduler settings (SlateDB\n`SizeTieredCompactionSchedulerOptions`).",
+      "type": "object",
+      "properties": {
+        "include_size_threshold": {
+          "description": "A sorted run joins a compaction if its size is below this multiple\nof the smallest run already included.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "max_compaction_sources": {
+          "description": "Maximum sources included together in one compaction.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_compaction_sources": {
+          "description": "Minimum sources included together in one compaction.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Service": {
+      "description": "A per-database service.",
+      "oneOf": [
+        {
+          "description": "Garbage collection.",
+          "type": "string",
+          "const": "gc"
+        },
+        {
+          "description": "Standalone compaction coordinator (RFC-0025).",
+          "type": "string",
+          "const": "compactor"
+        },
+        {
+          "description": "Compaction worker pool (RFC-0025).",
+          "type": "string",
+          "const": "workers"
+        }
+      ]
+    },
+    "ServiceOverrides": {
+      "description": "Per-database service settings. All fields are optional; unset fields\nfall through to the next precedence layer.",
+      "type": "object",
+      "properties": {
+        "compactor": {
+          "description": "Compaction coordinator settings.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompactorOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gc": {
+          "description": "Garbage collection settings.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "services": {
+          "description": "Which services run for the database. Default: all of them.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Service"
+          }
+        },
+        "workers": {
+          "description": "Compaction worker pool settings.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkersOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkersOverrides": {
+      "description": "Compaction worker pool settings (SlateDB `CompactionWorkerOptions`\nplus the pool size).",
+      "type": "object",
+      "properties": {
+        "bytes_to_fetch": {
+          "description": "Read-ahead request size in bytes while iterating input SSTs.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "compression_codec": {
+          "description": "Compression for SSTs the worker writes. Must match the writer's\n`compression_codec`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompressionCodec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "count": {
+          "description": "Worker slots for this database across the fleet.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "heartbeat_bytes": {
+          "description": "Bytes a worker must process before emitting a heartbeat.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "heartbeat_min_interval": {
+          "description": "Minimum wall-clock time between heartbeat writes.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_concurrent_compactions": {
+          "description": "Jobs a single worker may hold simultaneously.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_fetch_tasks": {
+          "description": "Concurrent block-fetch tasks per input SST.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_sst_size": {
+          "description": "Maximum output SST size in bytes before a new one is rolled.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_subcompactions": {
+          "description": "Maximum subcompactions per job (RFC-0028); values <= 1 disable\nsubcompactions.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_filter_keys": {
+          "description": "Write bloom filters for SSTs with at least this many keys. Must\nmatch the writer's `min_filter_keys`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "poll_interval": {
+          "description": "How often workers poll `.compactions` for `Scheduled` jobs.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,69 @@
+# Example sleet fleet spec. Full field reference: schema/fleet.schema.json
+# (regenerate with `cargo run -- schema`). Validate with
+# `sleet validate --spec <path>`.
+
+[fleet]
+node_id = "sleet-1"                    # default: hostname
+heartbeats = "s3://ops/sleet/nodes/"   # omit if single-node
+heartbeat_interval = "10s"
+node_timeout = "30s"
+http_addr = "127.0.0.1:7533"           # status + Prometheus metrics
+
+# Applied to every database unless a discovery root or [[database]] entry
+# overrides a field. Unset fields use SlateDB's defaults.
+[defaults]
+services = ["gc", "compactor", "workers"]
+
+[defaults.gc.manifest]
+interval = "60s"
+min_age = "5m"
+
+[defaults.gc.wal_fence]
+dry_run = true                         # deleting young fences can lose writes
+
+[defaults.gc.compacted]
+min_age = "10m"
+
+[defaults.compactor]
+poll_interval = "5s"
+max_concurrent_compactions = 4
+worker_heartbeat_timeout = "30s"
+
+[defaults.compactor.scheduler]
+min_compaction_sources = 4
+max_compaction_sources = 8
+include_size_threshold = 4.0
+
+[defaults.workers]
+count = 2
+max_sst_size = 268435456               # 256 MiB
+max_subcompactions = 4
+
+# Roots scanned for databases: a prefix with manifest/*.manifest objects
+# is a database.
+[[discover]]
+url = "s3://prod-us/"
+rescan = "5m"
+max_depth = 3
+exclude = ["**/tmp/**"]
+
+[[discover]]
+url = "s3://prod-eu/dbs/"
+
+[discover.workers]                     # databases under this root only
+count = 1
+
+# Explicit entries win over discovery for the same URL.
+[[database]]
+url = "gs://analytics/events"
+services = ["gc"]
+
+[[database]]
+url = "s3://prod-us/tenants/acme"
+
+[database.gc.compacted]
+min_age = "30m"
+
+[database.workers]
+count = 4
+compression_codec = "lz4"
