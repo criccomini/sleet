@@ -40,4 +40,5 @@ protocols. Relevant RFCs there: 0001 (manifest), 0004 (checkpoints/clones),
   asides, or editorializing; future work goes in the Future work section;
   config options are described neutrally with explicit precedence rules.
 - Wrap prose at ~78 columns.
-- Conventional commit syntax (e.g. `docs: ...`, `feat: ...`).
+- Always commit changes using conventional commit syntax (e.g.
+  `docs: ...`, `feat: ...`), and commit at every stopping point.
