@@ -80,7 +80,7 @@ services = ["gc"]
 
 The spec format is defined by the serde structs in `src/spec.rs`; the
 JSON Schema generated from them is checked in at
-`schema/fleet.schema.json` (`sleet schema`, drift-checked by a test).
+`schema/config.schema.json` (`sleet schema`, drift-checked by a test).
 `[defaults]`, `[[discover]]` entries, and `[[database]]` entries all
 accept the same optional `services` list and `gc`/`compactor`/`workers`
 tables, whose fields mirror SlateDB's `GarbageCollectorOptions`,
@@ -181,7 +181,7 @@ A single `sleet` crate with one binary: `sleet run --spec <path>` is the
 long-running daemon; `status`, `db list|add|remove`, `validate`, and
 `schema` are one-shots. The fleet spec types live in `src/spec.rs`.
 One-shot subcommands take `--format json`; response types in
-`src/response.rs` generate `schema/response.schema.json` (one `$defs`
+`src/response.rs` generate `schema/cli.schema.json` (one `$defs`
 entry per command), and text rendering lives in `src/render.rs`.
 
 Depends on `slatedb` (Admin, GarbageCollector, Compactor, CompactionWorker),

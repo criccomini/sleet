@@ -1,7 +1,7 @@
 //! The fleet spec: the TOML file loaded by `sleet run --spec <path>`.
 //!
 //! These structs are the source of truth for the spec format. The JSON
-//! Schema at `schema/fleet.schema.json` is generated from them (`sleet
+//! Schema at `schema/config.schema.json` is generated from them (`sleet
 //! schema`); `tests/schema_sync.rs` fails if the two drift.
 //!
 //! Settings resolve in precedence order: built-in defaults (SlateDB's

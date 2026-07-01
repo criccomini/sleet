@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `DESIGN.md` is the design source of truth; read it before making changes
 and keep it consistent when the design evolves. The fleet spec format is
 defined by the serde structs in `src/spec.rs`, which generate
-`schema/fleet.schema.json`; a test fails when the two drift.
+`schema/config.schema.json`; a test fails when the two drift.
 
 ## Commands
 
