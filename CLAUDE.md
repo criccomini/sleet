@@ -4,10 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`sleet` is a fleet manager for [SlateDB](https://slatedb.io) databases. The
-repository is design-stage: `DESIGN.md` is the source of truth and there is
-no code yet. Read it before making changes; keep it consistent when the
-design evolves.
+`sleet` is a fleet manager for [SlateDB](https://slatedb.io) databases.
+`DESIGN.md` is the design source of truth; read it before making changes
+and keep it consistent when the design evolves. The fleet spec format is
+defined by the serde structs in `src/spec.rs`, which generate
+`schema/fleet.schema.json`; a test fails when the two drift.
+
+## Commands
+
+- `cargo test` — all tests, including the schema drift check.
+- `cargo run -- schema > schema/fleet.schema.json` — regenerate the
+  schema after changing `src/spec.rs`.
+- `cargo run -- validate --spec examples/fleet.toml` — validate a spec.
+- `cargo fmt && cargo clippy --all-targets` before committing.
 
 ## Architecture (from DESIGN.md)
 

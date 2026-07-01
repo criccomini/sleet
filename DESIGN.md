@@ -59,10 +59,13 @@ node_id = "sleet-1"                          # default: hostname
 heartbeats = "s3://ops/sleet/nodes/"         # omit if single-node
 heartbeat_interval = "10s"
 node_timeout = "30s"
+http_addr = "127.0.0.1:7533"                 # status + metrics endpoint
 
 [defaults]
 services = ["gc", "compactor", "workers"]
-workers = 2
+
+[defaults.workers]
+count = 2
 
 [[discover]]
 url = "s3://prod-us/"                        # credentials via env/profile
@@ -71,9 +74,21 @@ max_depth = 3
 exclude = ["**/tmp/**"]
 
 [[database]]                                 # explicit entry; wins over
-url = "gcs://analytics/events"               # discovery for the same path
+url = "gs://analytics/events"                # discovery for the same path
 services = ["gc"]
 ```
+
+The spec format is defined by the serde structs in `src/spec.rs`; the
+JSON Schema generated from them is checked in at
+`schema/fleet.schema.json` (`sleet schema`, drift-checked by a test).
+`[defaults]`, `[[discover]]` entries, and `[[database]]` entries all
+accept the same optional `services` list and `gc`/`compactor`/`workers`
+tables, whose fields mirror SlateDB's `GarbageCollectorOptions`,
+`CompactorOptions`, and `CompactionWorkerOptions` with SlateDB's
+defaults; `workers.count` sets the pool size. `sleet validate --spec`
+enforces what the schema cannot: `heartbeat_interval < node_timeout`,
+valid object-store URLs and exclude globs, unique database entries and
+discovery roots, and scheduler bounds on the resolved settings.
 
 ### Discovery
 
@@ -85,8 +100,9 @@ discover independently — listing the same root yields the same set, so
 assignments converge within one rescan; skew at worst double-runs a service,
 which is safe.
 
-Precedence: built-in defaults → `[defaults]` → discovery entry →
-`[[database]]` entry.
+Precedence: built-in defaults → `[defaults]` → longest matching
+discovery root → `[[database]]` entry. Unset fields fall through to the
+previous layer.
 
 ### Assignment and failover
 
@@ -118,7 +134,8 @@ local HTTP endpoint.
 Wraps `GarbageCollector` (`slatedb/src/garbage_collector.rs`) in long-running
 mode, equivalent to `slatedb schedule-gc` but multiplexed across databases.
 Per-resource `interval`/`min_age`/`dry_run` come from the fleet spec, with the
-SlateDB defaults (`min_age=300s`, `interval=60s`).
+SlateDB defaults (`min_age=300s`, `interval=60s`); WAL fence GC dry-runs by
+default.
 
 Safety: GC already honors checkpoints, the compaction low-watermark, and
 `min_age`; boundary files (RFC-0026) close the stalled-writer race. Two
@@ -161,7 +178,8 @@ depth across the fleet.
 ## Crate layout
 
 A single `sleet` crate with one binary: `sleet run --spec <path>` is the
-long-running daemon; other subcommands (`status`, spec edits) are one-shots.
+long-running daemon; other subcommands (`status`, `validate`, `schema`,
+spec edits) are one-shots. The fleet spec types live in `src/spec.rs`.
 
 Depends on `slatedb` (Admin, GarbageCollector, Compactor, CompactionWorker),
 `slatedb-txn-obj` (CAS primitives), and `object_store`.
