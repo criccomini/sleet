@@ -1,0 +1,2 @@
+bin.name = "sleet"
+args = ["db", "remove", "gs://analytics/events", "--spec", "fleet.toml"]

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sleet db edit response",
+  "description": "The `sleet db add`/`db remove` response.",
+  "type": "object",
+  "properties": {
+    "action": {
+      "$ref": "#/$defs/DbEditAction"
+    },
+    "changed": {
+      "description": "False when the edit was a no-op (already present or not found).",
+      "type": "boolean"
+    },
+    "spec": {
+      "description": "Path of the spec that was edited.",
+      "type": "string"
+    },
+    "url": {
+      "description": "The database URL the edit applied to.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "spec",
+    "url",
+    "action",
+    "changed"
+  ],
+  "$defs": {
+    "DbEditAction": {
+      "description": "What a `db` edit did.",
+      "type": "string",
+      "enum": [
+        "added",
+        "removed"
+      ]
+    }
+  }
+}

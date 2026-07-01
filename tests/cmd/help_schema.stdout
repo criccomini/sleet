@@ -1,0 +1,20 @@
+Print a JSON Schema
+
+Usage: sleet schema [KIND]
+
+Arguments:
+  [KIND]
+          Which schema to print
+
+          Possible values:
+          - fleet-spec: The fleet spec TOML format
+          - validate:   The `validate --format json` response
+          - status:     The `status --format json` response
+          - db-list:    The `db list --format json` response
+          - db-edit:    The `db add`/`db remove` `--format json` response
+          
+          [default: fleet-spec]
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')

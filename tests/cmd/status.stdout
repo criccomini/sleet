@@ -1,0 +1,10 @@
+NODE     LIVE  HEARTBEAT
+sleet-1  yes   2s
+sleet-2  yes   4s
+sleet-3  no    1m 12s
+
+DATABASE               SERVICE    NODE     STATE
+s3://prod-us/db1       gc         sleet-1  running
+s3://prod-us/db1       compactor  sleet-2  running
+s3://prod-us/db1       workers    sleet-1  running
+gs://analytics/events  gc         sleet-2  backoff

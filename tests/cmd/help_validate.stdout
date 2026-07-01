@@ -1,0 +1,19 @@
+Parse and validate a fleet spec
+
+Usage: sleet validate [OPTIONS] --spec <SPEC>
+
+Options:
+      --spec <SPEC>
+          Path to the fleet spec TOML file
+
+      --format <FORMAT>
+          Output format
+
+          Possible values:
+          - text: Human-readable text
+          - json: JSON matching the subcommand's response schema
+          
+          [default: text]
+
+  -h, --help
+          Print help (see a summary with '-h')

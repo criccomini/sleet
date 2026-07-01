@@ -1,0 +1,6 @@
+DATABASE                   SERVICES
+gs://analytics/events      gc
+s3://prod-us/tenants/acme  (defaults)
+
+ROOT           RESCAN  MAX_DEPTH
+s3://prod-us/  5m      3

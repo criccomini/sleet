@@ -126,6 +126,9 @@ fn default_node_timeout() -> HumanDuration {
     Duration::from_secs(30).into()
 }
 
+/// Default `fleet.http_addr`, shared with subcommands that dial a node.
+pub const DEFAULT_HTTP_ADDR: &str = "127.0.0.1:7533";
+
 fn default_http_addr() -> SocketAddr {
     SocketAddr::from((Ipv4Addr::LOCALHOST, 7533))
 }
@@ -140,6 +143,16 @@ pub enum Service {
     Compactor,
     /// Compaction worker pool (RFC-0025).
     Workers,
+}
+
+impl Service {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Service::Gc => "gc",
+            Service::Compactor => "compactor",
+            Service::Workers => "workers",
+        }
+    }
 }
 
 /// Per-database service settings. All fields are optional; unset fields

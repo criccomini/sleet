@@ -1,0 +1,7 @@
+Run the fleet daemon
+
+Usage: sleet run --spec <SPEC>
+
+Options:
+      --spec <SPEC>  Path to the fleet spec TOML file
+  -h, --help         Print help

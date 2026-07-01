@@ -1,0 +1,21 @@
+Show fleet nodes, service assignments, and service health
+
+Usage: sleet status [OPTIONS]
+
+Options:
+      --addr <ADDR>
+          Status endpoint of a sleet node (`fleet.http_addr`)
+          
+          [default: 127.0.0.1:7533]
+
+      --format <FORMAT>
+          Output format
+
+          Possible values:
+          - text: Human-readable text
+          - json: JSON matching the subcommand's response schema
+          
+          [default: text]
+
+  -h, --help
+          Print help (see a summary with '-h')

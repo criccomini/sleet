@@ -3,8 +3,11 @@ SlateDB fleet manager
 Usage: sleet <COMMAND>
 
 Commands:
-  schema    Print a JSON Schema
+  run       Run the fleet daemon
+  status    Show fleet nodes, service assignments, and service health
+  db        Inspect and edit the databases in a fleet spec
   validate  Parse and validate a fleet spec
+  schema    Print a JSON Schema
   help      Print this message or the help of the given subcommand(s)
 
 Options:

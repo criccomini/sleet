@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sleet db list response",
+  "description": "The `sleet db list` response.",
+  "type": "object",
+  "properties": {
+    "databases": {
+      "description": "Explicit `[[database]]` entries in the spec.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DbListEntry"
+      }
+    },
+    "roots": {
+      "description": "Discovery roots; databases under them are known only to running\nnodes.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DbListRoot"
+      }
+    }
+  },
+  "required": [
+    "databases",
+    "roots"
+  ],
+  "$defs": {
+    "DbListEntry": {
+      "description": "One explicit database entry.",
+      "type": "object",
+      "properties": {
+        "services": {
+          "description": "The entry's services override, if it sets one.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Service"
+          }
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "DbListRoot": {
+      "description": "One discovery root.",
+      "type": "object",
+      "properties": {
+        "max_depth": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "rescan": {
+          "$ref": "#/$defs/HumanDuration"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "rescan",
+        "max_depth"
+      ]
+    },
+    "HumanDuration": {
+      "description": "A duration in humantime form, e.g. \"10s\", \"5m\", \"1h 30m\".",
+      "type": "string",
+      "pattern": "^([0-9]+ *[a-zµ]+ *)+$"
+    },
+    "Service": {
+      "description": "A per-database service.",
+      "oneOf": [
+        {
+          "description": "Garbage collection.",
+          "type": "string",
+          "const": "gc"
+        },
+        {
+          "description": "Standalone compaction coordinator (RFC-0025).",
+          "type": "string",
+          "const": "compactor"
+        },
+        {
+          "description": "Compaction worker pool (RFC-0025).",
+          "type": "string",
+          "const": "workers"
+        }
+      ]
+    }
+  }
+}

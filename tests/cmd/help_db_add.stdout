@@ -1,0 +1,26 @@
+Add an explicit database entry to a fleet spec
+
+Usage: sleet db add [OPTIONS] --spec <SPEC> <URL>
+
+Arguments:
+  <URL>
+          Object-store URL of the database root
+
+Options:
+      --spec <SPEC>
+          Path to the fleet spec TOML file
+
+      --services <SERVICES>
+          Services for the entry (default: inherit `[defaults]`)
+
+      --format <FORMAT>
+          Output format
+
+          Possible values:
+          - text: Human-readable text
+          - json: JSON matching the subcommand's response schema
+          
+          [default: text]
+
+  -h, --help
+          Print help (see a summary with '-h')

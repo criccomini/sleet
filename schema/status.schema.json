@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sleet status response",
+  "description": "The `sleet status` response.",
+  "type": "object",
+  "properties": {
+    "databases": {
+      "description": "Managed databases and their service assignments.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DatabaseStatus"
+      }
+    },
+    "node_id": {
+      "description": "The node that served the request.",
+      "type": "string"
+    },
+    "nodes": {
+      "description": "Every fleet member with a heartbeat object.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/NodeStatus"
+      }
+    }
+  },
+  "required": [
+    "node_id",
+    "nodes",
+    "databases"
+  ],
+  "$defs": {
+    "DatabaseStatus": {
+      "description": "One managed database and its service assignments.",
+      "type": "object",
+      "properties": {
+        "services": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServiceStatus"
+          }
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "services"
+      ]
+    },
+    "HumanDuration": {
+      "description": "A duration in humantime form, e.g. \"10s\", \"5m\", \"1h 30m\".",
+      "type": "string",
+      "pattern": "^([0-9]+ *[a-zµ]+ *)+$"
+    },
+    "NodeStatus": {
+      "description": "One fleet member.",
+      "type": "object",
+      "properties": {
+        "heartbeat_age": {
+          "description": "Age of the heartbeat object.",
+          "$ref": "#/$defs/HumanDuration"
+        },
+        "live": {
+          "description": "Whether the heartbeat is younger than `node_timeout`.",
+          "type": "boolean"
+        },
+        "node_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "live",
+        "heartbeat_age"
+      ]
+    },
+    "Service": {
+      "description": "A per-database service.",
+      "oneOf": [
+        {
+          "description": "Garbage collection.",
+          "type": "string",
+          "const": "gc"
+        },
+        {
+          "description": "Standalone compaction coordinator (RFC-0025).",
+          "type": "string",
+          "const": "compactor"
+        },
+        {
+          "description": "Compaction worker pool (RFC-0025).",
+          "type": "string",
+          "const": "workers"
+        }
+      ]
+    },
+    "ServiceState": {
+      "description": "Supervised task state for one service.",
+      "type": "string",
+      "enum": [
+        "running",
+        "backoff",
+        "stopped"
+      ]
+    },
+    "ServiceStatus": {
+      "description": "One `(database, service)` assignment.",
+      "type": "object",
+      "properties": {
+        "node_id": {
+          "description": "Node the service is rendezvous-hashed to.",
+          "type": "string"
+        },
+        "service": {
+          "$ref": "#/$defs/Service"
+        },
+        "state": {
+          "$ref": "#/$defs/ServiceState"
+        }
+      },
+      "required": [
+        "service",
+        "node_id",
+        "state"
+      ]
+    }
+  }
+}

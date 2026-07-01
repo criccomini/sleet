@@ -1,0 +1,12 @@
+Inspect and edit the databases in a fleet spec
+
+Usage: sleet db <COMMAND>
+
+Commands:
+  list    List explicit databases and discovery roots in a fleet spec
+  add     Add an explicit database entry to a fleet spec
+  remove  Remove an explicit database entry from a fleet spec
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
