@@ -16,3 +16,4 @@ url = "2.5.8"
 
 [dev-dependencies]
 toml = "1.1.2"
+trycmd = "1.2.0"

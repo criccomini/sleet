@@ -1,0 +1,3 @@
+bin.name = "sleet"
+args = ["validate", "--spec", "fleet.toml"]
+status.code = 1

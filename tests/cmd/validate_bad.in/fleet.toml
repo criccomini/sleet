@@ -1,0 +1,3 @@
+[fleet]
+heartbeat_interval = "30s"
+node_timeout = "30s"
