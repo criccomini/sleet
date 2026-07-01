@@ -180,6 +180,8 @@ depth across the fleet.
 A single `sleet` crate with one binary: `sleet run --spec <path>` is the
 long-running daemon; other subcommands (`status`, `validate`, `schema`,
 spec edits) are one-shots. The fleet spec types live in `src/spec.rs`.
+One-shot subcommands take `--format json`; response types in
+`src/response.rs` generate per-command schemas under `schema/`.
 
 Depends on `slatedb` (Admin, GarbageCollector, Compactor, CompactionWorker),
 `slatedb-txn-obj` (CAS primitives), and `object_store`.
