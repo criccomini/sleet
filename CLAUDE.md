@@ -23,19 +23,27 @@ defined by the serde structs in `src/spec.rs`, which generate
 
 ## Architecture (from DESIGN.md)
 
-- A single Rust crate, one `sleet` binary: `sleet run --spec <path>` is the
+- A single Rust crate, one `sleet` binary: `sleet run <root>` is the
   long-running daemon; other subcommands are one-shot operator tools.
-- Nodes load a local TOML fleet spec, discover databases under object-store
-  prefixes (a prefix with `manifest/*.manifest` is a database), heartbeat to
-  a configured object-store location, and rendezvous-hash
-  `(database, service)` pairs over the live node set.
+- A fleet is a `.sleet/` tree under one object-store URL: `fleet.toml`
+  (policy), `dbs/` (registry; one file per database, empty = defaults,
+  `services = []` = tombstone), `nodes/` (heartbeats + offered services),
+  `assignments/` (ownership records), `queue/` (pending-compaction
+  markers). Nodes are stateless; the only node-local config is flags.
+- Nodes discover databases under discovery roots (a prefix with
+  `manifest/*.manifest` is a database) and create-only-PUT registry stubs.
+  Each `(database, service, slot)` is one assignment object acquired by
+  conditional PUT; validity rides on the holder's heartbeat liveness. No
+  hashing, no membership agreement.
 - Per-database services wrap SlateDB primitives via `slatedb::Admin`:
   garbage collection, standalone compaction coordinators (RFC-0025), and
-  compaction worker pools. Mirroring is future work.
+  compaction workers (slot holders poll `.compactions`, gated by the
+  `queue/` index). Mirroring is future work.
 - Core invariant: safety never depends on sleet's scheduling. Duplicate or
   stale processes must be harmless; mutual exclusion comes only from
-  SlateDB's manifest CAS, epoch fencing, and `.compactions` claims. The only
-  dependency is object storage — no etcd/ZK/leader election.
+  SlateDB's manifest CAS, epoch fencing, and `.compactions` claims —
+  assignments are efficiency only. The only dependency is object storage —
+  no etcd/ZK/leader election.
 
 ## SlateDB reference
 
