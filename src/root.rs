@@ -510,6 +510,101 @@ mod tests {
         );
     }
 
+    /// The design's read-cost promise: empty registry files are never
+    /// fetched, and override files are fetched only when their ETag
+    /// changes.
+    #[tokio::test]
+    async fn poller_never_refetches_unchanged_bodies() {
+        use crate::testing::{Op, TestStore};
+        let store = TestStore::in_memory();
+        let root = FleetRoot::from_parts(store.clone(), StorePath::from("fleet"), "memory:///f");
+        put(
+            &root,
+            &root.config_path(),
+            "[database]\nservices = [\"gc\"]",
+        )
+        .await;
+        put(&root, &root.database_path("s3://b/empty"), "").await;
+        put(&root, &root.database_path("s3://b/tuned"), "services = []").await;
+
+        let mut poller = ConfigPoller::default();
+        poller.poll(&root).await;
+        let first_pass_gets = store.counters().count(Op::Get);
+        // Config + the one non-empty override; the empty file costs no GET.
+        assert_eq!(first_pass_gets, 2);
+
+        poller.poll(&root).await;
+        // Second pass re-reads only sleet.toml (to see its ETag); the
+        // unchanged override body is served from the cache.
+        assert_eq!(store.counters().count(Op::Get), first_pass_gets + 1);
+
+        // A changed override is re-fetched once.
+        put(
+            &root,
+            &root.database_path("s3://b/tuned"),
+            "services = [\"gc\"]",
+        )
+        .await;
+        let state = poller.poll(&root).await;
+        assert_eq!(store.counters().count(Op::Get), first_pass_gets + 3);
+        assert_eq!(
+            state
+                .config
+                .resolve(state.databases.get("s3://b/tuned"))
+                .services,
+            vec![Service::Gc]
+        );
+    }
+
+    /// An override that turns invalid keeps its last good version; a
+    /// failed registry LIST keeps the whole last-good map.
+    #[tokio::test]
+    async fn poller_keeps_last_good_per_file_and_on_list_failure() {
+        use crate::testing::{Op, TestStore};
+        let store = TestStore::in_memory();
+        let root = FleetRoot::from_parts(store.clone(), StorePath::from("fleet"), "memory:///f");
+        put(
+            &root,
+            &root.database_path("s3://b/db"),
+            "services = [\"gc\"]",
+        )
+        .await;
+
+        let mut poller = ConfigPoller::default();
+        let state = poller.poll(&root).await;
+        assert_eq!(
+            state
+                .config
+                .resolve(state.databases.get("s3://b/db"))
+                .services,
+            vec![Service::Gc]
+        );
+
+        // Now corrupt the override: the last good version stays.
+        put(&root, &root.database_path("s3://b/db"), "nope = 1").await;
+        let state = poller.poll(&root).await;
+        assert_eq!(
+            state
+                .config
+                .resolve(state.databases.get("s3://b/db"))
+                .services,
+            vec![Service::Gc]
+        );
+        assert!(
+            state
+                .warnings
+                .iter()
+                .any(|w| w.contains("keeping last good"))
+        );
+
+        // And a failed LIST keeps the whole registry view.
+        store.fail_next(Op::List, 1);
+        let state = poller.poll(&root).await;
+        assert_eq!(state.databases.len(), 1);
+        assert!(state.databases.contains_key("s3://b/db"));
+        assert!(state.warnings.iter().any(|w| w.contains("failed to list")));
+    }
+
     #[tokio::test]
     async fn bad_fleet_config_keeps_last_good() {
         let root = root();

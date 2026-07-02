@@ -328,6 +328,43 @@ mod tests {
         assert!(worker.compression_codec.is_none());
     }
 
+    /// Idle backoff: with nothing to compact, worker polling doubles
+    /// toward the ceiling instead of polling at the base interval.
+    /// Under paused time, 1000 virtual seconds of a 1s base interval
+    /// would mean ~1000 reads without backoff; with it, wakeups follow
+    /// 1, 2, 4, ... capped at 300s — a handful of reads.
+    #[tokio::test(start_paused = true)]
+    async fn worker_polling_backs_off_while_idle() {
+        use crate::testing::{Op, TestStore};
+        let store = TestStore::in_memory();
+        let db = DatabaseHandle::from_parts(
+            "memory:///db",
+            store.clone(),
+            object_store::path::Path::from("db"),
+        );
+        let resolved = ResolvedWorkers {
+            compactions_poll_interval: Duration::from_secs(1),
+            ..ResolvedServices::default().workers
+        };
+        let token = tokio_util::sync::CancellationToken::new();
+        let jobs = Arc::new(tokio::sync::Semaphore::new(1));
+        let worker = tokio::spawn({
+            let token = token.clone();
+            async move { run_workers(&db, &resolved, jobs, token).await }
+        });
+
+        tokio::time::sleep(Duration::from_secs(1000)).await;
+        token.cancel();
+        worker.await.unwrap().unwrap();
+
+        let reads = store.counters().count(Op::List) + store.counters().count(Op::Get);
+        assert!(reads >= 8, "worker never polled: {reads} reads");
+        assert!(
+            reads <= 60,
+            "worker polled without backing off: {reads} reads in 1000s"
+        );
+    }
+
     #[test]
     fn disabled_gc_directories_map_to_none() {
         let mut resolved = ResolvedServices::default();

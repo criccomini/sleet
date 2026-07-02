@@ -167,3 +167,61 @@ async fn queue_status(url: &str) -> Result<QueueStatus, String> {
 // Re-exported for `run` startup logging symmetry; keeps heartbeat the
 // single source of the name format.
 pub use heartbeat::validate_node_id;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Service;
+    use crate::testing::{TestClock, TestStore};
+    use chrono::Utc;
+    use object_store::ObjectStoreExt;
+    use object_store::path::Path as StorePath;
+    use std::time::Duration;
+
+    /// Status lists dead and live nodes with the youngest body's
+    /// versions; unreadable bodies yield absent versions.
+    #[tokio::test]
+    async fn status_reports_dead_nodes_and_unreadable_bodies() {
+        let clock = TestClock::new(Utc::now());
+        let store = TestStore::in_memory_at(clock.clone());
+        let root = FleetRoot::from_parts(store, StorePath::from("fleet"), "memory:///f")
+            .with_clock(clock.clone());
+
+        // "old" heartbeats, then advance past heartbeat_timeout (30s).
+        let dead = Heartbeat::new("dead", "0.14.1", vec![]);
+        root.store()
+            .put(
+                &root.node_path(&heartbeat::object_name("dead", &Service::ALL)),
+                serde_json::to_vec(&dead).unwrap().into(),
+            )
+            .await
+            .unwrap();
+        clock.advance(Duration::from_secs(120));
+        root.store()
+            .put(
+                &root.node_path(&heartbeat::object_name("garbled", &[Service::Gc])),
+                "not json".into(),
+            )
+            .await
+            .unwrap();
+
+        let status = status(&root, false).await.unwrap();
+        assert_eq!(status.nodes.len(), 2);
+        let dead = status.nodes.iter().find(|n| n.node_id == "dead").unwrap();
+        assert!(!dead.live);
+        assert_eq!(dead.heartbeat_age.0, Duration::from_secs(120));
+        assert_eq!(
+            dead.sleet_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        let garbled = status
+            .nodes
+            .iter()
+            .find(|n| n.node_id == "garbled")
+            .unwrap();
+        assert!(garbled.live);
+        assert_eq!(garbled.sleet_version, None);
+        assert_eq!(garbled.slatedb_version, None);
+        assert_eq!(garbled.services, vec![Service::Gc]);
+    }
+}

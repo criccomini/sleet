@@ -296,18 +296,37 @@ async fn supervise(
     token: CancellationToken,
     heartbeat_interval: Duration,
 ) {
+    let (url, service) = key.clone();
+    let run = move |child: CancellationToken| {
+        let url = url.clone();
+        let resolved = resolved.clone();
+        let jobs = jobs.clone();
+        async move {
+            let db = DatabaseHandle::open(&url)?;
+            services::run_service(&db, service, &resolved, jobs, child).await
+        }
+    };
+    supervise_with(run, key, states, token, heartbeat_interval).await;
+}
+
+/// The supervision loop itself, generic over the task body so the
+/// backoff policy is unit-testable.
+async fn supervise_with<F, Fut>(
+    mut run: F,
+    key: Assignment,
+    states: TaskStates,
+    token: CancellationToken,
+    heartbeat_interval: Duration,
+) where
+    F: FnMut(CancellationToken) -> Fut,
+    Fut: Future<Output = Result<(), services::ServiceError>>,
+{
     let (url, service) = &key;
     let mut backoff = Duration::from_secs(1);
     const MAX_BACKOFF: Duration = Duration::from_secs(60);
     loop {
         set_state(&states, &key, TaskState::Running);
-        let result = match DatabaseHandle::open(url) {
-            Ok(db) => {
-                services::run_service(&db, *service, &resolved, jobs.clone(), token.child_token())
-                    .await
-            }
-            Err(e) => Err(e),
-        };
+        let result = run(token.child_token()).await;
         if token.is_cancelled() {
             break;
         }
@@ -353,5 +372,239 @@ fn fingerprint(resolved: &ResolvedServices) -> u64 {
 fn log_warnings(state: &FleetState) {
     for warning in &state.warnings {
         warn!("{warning}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{DatabaseConfig, SleetConfig, WorkersOverrides};
+    use crate::root::HeartbeatEntry;
+    use crate::testing::TestStore;
+    use object_store::path::Path as StorePath;
+    use slatedb::{CloseReason, Error as SlateError};
+
+    fn node(node_id: &str, services: &[Service]) -> Node {
+        let options = NodeOptions {
+            node_id: node_id.into(),
+            services: services.to_vec(),
+            max_compaction_jobs: 1,
+        };
+        Node {
+            object_name: heartbeat::object_name(&options.node_id, &options.services),
+            jobs: Arc::new(Semaphore::new(1)),
+            states: TaskStates::default(),
+            root: FleetRoot::from_parts(
+                TestStore::in_memory(),
+                StorePath::from("fleet"),
+                "memory:///fleet",
+            ),
+            options,
+        }
+    }
+
+    fn entry(node_id: &str, services: &[Service], age_secs: u64) -> HeartbeatEntry {
+        HeartbeatEntry {
+            node_id: node_id.into(),
+            services: services.to_vec(),
+            age: Duration::from_secs(age_secs),
+            location: StorePath::from(format!(
+                "fleet/nodes/{}",
+                heartbeat::object_name(node_id, services)
+            )),
+        }
+    }
+
+    fn state(databases: &[(&str, DatabaseConfig)]) -> FleetState {
+        FleetState {
+            config: SleetConfig::default(),
+            databases: databases
+                .iter()
+                .map(|(url, db)| (url.to_string(), db.clone()))
+                .collect(),
+            warnings: vec![],
+        }
+    }
+
+    /// Ownership: the ranked owner per service, role-filtered, with
+    /// `count` worker owners; both nodes agree on the same placement.
+    #[test]
+    fn owned_assignments_follow_the_ranking() {
+        let dbs = state(&[
+            ("s3://b/db1", DatabaseConfig::default()),
+            ("s3://b/db2", DatabaseConfig::default()),
+        ]);
+        let entries = vec![entry("n1", &Service::ALL, 1), entry("n2", &Service::ALL, 1)];
+        let n1_owned = node("n1", &Service::ALL).owned_assignments(&entries, &dbs);
+        let n2_owned = node("n2", &Service::ALL).owned_assignments(&entries, &dbs);
+        // Disjoint single-owner services; every pair owned exactly once.
+        for url in ["s3://b/db1", "s3://b/db2"] {
+            for service in Service::ALL {
+                let expected = placement::owners(url, service, 1, &["n1", "n2"])[0];
+                let key = (url.to_string(), service);
+                assert_eq!(n1_owned.contains_key(&key), expected == "n1");
+                assert_eq!(n2_owned.contains_key(&key), expected == "n2");
+            }
+        }
+    }
+
+    /// A node never owns a service it doesn't offer, even when it would
+    /// win the ranking.
+    #[test]
+    fn owned_assignments_respect_roles() {
+        let dbs = state(&[("s3://b/db1", DatabaseConfig::default())]);
+        let entries = vec![
+            entry("n1", &[Service::Gc], 1),
+            entry("n2", &[Service::CompactionWorkers], 1),
+        ];
+        let gc_only = node("n1", &[Service::Gc]).owned_assignments(&entries, &dbs);
+        assert!(gc_only.contains_key(&("s3://b/db1".into(), Service::Gc)));
+        assert!(!gc_only.contains_key(&("s3://b/db1".into(), Service::CompactionWorkers)));
+        // Coordinator has no live offering node: nobody owns it.
+        assert!(!gc_only.contains_key(&("s3://b/db1".into(), Service::CompactorCoordinator)));
+        let workers_only =
+            node("n2", &[Service::CompactionWorkers]).owned_assignments(&entries, &dbs);
+        assert_eq!(workers_only.len(), 1);
+        assert!(workers_only.contains_key(&("s3://b/db1".into(), Service::CompactionWorkers)));
+    }
+
+    /// `count = 2` puts workers on two nodes; `services = []` yields
+    /// nothing; dead nodes are not candidates.
+    #[test]
+    fn owned_assignments_count_disabled_and_dead() {
+        let two_workers = DatabaseConfig {
+            compaction_workers: Some(WorkersOverrides {
+                count: Some(2),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let disabled = DatabaseConfig {
+            services: Some(vec![]),
+            ..Default::default()
+        };
+        let dbs = state(&[("s3://b/db1", two_workers), ("s3://b/off", disabled)]);
+        let entries = vec![
+            entry("n1", &Service::ALL, 1),
+            entry("n2", &Service::ALL, 1),
+            entry("n3", &Service::ALL, 999), // dead
+        ];
+        let worker_key = ("s3://b/db1".to_string(), Service::CompactionWorkers);
+        let n1 = node("n1", &Service::ALL).owned_assignments(&entries, &dbs);
+        let n2 = node("n2", &Service::ALL).owned_assignments(&entries, &dbs);
+        let n3 = node("n3", &Service::ALL).owned_assignments(&entries, &dbs);
+        assert!(n1.contains_key(&worker_key) && n2.contains_key(&worker_key));
+        assert!(n3.is_empty(), "a dead node owns nothing it can see");
+        for owned in [&n1, &n2] {
+            assert!(!owned.keys().any(|(url, _)| url == "s3://b/off"));
+        }
+    }
+
+    /// Reconciliation: starts owned pairs, stops unowned ones, restarts
+    /// on config change, reaps finished tasks.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reconcile_diffs_tasks_against_ownership() {
+        let node = node("n1", &Service::ALL);
+        let fleet = state(&[]);
+        let mut tasks = HashMap::new();
+        let key = ("memory:///db1".to_string(), Service::Gc);
+        let resolved = Arc::new(SleetConfig::default().resolve(None));
+
+        let mut owned = HashMap::new();
+        owned.insert(key.clone(), resolved.clone());
+        node.reconcile(&mut tasks, owned.clone(), &fleet);
+        assert!(tasks.contains_key(&key));
+        let first_token = tasks[&key].token.clone();
+
+        // Same ownership, same config: the task is left alone.
+        node.reconcile(&mut tasks, owned.clone(), &fleet);
+        assert!(!first_token.is_cancelled());
+
+        // Changed resolved config: the task restarts.
+        let mut changed = SleetConfig::default().resolve(None);
+        changed.workers.count = 7;
+        let mut owned_changed = HashMap::new();
+        owned_changed.insert(key.clone(), Arc::new(changed));
+        node.reconcile(&mut tasks, owned_changed, &fleet);
+        assert!(first_token.is_cancelled());
+        assert!(tasks.contains_key(&key));
+        let second_token = tasks[&key].token.clone();
+
+        // No longer owned: the task stops and leaves the map.
+        node.reconcile(&mut tasks, HashMap::new(), &fleet);
+        assert!(second_token.is_cancelled());
+        assert!(tasks.is_empty());
+    }
+
+    fn fenced() -> services::ServiceError {
+        services::ServiceError::SlateDb(SlateError::closed(
+            "fenced by another coordinator".into(),
+            CloseReason::Fenced,
+        ))
+    }
+
+    fn plain() -> services::ServiceError {
+        services::ServiceError::SlateDb(SlateError::unavailable("boom".into()))
+    }
+
+    /// Backoff policy: a fence waits exactly one heartbeat interval and
+    /// resets the exponential backoff; plain errors double toward the
+    /// cap. Verified under paused time so delays are exact.
+    #[tokio::test(start_paused = true)]
+    async fn supervisor_backoff_policy() {
+        let outcomes = Arc::new(Mutex::new(vec![
+            Err(fenced()),
+            Err(plain()),
+            Err(plain()),
+            Ok(()),
+        ]));
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let run = {
+            let outcomes = outcomes.clone();
+            let calls = calls.clone();
+            move |_child: CancellationToken| {
+                let outcomes = outcomes.clone();
+                let calls = calls.clone();
+                async move {
+                    calls.lock().unwrap().push(tokio::time::Instant::now());
+                    outcomes.lock().unwrap().remove(0)
+                }
+            }
+        };
+        let heartbeat_interval = Duration::from_secs(7);
+        supervise_with(
+            run,
+            ("db".into(), Service::CompactorCoordinator),
+            TaskStates::default(),
+            CancellationToken::new(),
+            heartbeat_interval,
+        )
+        .await;
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 4);
+        // Fence: exactly one heartbeat interval.
+        assert_eq!(calls[1] - calls[0], heartbeat_interval);
+        // Plain errors: exponential from 2s (the fence reset it to 1s).
+        assert_eq!(calls[2] - calls[1], Duration::from_secs(2));
+        assert_eq!(calls[3] - calls[2], Duration::from_secs(4));
+    }
+
+    /// Cancellation during backoff exits promptly and clears the state.
+    #[tokio::test(start_paused = true)]
+    async fn supervisor_exits_on_cancel() {
+        let states = TaskStates::default();
+        let token = CancellationToken::new();
+        let run = |_child: CancellationToken| async { Err(plain()) };
+        let handle = tokio::spawn(supervise_with(
+            run,
+            ("db".into(), Service::Gc),
+            states.clone(),
+            token.clone(),
+            Duration::from_secs(10),
+        ));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        token.cancel();
+        handle.await.unwrap();
+        assert!(states.lock().unwrap().is_empty());
     }
 }

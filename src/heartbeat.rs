@@ -187,6 +187,16 @@ mod tests {
         assert_eq!(back.services[0].running, 12);
     }
 
+    #[test]
+    fn node_ids_are_validated() {
+        for ok in ["n", "sleet-1", "a_b-c", "A9", &"x".repeat(128)] {
+            assert!(validate_node_id(ok).is_ok(), "{ok:?}");
+        }
+        for bad in ["", "a.b", "a/b", "a b", "a:b", "ü", &"x".repeat(129)] {
+            assert!(validate_node_id(bad).is_err(), "{bad:?}");
+        }
+    }
+
     /// Readers must tolerate fields added by newer writers.
     #[test]
     fn ignores_unknown_fields() {
