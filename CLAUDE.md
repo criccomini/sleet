@@ -25,7 +25,7 @@ defined by the serde structs in `src/spec.rs`, which generate
 
 - A single Rust crate, one `sleet` binary: `sleet run <root>` is the
   long-running daemon; other subcommands are one-shot operator tools.
-- A fleet is a `.sleet/` tree under one object-store URL: `sleet.toml`
+- A fleet lives under one object-store URL, the fleet root: `sleet.toml`
   (policy: defaults, discovery roots, timing), `dbs/` (registry; one file
   per database, empty = defaults, `services = []` = tombstone), `nodes/`
   (heartbeats: liveness, offered services, sleet/slatedb versions). Nodes

@@ -32,15 +32,15 @@ choose to run them separately.
 ## Architecture
 
 A fleet's entire state — policy, the database registry, and node liveness —
-lives in a `.sleet/` tree under a single object-store URL, the **fleet
-root**. Nodes are stateless, interchangeable processes pointed at the root:
+lives under a single object-store URL, the **fleet root**. Nodes are
+stateless, interchangeable processes pointed at the root:
 
 ```
 sleet run s3://ops/sleet/
 ```
 
 ```
-.sleet/
+<root>/
   sleet.toml        # policy: defaults, discovery roots, timing
   dbs/<db>.toml     # registry: one file per database, overrides only
   nodes/<node>.json # liveness: heartbeat, offered services, versions
