@@ -57,17 +57,18 @@ heartbeat_timeout = "30s"
 config_poll = "1m"                   # sleet.toml / dbs/ re-read cadence
 
 [database]
-services = ["gc", "compactor", "workers"]
+services = ["gc", "compactor-coordinator", "compaction-workers"]
 
-[database.workers]
+[database.compaction-workers]
 count = 1                            # worker slots per database
 ```
 
 The `[database]` table and `dbs/<db>.toml` files share the same shape: an
-optional `services` list and `gc`/`compactor`/`workers` tables, whose
-fields mirror SlateDB's `GarbageCollectorOptions`, `CompactorOptions`, and
-`CompactionWorkerOptions` with SlateDB's defaults; `workers.count` sets
-the number of worker slots. The config types are defined by the serde
+optional `services` list and `gc`/`compactor-coordinator`/
+`compaction-workers` tables, whose fields mirror SlateDB's
+`GarbageCollectorOptions`, `CompactorOptions`, and
+`CompactionWorkerOptions` with SlateDB's defaults;
+`compaction-workers.count` sets the number of worker slots. The config types are defined by the serde
 structs in `src/spec.rs`; the JSON Schema generated from them is checked in
 at `schema/config.schema.json` (drift-checked by a test). Loading enforces
 what the schema cannot: `heartbeat_interval < heartbeat_timeout`, valid
@@ -126,9 +127,10 @@ Ownership is decided by rendezvous hashing. For a given `(database,
 service, slot)`, every live node whose heartbeat offers that service gets
 a score — the hash of the triple combined with the node's id — and the
 highest score owns it. Removing a node moves only the triples it owned;
-adding one moves only the triples it now wins. `gc` and `compactor`
-have a single slot; `workers` has `workers.count` slots, so `count` bounds
-how many nodes poll a database's compaction queue. Every node recomputes
+adding one moves only the triples it now wins. `gc` and
+`compactor-coordinator` have a single slot; `compaction-workers` has
+`count` slots, so `count` bounds how many nodes poll a database's
+compaction queue. Every node recomputes
 ownership each heartbeat tick from the same shared inputs — the `dbs/`
 registry and the live set — and runs exactly the pairs it owns. No
 assignment state is stored. The hash and its key encoding are frozen, like
@@ -156,7 +158,8 @@ they offer; placement is capability-blind by construction.
 node-specific: `--node-id` (default: hostname), `--services` (default: all
 services), and capacity caps defaulted from the machine (e.g. maximum
 concurrent compaction jobs). Heterogeneous fleets run the same binary with
-different flags — e.g. large machines with `--services workers`. Each owned
+different flags — e.g. large machines with `--services
+compaction-workers`. Each owned
 assignment is a supervised task built on the `slatedb::Admin` API,
 restarted with backoff on failure. One-shot subcommands read the fleet
 root and object storage; nodes serve no API.
