@@ -1,4 +1,4 @@
-//! Test support: the seams TESTS.md's chaos and DST levels need.
+//! Test support: the seams the chaos and DST test suites need.
 //!
 //! `TestStore` decorates any `ObjectStore` with per-operation counters,
 //! deterministic fault injection, and, when given a `TestClock`, a

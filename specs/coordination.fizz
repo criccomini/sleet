@@ -7,6 +7,10 @@
 # compactor_epoch abstraction: `holder` is the current epoch owner,
 # and a newly acquired holder fences whoever else is running).
 #
+# Scope: only top-1 placement (gc, coordinator) is modeled. Compaction
+# workers place on the top `count` nodes, but execution there is gated
+# by job claims, not placement, so fencing does not apply.
+#
 # Checked claims:
 # - CurrentHolderNeverFenced: fencing is ordered; the newest acquirer
 #   is never itself fenced.
@@ -56,8 +60,11 @@ role Node:
             elif owner != self.nid and (self.nid in runners[db]) and (self.nid not in fenced[db]):
                 runners[db] = [m for m in runners[db] if m != self.nid]
 
-    # The fenced-coordinator rule: refresh the view; rerun only if
-    # still the owner (re-fencing the rival), otherwise stand down.
+    # The fenced-coordinator rule: the fenced task waits one heartbeat
+    # tick and reruns, re-fencing the rival, unless the daemon's
+    # reconcile cancels it during the wait because ownership moved.
+    # Modeled atomically: recompute the owner from the refreshed view;
+    # rerun if still the owner, otherwise stand down.
     atomic fair action HandleFence:
         require alive[self.nid]
         db = oneof [d for d in DBS if self.nid in fenced[d]]

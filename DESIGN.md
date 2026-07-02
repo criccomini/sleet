@@ -108,7 +108,8 @@ fall through to the previous layer.
 Each node PUTs a heartbeat at `nodes/<node_id>.<services>.json` every
 `heartbeat_interval`, where `<services>` is the offered services' letters
 (`c` = compactor-coordinator, `g` = gc, `w` = compaction-workers) sorted
-ascending, e.g. `sleet-1.cgw.json`; node ids must not contain `.`.
+ascending, e.g. `sleet-1.cgw.json`; node ids are 1-128 characters of
+`[A-Za-z0-9_-]`.
 Assignment never looks inside a heartbeat: the name says which services
 a node offers and `LastModified` says whether it is alive, so one LIST
 of `nodes/` per tick is the only read placement makes.
@@ -125,9 +126,10 @@ counts itself live, even when its own heartbeat reads as stale: it has
 no reliable way to know it is dead, and peers that think so take over in
 parallel anyway, so counting itself in risks at most a double-run, while
 counting itself out would leave its share unowned. A node that changes
-its offered services restarts under a new heartbeat name and deletes its
-old one at startup; if both are briefly visible, the youngest name per
-`node_id` wins. A role change just removes the node from one service's
+its offered services restarts under a new heartbeat name; each tick's
+housekeeping deletes any heartbeat bearing its node id under another
+name, and if both are briefly visible, the youngest name per `node_id`
+wins. A role change just removes the node from one service's
 candidate pool and adds it to another's, and converges like any other
 membership change. On clean shutdown a node deletes its heartbeat,
 handing its assignments off immediately. Any node deletes heartbeats
@@ -169,27 +171,24 @@ they offer; placement does not consider reachability.
 A running coordinator can be fenced by `compactor_epoch` at any time: it
 means another node started a coordinator for the same database, so the
 two disagree about ownership. `sleet` treats fencing as view skew, not
-an ordinary failure. Rather than restart right away, the fenced task
-re-reads `nodes/` and the database's registry entry and recomputes
-ownership:
-
-- Still the owner: restart the coordinator after one
-  `heartbeat_interval`. Restarting bumps `compactor_epoch` and fences
-  the other node, which follows this same rule, sees that it lost, and
-  stands down.
-- No longer the owner: stop; the pair has moved.
-
-The wait gives the other node time to refresh and stand down before the
-re-fence. Mutual fencing can only last as long as the views disagree, at
-most one `config_poll` plus one `heartbeat_interval`, and its cost is a
-brief compaction stall.
+an ordinary failure: instead of restarting with failure backoff, the
+fenced task waits one `heartbeat_interval` and reruns, which bumps
+`compactor_epoch` and fences the rival. The fenced task does not check
+ownership itself; the daemon's next tick recomputes ownership from
+`nodes/` and the registry and cancels the task if the pair has moved,
+so a node that lost stands down before or during its wait. The wait
+gives the rival's daemon the same window to cancel before the re-fence.
+Mutual fencing can only last as long as the views disagree, at most one
+`config_poll` plus one `heartbeat_interval`, and its cost is a brief
+compaction stall.
 
 ### Process model
 
 `sleet run <root>` is a tokio process. Flags cover only what is
 node-specific: `--node-id` (required; ids must be unique within a fleet),
 `--services` (default: all services), and capacity caps defaulted from
-the machine (e.g. maximum concurrent compaction jobs). Heterogeneous
+the machine (e.g. `--max-compaction-jobs`, the maximum number of
+databases compacting on the node at once). Heterogeneous
 fleets run the same binary with different flags, e.g. large machines
 with `--services compaction-workers`. Each owned assignment is a
 supervised task built on the `slatedb::Admin` API, restarted with backoff
