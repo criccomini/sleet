@@ -1,102 +1,57 @@
-//! Real S3 semantics via MinIO in Docker: conditional PUTs, ETags, and
-//! LIST pagination, the behaviors `file://` and `memory://` don't
-//! exercise. Skips (with a note) when Docker isn't available.
+//! Real S3 semantics via MinIO: conditional PUTs, ETags, and LIST
+//! pagination, the behaviors `file://` and `memory://` don't exercise.
+//! The test owns no infrastructure: it connects to the MinIO endpoint
+//! in `SLEET_S3_ENDPOINT` (CI starts one; locally, `scripts/minio.sh`)
+//! and skips with a note when the variable is unset. When the variable
+//! is set, an unreachable MinIO is a failure, not a skip.
 
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
 use object_store::ObjectStoreExt;
 use object_store::aws::AmazonS3Builder;
 use object_store::path::Path as StorePath;
+use sleet::ops;
 use sleet::root::{ConfigPoller, FleetRoot};
 use sleet::testing::{Op, TestStore};
-use sleet::{ops, registry};
 
-fn docker_available() -> bool {
-    Command::new("docker")
-        .arg("info")
-        .output()
-        .is_ok_and(|out| out.status.success())
+fn minio_store(endpoint: &str) -> Arc<dyn object_store::ObjectStore> {
+    Arc::new(
+        AmazonS3Builder::new()
+            .with_bucket_name("sleet")
+            .with_endpoint(endpoint)
+            .with_allow_http(true)
+            .with_access_key_id("minioadmin")
+            .with_secret_access_key("minioadmin")
+            .with_region("us-east-1")
+            .build()
+            .expect("s3 store builds"),
+    )
 }
 
-struct Minio {
-    container: String,
-    port: u16,
-}
-
-impl Minio {
-    fn start() -> Self {
-        // Let the OS pick a free port, then hand it to Docker.
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let output = Command::new("docker")
-            .args([
-                "run",
-                "-d",
-                "--rm",
-                "-p",
-                &format!("127.0.0.1:{port}:9000"),
-                "minio/minio",
-                "server",
-                "/data",
-            ])
-            .output()
-            .expect("docker run");
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let container = String::from_utf8(output.stdout).unwrap().trim().to_string();
-        // The FS backend treats a directory as a bucket.
-        let mkdir = Command::new("docker")
-            .args(["exec", &container, "mkdir", "-p", "/data/sleet"])
-            .status()
-            .expect("docker exec");
-        assert!(mkdir.success());
-        Self { container, port }
-    }
-
-    fn store(&self) -> Arc<dyn object_store::ObjectStore> {
-        Arc::new(
-            AmazonS3Builder::new()
-                .with_bucket_name("sleet")
-                .with_endpoint(format!("http://127.0.0.1:{}", self.port))
-                .with_allow_http(true)
-                .with_access_key_id("minioadmin")
-                .with_secret_access_key("minioadmin")
-                .with_region("us-east-1")
-                .build()
-                .expect("s3 store builds"),
-        )
-    }
-}
-
-impl Drop for Minio {
-    fn drop(&mut self) {
-        let _ = Command::new("docker")
-            .args(["rm", "-f", &self.container])
-            .output();
-    }
-}
-
-/// Register (conditional create), alias detection, ETag-cached polling,
-/// and >1000-entry LIST pagination against real S3 semantics.
+/// Register (conditional create), ETag-cached polling, and
+/// >1000-entry LIST pagination against real S3 semantics.
 #[tokio::test(flavor = "multi_thread")]
 async fn s3_semantics_via_minio() {
-    if !docker_available() {
-        eprintln!("note: docker unavailable; skipping MinIO test");
+    let Ok(endpoint) = std::env::var("SLEET_S3_ENDPOINT") else {
+        eprintln!("note: SLEET_S3_ENDPOINT unset; skipping MinIO test");
         return;
-    }
-    let minio = Minio::start();
-    let store = TestStore::new(minio.store());
-    let root = FleetRoot::from_parts(store.clone(), StorePath::from("fleet"), "s3://sleet/fleet");
+    };
+    let store = TestStore::new(minio_store(&endpoint));
+    // A fresh prefix per run: local MinIO containers outlive test runs,
+    // and the register assertions need an empty registry.
+    let prefix = format!(
+        "fleet-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let url = format!("s3://sleet/{prefix}");
+    let root = FleetRoot::from_parts(store.clone(), StorePath::from(prefix), &url);
 
-    // Wait for MinIO to accept requests.
+    // Absorb MinIO startup lag, then fail: with an endpoint configured,
+    // unreachable means broken, never skip.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
         match ops::status(&root, false).await {
@@ -104,7 +59,7 @@ async fn s3_semantics_via_minio() {
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
-            Err(e) => panic!("minio never became ready: {e}"),
+            Err(e) => panic!("minio at {endpoint} never became ready: {e}"),
         }
     }
 
@@ -118,7 +73,8 @@ async fn s3_semantics_via_minio() {
     );
 
     // ETag caching against real S3 ETags: a config body is fetched
-    // once, then served from cache until it changes.
+    // once, then served from cache until it changes. The +1 allows the
+    // unconditional sleet.toml read every poll makes.
     root.store()
         .put(
             &root.database_path("s3://data/db"),
@@ -159,5 +115,4 @@ async fn s3_semantics_via_minio() {
         "pagination must see every entry"
     );
     assert!(state.warnings.is_empty(), "{:?}", state.warnings);
-    let _ = registry::file_name("s3://data/db");
 }

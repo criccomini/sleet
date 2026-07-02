@@ -28,12 +28,17 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
 
   # Runs the full suite: unit, property, integration, chaos, DST, schema
-  # drift, CLI snapshots, and the MinIO test (Docker is preinstalled on
-  # ubuntu runners). The fizz MBT bridge skips itself without `fizz`.
+  # drift, CLI snapshots, and the MinIO test. scripts/minio.sh starts
+  # MinIO; with SLEET_S3_ENDPOINT set, an unreachable MinIO fails the
+  # test instead of skipping it. The fizz MBT bridge skips itself
+  # without `fizz`.
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - run: scripts/minio.sh
       - run: cargo test --locked
+        env:
+          SLEET_S3_ENDPOINT: http://127.0.0.1:9000

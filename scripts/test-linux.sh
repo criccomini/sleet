@@ -1,8 +1,9 @@
 #!/bin/sh
 # Run the sleet test suite on Linux in Docker. Cargo caches persist in
-# named volumes so reruns are fast. Docker-dependent tests (MinIO)
-# skip themselves inside the container. Debug info is disabled and
-# build jobs are capped so the linker fits in Docker's memory limit.
+# named volumes so reruns are fast. The MinIO test skips itself: no
+# SLEET_S3_ENDPOINT is set inside the container. Debug info is
+# disabled and build jobs are capped so the linker fits in Docker's
+# memory limit.
 set -eu
 cd "$(dirname "$0")/.."
 exec docker run --rm \

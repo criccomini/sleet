@@ -14,8 +14,9 @@ when the two drift.
 ## Commands
 
 - `cargo test` runs all tests: unit, property, integration, chaos, DST,
-  schema drift, CLI snapshots. The MinIO test skips without Docker; the
-  MBT bridge skips without `fizz`.
+  schema drift, CLI snapshots. The MinIO test needs `SLEET_S3_ENDPOINT`
+  (start MinIO with `scripts/minio.sh`) and skips without it; the MBT
+  bridge skips without `fizz`.
 - `UPDATE_SCHEMAS=1 cargo test --test schema_sync` regenerates the
   files under `schema/` after changing `src/config.rs`,
   `src/response.rs`, or `src/heartbeat.rs`.

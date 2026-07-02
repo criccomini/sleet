@@ -58,4 +58,6 @@ cargo fmt && cargo clippy --all-targets
 fizz specs/coordination.fizz     # model-check the coordination protocol
 ```
 
-The MinIO test needs Docker and skips without it.
+The MinIO test connects to `SLEET_S3_ENDPOINT` and skips when it is
+unset; `scripts/minio.sh` starts a MinIO container and prints the
+variable to set.
