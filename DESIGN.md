@@ -278,8 +278,8 @@ json`; response types in `src/response.rs` generate
 `schema/cli.schema.json` (one `$defs` entry per command), and text
 rendering lives in `src/render.rs`.
 
-Depends on `slatedb` (Admin, GarbageCollector, Compactor, CompactionWorker),
-`slatedb-txn-obj` (CAS primitives), and `object_store`.
+Depends on `slatedb` (`Admin` drives GC, coordinators, and workers) and
+`object_store` (stores from URLs, listings, conditional PUTs).
 
 ## Future work
 
