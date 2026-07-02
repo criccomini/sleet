@@ -11,7 +11,11 @@ use sleet::{heartbeat, ops};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
-#[command(name = "sleet", about = "SlateDB fleet manager", version)]
+#[command(
+    name = "sleet",
+    about = "A fleet manager for SlateDB databases",
+    version
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
