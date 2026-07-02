@@ -5,7 +5,6 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use object_store::ObjectStoreExt;
-use sleet::config::Service;
 use sleet::root::FleetRoot;
 use sleet::services::{DatabaseHandle, queue_depth};
 use sleet::{ops, registry};
@@ -184,5 +183,4 @@ async fn sigkill_mid_compaction_is_reclaimed_and_completed() {
     // Whatever the interleaving, the database converged.
     let manifest = handle.admin.read_manifest(None).await.unwrap().unwrap();
     assert!(!manifest.compacted().is_empty());
-    let _ = Service::ALL; // imports used across cfgs
 }

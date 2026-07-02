@@ -62,43 +62,8 @@ async fn register_and_status_roundtrip() {
 async fn daemon_compacts_a_real_database() {
     let dir = tempfile::tempdir().unwrap();
     let fleet_url = format!("file://{}/fleet", dir.path().display());
-    let db_url = format!("file://{}/db1", dir.path().display());
     std::fs::create_dir_all(dir.path().join("fleet")).unwrap();
-    std::fs::create_dir_all(dir.path().join("db1")).unwrap();
-
-    // Write four L0 SSTs with the embedded compactor and GC disabled:
-    // background maintenance belongs to sleet.
-    {
-        let (store, path) = object_store::parse_url(&url::Url::parse(&db_url).unwrap()).unwrap();
-        let settings = slatedb::config::Settings {
-            compactor_options: None,
-            garbage_collector_options: None,
-            ..Default::default()
-        };
-        let db = slatedb::Db::builder(path, Arc::from(store))
-            .with_settings(settings)
-            .build()
-            .await
-            .unwrap();
-        for sst in 0..4 {
-            for key in 0..64 {
-                db.put(
-                    format!("key-{sst}-{key}").as_bytes(),
-                    vec![sst as u8; 1024].as_slice(),
-                )
-                .await
-                .unwrap();
-            }
-            // A plain flush() only flushes the WAL; force memtable
-            // flushes so each round leaves an L0 SST to compact.
-            db.flush_with_options(slatedb::config::FlushOptions {
-                flush_type: slatedb::config::FlushType::MemTable,
-            })
-            .await
-            .unwrap();
-        }
-        db.close().await.unwrap();
-    }
+    let db_url = seed_database(dir.path(), "db1").await;
 
     // Precondition: the writes above left L0 SSTs behind.
     {

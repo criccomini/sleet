@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use common::{Cluster, expected_pairs, poll_until};
 use sleet::config::Service;
-use sleet::testing::{Op, TestClock, TestStore};
+use sleet::testing::{Op, TestClock};
 use sleet::{ops, placement};
 
 /// A fleet running under a 20% fault rate on every store operation
@@ -161,6 +161,5 @@ async fn skewed_reader_takes_over_everything_safely() {
     let status = ops::status(&cluster.root, false).await.unwrap();
     assert_eq!(status.databases.len(), dbs.len());
 
-    let _ = TestStore::in_memory; // keep the import used on all cfgs
     cluster.shutdown().await;
 }
