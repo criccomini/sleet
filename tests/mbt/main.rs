@@ -29,8 +29,8 @@ mod traits;
 
 /// The mechanical transform from the verification spec to the MBT
 /// generation spec: shallower exploration, no liveness (the Converged
-/// block and the `liveness: strict` option), and a generated-file
-/// banner.
+/// block, its header bullet, and the `liveness: strict` option), and
+/// a generated-file banner.
 fn derive_mbt_spec(spec: &str) -> String {
     let banner = "# GENERATED from coordination.fizz for MBT state generation; do not\n\
                   # edit. Regenerate with UPDATE_SPECS=1 cargo test --test mbt.\n";
@@ -42,6 +42,14 @@ fn derive_mbt_spec(spec: &str) -> String {
         .trim_end();
     let body = body.replace("max_actions: 30", "max_actions: 10");
     let body = body.replace("\nliveness: strict", "");
+    let bullet = body
+        .find("# - Converged")
+        .expect("header lists the Converged claim");
+    let options = body[bullet..]
+        .find("options:")
+        .expect("options block follows the header")
+        + bullet;
+    let body = format!("{}{}", &body[..bullet], &body[options..]);
     format!("{banner}{body}\n")
 }
 

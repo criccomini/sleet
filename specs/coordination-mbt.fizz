@@ -18,11 +18,6 @@
 #   is never itself fenced.
 # - DoubleRunReachable: the design's stated worst case (a transient
 #   double-run) is actually explored, not vacuously absent.
-# - Converged (eventually always): after churn stops, every database
-#   is run by exactly the top-ranked alive node, with no fenced tasks
-#   left. This checks convergence and the absence of fence livelock in
-#   one property (a livelock would flap runners/fenced forever and
-#   violate eventually-always).
 options:
   max_actions: 10
   max_concurrent_actions: 1
