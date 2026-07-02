@@ -2635,6 +2635,8 @@ dependencies = [
 name = "sleet"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "chrono",
  "clap",
  "futures",

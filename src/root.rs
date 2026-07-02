@@ -28,6 +28,23 @@ use object_store::{ObjectMeta, ObjectStore, ObjectStoreExt};
 use crate::config::{self, DatabaseConfig, Service, SleetConfig};
 use crate::{heartbeat, registry};
 
+/// The time source for heartbeat ages. Liveness compares a heartbeat's
+/// `LastModified` (object-store clock) against the reader's clock; this
+/// seam lets tests and simulations control the reader's side.
+pub trait Clock: Send + Sync {
+    fn now(&self) -> chrono::DateTime<Utc>;
+}
+
+/// The wall clock.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now(&self) -> chrono::DateTime<Utc> {
+        Utc::now()
+    }
+}
+
 /// A fleet root that could not be opened.
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
@@ -43,6 +60,7 @@ pub struct FleetRoot {
     store: Arc<dyn ObjectStore>,
     prefix: StorePath,
     url: String,
+    clock: Arc<dyn Clock>,
 }
 
 impl FleetRoot {
@@ -52,11 +70,7 @@ impl FleetRoot {
         let canonical = registry::canonicalize_url(url)?;
         let parsed = url::Url::parse(&canonical).expect("canonical URL reparses");
         let (store, prefix) = object_store::parse_url(&parsed)?;
-        Ok(Self {
-            store: store.into(),
-            prefix,
-            url: canonical,
-        })
+        Ok(Self::from_parts(store.into(), prefix, &canonical))
     }
 
     /// A root over an existing store, for tests and embedding.
@@ -65,7 +79,14 @@ impl FleetRoot {
             store,
             prefix,
             url: url.to_string(),
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    /// Replace the reader's clock (tests and simulations).
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     pub fn store(&self) -> &Arc<dyn ObjectStore> {
@@ -108,7 +129,7 @@ impl FleetRoot {
     /// Every heartbeat object under `nodes/`, with parsed names and
     /// ages. Objects that aren't heartbeats are ignored.
     pub async fn list_heartbeats(&self) -> Result<Vec<HeartbeatEntry>, object_store::Error> {
-        let now = Utc::now();
+        let now = self.clock.now();
         let metas = self.list(&self.nodes_prefix()).await?;
         let mut entries = Vec::new();
         for meta in metas {

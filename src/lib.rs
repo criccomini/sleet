@@ -18,6 +18,7 @@ pub mod render;
 pub mod response;
 pub mod root;
 pub mod services;
+pub mod testing;
 
 /// The slatedb version compiled into this binary (from Cargo.lock via
 /// build.rs), carried in heartbeat bodies.
