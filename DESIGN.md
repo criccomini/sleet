@@ -87,7 +87,8 @@ when its ETag changes.
 `dbs/<db>.toml` registers a database. `<db>` is the percent-encoded
 database URL, so the filename alone identifies the database and an empty
 file is valid. Files are created by operators, directly or with `sleet
-register <url>`. `register` canonicalizes URLs before encoding so one
+register <root> <url>`. `register` canonicalizes URLs before encoding
+so one
 database cannot be registered under two spellings; `status` flags entries
 that alias after canonicalization. A file's contents are exactly a
 `[database]` table: any field `sleet.toml`'s `[database]` section accepts

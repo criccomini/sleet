@@ -35,7 +35,7 @@ async fn failover_on_unclean_death() {
     .await;
 
     // Kill it with no cleanup; the survivor takes over once the stale
-    // heartbeat ages past heartbeat_timeout (1s).
+    // heartbeat ages past heartbeat_timeout (2s, from common::FAST).
     cluster.kill(&owner);
     let takeover = tokio::time::Instant::now();
     poll_until("survivor takes over", || async {

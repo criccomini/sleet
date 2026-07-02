@@ -53,7 +53,7 @@ commands take `--format json`, with responses documented by
 ## Developing
 
 ```sh
-cargo test                       # unit, property, chaos, DST, snapshots
+cargo test    # unit, property, integration, system, chaos, DST, schema, snapshots
 cargo fmt && cargo clippy --all-targets
 fizz --experimental_no_state_returns specs/coordination.fizz
 ```

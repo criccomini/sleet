@@ -47,7 +47,8 @@ when the two drift.
   liveness and offered services come from the object name, versions and
   stats from the body). Nodes are stateless; the only node-local config
   is flags.
-- Databases are registered manually, with `sleet register <url>` or by
+- Databases are registered manually, with `sleet register <root> <url>`
+  or by
   writing `dbs/<db>.toml` directly; auto-discovery is future work. Each
   `(database, service)` is placed by a frozen rendezvous ranking of the
   live nodes offering that service: the top node for gc and

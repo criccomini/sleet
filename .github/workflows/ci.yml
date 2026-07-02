@@ -40,8 +40,7 @@ jobs:
           done
 
   # One job per test type; fail-fast off so one failing type still
-  # reports the others. The fizz MBT bridge (dst) skips itself without
-  # `fizz`.
+  # reports the others.
   test:
     name: test (${{ matrix.name }})
     runs-on: ubuntu-latest
