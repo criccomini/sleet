@@ -7,8 +7,10 @@ choose to run them separately.
 
 ## Goals
 
-- Run GC, compactor coordinators, and compaction workers for many databases
-  from a small pool of `sleet` nodes.
+- Run GC, compactor coordinators, and compaction workers for millions of
+  databases from a small pool of `sleet` nodes. Per-database fleet state is
+  one registry file, coordination traffic is independent of database count,
+  and idle databases cost only backed-off polling.
 - Discover databases automatically under a bucket/prefix — no per-database
   registration.
 - No dependencies beyond object storage. Mutual exclusion comes from
