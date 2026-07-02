@@ -27,9 +27,10 @@ defined by the serde structs in `src/spec.rs`, which generate
   long-running daemon; other subcommands are one-shot operator tools.
 - A fleet lives under one object-store URL, the fleet root: `sleet.toml`
   (policy: defaults, timing), `dbs/` (registry; one file per database,
-  empty = defaults, `services = []` = disabled), `nodes/` (heartbeats:
-  liveness, offered services, sleet/slatedb versions). Nodes are
-  stateless; the only node-local config is flags.
+  empty = defaults, `services = []` = disabled), `nodes/` (heartbeats;
+  liveness and offered services ride the object name, versions and stats
+  ride the body). Nodes are stateless; the only node-local config is
+  flags.
 - Databases are registered manually — `sleet register <url>` or writing
   `dbs/<db>.toml` directly; auto-discovery is future work. Each
   `(database, service, slot)` is owned by the live node that wins a frozen

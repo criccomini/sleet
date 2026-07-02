@@ -40,9 +40,9 @@ sleet run s3://ops/sleet/
 
 ```
 <root>/
-  sleet.toml        # policy: defaults, timing
-  dbs/<db>.toml     # registry: one file per database, overrides only
-  nodes/<node>.json # liveness: heartbeat, offered services, versions
+  sleet.toml               # policy: defaults, timing
+  dbs/<db>.toml            # registry: one file per database, overrides only
+  nodes/<node>.<services>  # liveness + offered services in the name
 ```
 
 Each node heartbeats under `nodes/`, computes its assignments by
@@ -100,23 +100,27 @@ fall through to the previous layer.
 
 ### Nodes and liveness
 
-Each node PUTs `nodes/<node_id>.json` every `heartbeat_interval`. The body
-carries the node's offered services, its `sleet` and `slatedb` versions,
-and summary service states; it is defined by the structs in
-`src/heartbeat.rs` (`schema/heartbeat.schema.json`). Readers ignore unknown
-fields so mixed-version fleets coexist, and `version` bumps only on
-incompatible change.
+Each node PUTs a heartbeat at `nodes/<node_id>.<services>` every
+`heartbeat_interval`, where `<services>` compactly encodes the service set
+the node offers. Everything assignment needs is in the listing — names
+carry roles, `LastModified` carries liveness — so one LIST of `nodes/` per
+tick is the only read; heartbeat bodies are never fetched for placement.
+The body carries the node's `sleet` and `slatedb` versions and summary
+service states for `sleet status`; it is defined by the structs in
+`src/heartbeat.rs` (`schema/heartbeat.schema.json`). Readers ignore
+unknown fields so mixed-version fleets coexist, and `version` bumps only
+on incompatible change.
 
 A node is **live** iff its heartbeat's `LastModified` (object-store clock)
 is younger than `heartbeat_timeout` by the reader's clock; skew shifts
-failover timing, never safety. Each tick, every node LISTs `nodes/` for
-liveness and GETs each live heartbeat for its body — O(nodes) requests. A
-node that changes its offered services (a restart with different
-`--services`) is, to the hash, a departure from one service's candidate
-pool and an arrival in another's, and converges the same way membership
-changes do. On clean shutdown a node deletes its heartbeat,
-handing its assignments off immediately. Any node deletes heartbeats older
-than 10× `heartbeat_timeout`.
+failover timing, never safety. A node that changes its offered services
+restarts under a new heartbeat name and deletes its old one at startup; if
+both are briefly visible, the youngest name per `node_id` wins. To the
+hash, a role change is a departure from one service's candidate pool and
+an arrival in another's, converging like any membership change. On clean
+shutdown a node deletes its heartbeat, handing its assignments off
+immediately. Any node deletes heartbeats older than 10×
+`heartbeat_timeout`.
 
 ### Assignment and failover
 
