@@ -72,19 +72,31 @@ jobs:
           shared-key: test
       - run: cargo test --locked ${{ matrix.args }}
 
-  # The S3 semantics test, against MinIO started by scripts/minio.sh.
-  # With SLEET_S3_ENDPOINT set, an unreachable MinIO fails the test
-  # instead of skipping it.
+  # The S3 semantics test, against a MinIO service container. The
+  # official minio/minio image needs a `server /data` command, which
+  # service containers cannot pass; the Bitnami build starts from env
+  # alone and pre-creates the bucket. bitnamilegacy is frozen, hence
+  # the digest pin. The test itself absorbs startup lag (a 30s
+  # readiness loop) and fails, rather than skips, when MinIO is
+  # unreachable with SLEET_S3_ENDPOINT set.
   minio:
     name: test (minio)
     runs-on: ubuntu-latest
+    services:
+      minio:
+        image: bitnamilegacy/minio@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: sleet
+        ports:
+          - 9000:9000
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test
-      - run: scripts/minio.sh
       - run: cargo test --locked --test s3
         env:
           SLEET_S3_ENDPOINT: http://127.0.0.1:9000

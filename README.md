@@ -59,5 +59,4 @@ fizz specs/coordination.fizz     # model-check the coordination protocol
 ```
 
 The MinIO test connects to `SLEET_S3_ENDPOINT` and skips when it is
-unset; `scripts/minio.sh` starts a MinIO container and prints the
-variable to set.
+unset; CI provides MinIO as a service container.

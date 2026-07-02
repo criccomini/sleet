@@ -15,7 +15,8 @@ when the two drift.
 
 - `cargo test` runs all tests: unit, property, integration, chaos, DST,
   schema drift, CLI snapshots. The MinIO test needs `SLEET_S3_ENDPOINT`
-  (start MinIO with `scripts/minio.sh`) and skips without it; the MBT
+  and skips without it; CI runs MinIO as a service container, and
+  `.github/workflows/ci.yml` names the image to run locally. The MBT
   bridge skips without `fizz`.
 - `UPDATE_SCHEMAS=1 cargo test --test schema_sync` regenerates the
   files under `schema/` after changing `src/config.rs`,

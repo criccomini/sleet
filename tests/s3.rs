@@ -1,9 +1,10 @@
 //! Real S3 semantics via MinIO: conditional PUTs, ETags, and LIST
 //! pagination, the behaviors `file://` and `memory://` don't exercise.
 //! The test owns no infrastructure: it connects to the MinIO endpoint
-//! in `SLEET_S3_ENDPOINT` (CI starts one; locally, `scripts/minio.sh`)
-//! and skips with a note when the variable is unset. When the variable
-//! is set, an unreachable MinIO is a failure, not a skip.
+//! in `SLEET_S3_ENDPOINT` (CI provides one as a service container; the
+//! workflow names the image to run locally) and skips with a note when
+//! the variable is unset. When the variable is set, an unreachable
+//! MinIO is a failure, not a skip.
 
 use std::sync::Arc;
 use std::time::Duration;
