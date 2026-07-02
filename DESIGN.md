@@ -31,7 +31,7 @@ choose to run them separately.
 
 ## Architecture
 
-A fleet's entire state — policy, the database registry, and node liveness —
+`sleet`'s entire state — policy, the database registry, and node liveness —
 lives under a single object-store URL, the **fleet root**. Nodes are
 stateless, interchangeable processes pointed at the root:
 
