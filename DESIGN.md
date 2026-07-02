@@ -1,9 +1,9 @@
 # sleet — a SlateDB fleet manager
 
-`sleet` operates fleets of [SlateDB](https://slatedb.io) databases. It runs the
-background services a SlateDB database needs but that don't belong in the
-writer process — garbage collection, compaction coordination, and compaction
-execution.
+`sleet` operates fleets of [SlateDB](https://slatedb.io) databases. It runs
+their background services — garbage collection, compaction coordination, and
+compaction execution — outside the writer process, for deployments that
+choose to run them separately.
 
 ## Goals
 
