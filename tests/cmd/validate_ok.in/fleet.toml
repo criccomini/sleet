@@ -1,5 +1,0 @@
-[fleet]
-node_id = "sleet-1"
-
-[[database]]
-url = "s3://bucket/db"

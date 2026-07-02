@@ -10,9 +10,8 @@
 //! Compatibility: readers ignore unknown fields (mixed-version fleets
 //! must coexist), so fields may be added freely; `version` increments
 //! only on incompatible change. The JSON Schema at
-//! `schema/heartbeat.schema.json` is generated from these structs
-//! (`sleet schema heartbeat`); `tests/schema_sync.rs` fails if the two
-//! drift.
+//! `schema/heartbeat.schema.json` is generated from these structs by
+//! `tests/schema_sync.rs`, which fails if the two drift.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

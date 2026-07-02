@@ -1,2 +1,0 @@
-bin.name = "sleet"
-args = ["validate", "--help"]

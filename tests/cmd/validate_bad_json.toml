@@ -1,3 +1,0 @@
-bin.name = "sleet"
-args = ["validate", "--spec", "fleet.toml", "--format", "json"]
-status.code = 1

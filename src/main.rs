@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use sleet::render::Render;
-use sleet::response::{StatusResponse, ValidateResponse};
+use sleet::response::StatusResponse;
 use sleet::spec::LoadError;
 
 #[derive(Parser)]
@@ -33,32 +33,6 @@ enum Command {
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
     },
-    /// Parse and validate a fleet spec.
-    Validate {
-        /// Path to the fleet spec TOML file.
-        #[arg(long)]
-        spec: PathBuf,
-        /// Output format.
-        #[arg(long, value_enum, default_value = "text")]
-        format: Format,
-    },
-    /// Print a JSON Schema.
-    Schema {
-        /// Which schema to print.
-        #[arg(value_enum, default_value = "config")]
-        kind: SchemaKind,
-    },
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum SchemaKind {
-    /// The fleet spec TOML format (schema/config.schema.json).
-    Config,
-    /// Subcommand `--format json` responses, one `$defs` entry per
-    /// command (schema/cli.schema.json).
-    Cli,
-    /// The heartbeat object body (schema/heartbeat.schema.json).
-    Heartbeat,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -73,16 +47,6 @@ fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Run { spec } => run(&spec),
         Command::Status { spec, format } => status(&spec, format),
-        Command::Validate { spec, format } => validate(&spec, format),
-        Command::Schema { kind } => {
-            let json = match kind {
-                SchemaKind::Config => sleet::spec::schema_json(),
-                SchemaKind::Cli => sleet::response::schema_json(),
-                SchemaKind::Heartbeat => sleet::heartbeat::schema_json(),
-            };
-            println!("{json}");
-            ExitCode::SUCCESS
-        }
     }
 }
 
@@ -108,31 +72,6 @@ fn status(spec: &Path, format: Format) -> ExitCode {
             emit(&StatusResponse::stub(), format)
         }
         Err(e) => fail(e),
-    }
-}
-
-fn validate(spec: &Path, format: Format) -> ExitCode {
-    let result = sleet::spec::load(spec);
-    match format {
-        Format::Text => match result {
-            Ok(_) => {
-                println!("{}: ok", spec.display());
-                ExitCode::SUCCESS
-            }
-            Err(e) => fail(e),
-        },
-        Format::Json => {
-            let response = ValidateResponse::new(spec, &result);
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&response).expect("response serializes")
-            );
-            if response.valid {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::FAILURE
-            }
-        }
     }
 }
 

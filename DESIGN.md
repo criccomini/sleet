@@ -79,15 +79,15 @@ services = ["gc"]
 
 The spec format is defined by the serde structs in `src/spec.rs`; the
 JSON Schema generated from them is checked in at
-`schema/config.schema.json` (`sleet schema`, drift-checked by a test).
-`[defaults]`, `[[discover]]` entries, and `[[database]]` entries all
-accept the same optional `services` list and `gc`/`compactor`/`workers`
-tables, whose fields mirror SlateDB's `GarbageCollectorOptions`,
-`CompactorOptions`, and `CompactionWorkerOptions` with SlateDB's
-defaults; `workers.count` sets the pool size. `sleet validate --spec`
-enforces what the schema cannot: `heartbeat_interval < node_timeout`,
-valid object-store URLs and exclude globs, unique database entries and
-discovery roots, and scheduler bounds on the resolved settings.
+`schema/config.schema.json` (drift-checked by a test). `[defaults]`,
+`[[discover]]` entries, and `[[database]]` entries all accept the same
+optional `services` list and `gc`/`compactor`/`workers` tables, whose
+fields mirror SlateDB's `GarbageCollectorOptions`, `CompactorOptions`,
+and `CompactionWorkerOptions` with SlateDB's defaults; `workers.count`
+sets the pool size. Loading a spec enforces what the schema cannot:
+`heartbeat_interval < node_timeout`, valid object-store URLs and
+exclude globs, unique database entries and discovery roots, and
+scheduler bounds on the resolved settings.
 
 ### Discovery
 
@@ -182,7 +182,7 @@ depth across the fleet.
 ## Crate layout
 
 A single `sleet` crate with one binary: `sleet run --spec <path>` is the
-long-running daemon; `status`, `validate`, and `schema` are one-shots. The fleet spec types live in `src/spec.rs`.
+long-running daemon; `status` is a one-shot. The fleet spec types live in `src/spec.rs`.
 One-shot subcommands take `--format json`; response types in
 `src/response.rs` generate `schema/cli.schema.json` (one `$defs`
 entry per command), and text rendering lives in `src/render.rs`. The

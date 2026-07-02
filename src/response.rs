@@ -1,17 +1,16 @@
 //! Response types for one-shot subcommands run with `--format json`.
 //!
-//! These structs are the source of truth for the response schemas under
-//! `schema/` (`sleet schema <kind>`); `tests/schema_sync.rs` fails if
-//! the two drift. Text rendering lives in `crate::render`.
+//! These structs are the source of truth for `schema/cli.schema.json`;
+//! `tests/schema_sync.rs` regenerates it and fails if the two drift.
+//! Text rendering lives in `crate::render`.
 
-use std::path::Path;
 use std::time::Duration;
 
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::heartbeat::ServiceState;
-use crate::spec::{FleetSpec, HumanDuration, LoadError, Service};
+use crate::spec::{HumanDuration, Service};
 
 /// The subcommand response JSON Schema, pretty-printed.
 pub fn schema_json() -> String {
@@ -26,35 +25,7 @@ pub fn schema_json() -> String {
 #[serde(untagged)]
 #[schemars(title = "sleet response")]
 pub enum Response {
-    Validate(ValidateResponse),
     Status(StatusResponse),
-}
-
-/// The `sleet validate` response.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[schemars(title = "sleet validate response")]
-pub struct ValidateResponse {
-    /// Path of the spec that was checked.
-    pub spec: String,
-    /// Whether the spec parsed and validated.
-    pub valid: bool,
-    /// Problems found; empty when valid.
-    pub errors: Vec<String>,
-}
-
-impl ValidateResponse {
-    pub fn new(spec: &Path, result: &Result<FleetSpec, LoadError>) -> Self {
-        let errors = match result {
-            Ok(_) => Vec::new(),
-            Err(LoadError::Invalid(e)) => e.0.clone(),
-            Err(e) => vec![e.to_string()],
-        };
-        Self {
-            spec: spec.display().to_string(),
-            valid: errors.is_empty(),
-            errors,
-        }
-    }
 }
 
 /// The `sleet status` response, derived from object storage: node

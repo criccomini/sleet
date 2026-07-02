@@ -4,9 +4,6 @@
   "description": "A response from any subcommand run with `--format json`, one variant\nper command. Exists to generate the single response schema: each\ncommand's response is a named definition under `$defs`, so consumers\nvalidate against e.g. `#/$defs/StatusResponse`.",
   "anyOf": [
     {
-      "$ref": "#/$defs/ValidateResponse"
-    },
-    {
       "$ref": "#/$defs/StatusResponse"
     }
   ],
@@ -141,33 +138,6 @@
       "required": [
         "nodes",
         "databases"
-      ]
-    },
-    "ValidateResponse": {
-      "title": "sleet validate response",
-      "description": "The `sleet validate` response.",
-      "type": "object",
-      "properties": {
-        "errors": {
-          "description": "Problems found; empty when valid.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "spec": {
-          "description": "Path of the spec that was checked.",
-          "type": "string"
-        },
-        "valid": {
-          "description": "Whether the spec parsed and validated.",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "spec",
-        "valid",
-        "errors"
       ]
     }
   }
