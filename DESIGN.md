@@ -115,9 +115,11 @@ than 10× `heartbeat_timeout`.
 
 ### Assignment and failover
 
-Each `(database, service, slot)` is owned by the live node that maximizes
-a rendezvous hash of `(database, service, slot, node_id)`, computed over
-the live nodes whose heartbeats offer that service. `gc` and `compactor`
+Ownership is decided by rendezvous hashing. For a given `(database,
+service, slot)`, every live node whose heartbeat offers that service gets
+a score — the hash of the triple combined with the node's id — and the
+highest score owns it. Removing a node moves only the triples it owned;
+adding one moves only the triples it now wins. `gc` and `compactor`
 have a single slot; `workers` has `workers.count` slots, so `count` bounds
 how many nodes poll a database's compaction queue. Every node recomputes
 ownership each heartbeat tick from the same shared inputs — the `dbs/`
