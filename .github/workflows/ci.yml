@@ -27,13 +27,16 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       # Every test target must be run by a job below; a new tests/*.rs
-      # that no job names fails here instead of silently not running.
+      # or tests/*/main.rs that no job names fails here instead of
+      # silently not running.
       - name: check this workflow runs every test target
         run: |
-          for f in tests/*.rs; do
+          for f in tests/*.rs tests/*/main.rs; do
+            [ -e "$f" ] || continue
             t=$(basename "$f" .rs)
+            if [ "$t" = main ]; then t=$(basename "$(dirname "$f")"); fi
             grep -qE -- "--test $t( |$)" .github/workflows/ci.yml \
-              || { echo "tests/$t.rs is not run by any CI job" >&2; exit 1; }
+              || { echo "test target $t is not run by any CI job" >&2; exit 1; }
           done
 
   # One job per test type; fail-fast off so one failing type still
@@ -71,6 +74,48 @@ jobs:
         with:
           shared-key: test
       - run: cargo test --locked ${{ matrix.args }}
+
+  # Model checking plus model-based testing: fizz verifies the
+  # coordination spec, then explores the derived MBT spec;
+  # fizzbee-mbt-server serves that state space, and the mbt test
+  # (tests/mbt) drives its action sequences against the real decision
+  # code, comparing every action's return with the model's. With
+  # SLEET_MBT set, missing tools fail the test instead of skipping it.
+  mbt:
+    name: test (mbt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+      - name: Install fizzbee and fizzbee-mbt
+        run: |
+          mkdir -p "$HOME/fizzbee" "$HOME/fizzbee-mbt"
+          curl -sSfL https://github.com/fizzbee-io/fizzbee/releases/download/v0.5.1/fizzbee-v0.5.1-linux_x86.tar.gz \
+            | tar xz -C "$HOME/fizzbee"
+          curl -sSfL https://github.com/fizzbee-io/fizzbee-mbt-releases/releases/download/v0.2.0/fizzbee-mbt-0.2.0-linux_x86.tar.gz \
+            | tar xz -C "$HOME/fizzbee-mbt"
+          echo "$HOME/fizzbee-mbt" >> "$GITHUB_PATH"
+      - name: Model-check the spec and generate MBT states
+        run: |
+          export PARSER_BIN="$HOME/fizzbee/parser/parser_bin"
+          export FIZZBEE_BIN="$HOME/fizzbee/fizzbee"
+          "$HOME/fizzbee/fizz" --experimental_no_state_returns specs/coordination.fizz
+          "$HOME/fizzbee/fizz" specs/coordination-mbt.fizz
+      - name: Serve the state space
+        run: |
+          "$HOME/fizzbee-mbt/fizzbee-mbt-server" --states_file specs/out/latest &
+          for _ in $(seq 60); do
+            (exec 3<>/dev/tcp/127.0.0.1/50051) 2>/dev/null && exit 0
+            sleep 1
+          done
+          echo "mbt server never became ready" >&2
+          exit 1
+      - run: cargo test --locked --test mbt
+        env:
+          SLEET_MBT: 1
 
   # The S3 semantics test, against a MinIO service container. The
   # official minio/minio image needs a `server /data` command, which

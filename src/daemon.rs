@@ -55,6 +55,51 @@ pub enum DaemonError {
 /// One `(database, service)` assignment.
 type Assignment = (String, Service);
 
+/// The assignments `node_id` owns: for every registered database and
+/// configured service, the top of the rendezvous ranking over live
+/// nodes offering the service; top 1 for gc and coordinator, top
+/// `count` for workers. A node always counts itself live: reading its
+/// own heartbeat as stale (a skewed clock, a slow PUT) must not make
+/// it drop its share, because peers that consider it dead take over in
+/// parallel, which is a safe double-run, whereas excluding itself
+/// would leave the share unowned. The daemon calls this every tick;
+/// pub so the model-based test drives the same decision function.
+pub fn owned_assignments(
+    node_id: &str,
+    services: &[Service],
+    entries: &[HeartbeatEntry],
+    state: &FleetState,
+) -> HashMap<(String, Service), Arc<ResolvedServices>> {
+    let mut nodes = node_view(entries, state.config.node.heartbeat_timeout.0);
+    if !nodes.iter().any(|n| n.node_id == node_id) {
+        nodes.push(crate::root::NodeView {
+            node_id: node_id.to_string(),
+            services: services.to_vec(),
+            age: Duration::ZERO,
+        });
+    }
+    let mut owned = HashMap::new();
+    for (url, db) in &state.databases {
+        let resolved = Arc::new(state.config.resolve(Some(db)));
+        for &service in &resolved.services {
+            let candidates: Vec<&str> = nodes
+                .iter()
+                .filter(|n| n.services.contains(&service))
+                .map(|n| n.node_id.as_str())
+                .collect();
+            let count = match service {
+                Service::CompactionWorkers => resolved.workers.count as usize,
+                _ => 1,
+            };
+            let owners = placement::owners(url, service, count, &candidates);
+            if owners.contains(&node_id) {
+                owned.insert((url.clone(), service), resolved.clone());
+            }
+        }
+    }
+    owned
+}
+
 /// Supervised task state, aggregated into heartbeat bodies.
 #[derive(Clone, Copy, PartialEq)]
 enum TaskState {
@@ -203,48 +248,18 @@ impl Node {
         }
     }
 
-    /// The assignments this node owns: for every registered database
-    /// and configured service, the top of the rendezvous ranking over
-    /// live nodes offering the service; top 1 for gc and coordinator,
-    /// top `count` for workers.
+    /// The assignments this node owns; see [`owned_assignments`].
     fn owned_assignments(
         &self,
         entries: &[HeartbeatEntry],
         state: &FleetState,
     ) -> HashMap<Assignment, Arc<ResolvedServices>> {
-        let mut nodes = node_view(entries, state.config.node.heartbeat_timeout.0);
-        // A node always counts itself live. Reading its own heartbeat
-        // as stale (a skewed clock, a slow PUT) must not make it drop
-        // its share: peers that consider it dead take over in parallel,
-        // which is a safe double-run, whereas excluding itself would
-        // leave the share unowned.
-        if !nodes.iter().any(|n| n.node_id == self.options.node_id) {
-            nodes.push(crate::root::NodeView {
-                node_id: self.options.node_id.clone(),
-                services: self.options.services.clone(),
-                age: Duration::ZERO,
-            });
-        }
-        let mut owned = HashMap::new();
-        for (url, db) in &state.databases {
-            let resolved = Arc::new(state.config.resolve(Some(db)));
-            for &service in &resolved.services {
-                let candidates: Vec<&str> = nodes
-                    .iter()
-                    .filter(|n| n.services.contains(&service))
-                    .map(|n| n.node_id.as_str())
-                    .collect();
-                let count = match service {
-                    Service::CompactionWorkers => resolved.workers.count as usize,
-                    _ => 1,
-                };
-                let owners = placement::owners(url, service, count, &candidates);
-                if owners.contains(&self.options.node_id.as_str()) {
-                    owned.insert((url.clone(), service), resolved.clone());
-                }
-            }
-        }
-        owned
+        owned_assignments(
+            &self.options.node_id,
+            &self.options.services,
+            entries,
+            state,
+        )
     }
 
     /// Reconcile supervised tasks to exactly the owned assignments.

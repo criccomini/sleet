@@ -27,6 +27,7 @@ url = "2.5.8"
 
 [dev-dependencies]
 criterion = "0.8.2"
+fizzbee-mbt = "0.1.1"
 jsonschema = "0.46.8"
 proptest = "1.11.0"
 tempfile = "3.27.0"

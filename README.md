@@ -55,8 +55,12 @@ commands take `--format json`, with responses documented by
 ```sh
 cargo test                       # unit, property, chaos, DST, snapshots
 cargo fmt && cargo clippy --all-targets
-fizz specs/coordination.fizz     # model-check the coordination protocol
+fizz --experimental_no_state_returns specs/coordination.fizz
 ```
+
+The last command model-checks the coordination protocol; CI also
+replays the spec's action sequences against the real code with
+model-based testing (`tests/mbt`, gated on `SLEET_MBT`).
 
 The MinIO test connects to `SLEET_S3_ENDPOINT` and skips when it is
 unset; CI provides MinIO as a service container.

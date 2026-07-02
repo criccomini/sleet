@@ -203,6 +203,16 @@ impl TestStore {
         }
     }
 
+    /// Override one object's simulated `LastModified`, so a single
+    /// heartbeat can read as stale while the rest stay fresh. Only
+    /// meaningful on stores built with a `TestClock`.
+    pub fn set_modified(&self, location: &Path, time: DateTime<Utc>) {
+        self.times
+            .lock()
+            .expect("times")
+            .insert(location.clone(), time);
+    }
+
     fn restamp(&self, mut meta: ObjectMeta) -> ObjectMeta {
         if self.clock.is_some()
             && let Some(time) = self.times.lock().expect("times").get(&meta.location)

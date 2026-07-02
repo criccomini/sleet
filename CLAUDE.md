@@ -17,7 +17,7 @@ when the two drift.
   schema drift, CLI snapshots. The MinIO test needs `SLEET_S3_ENDPOINT`
   and skips without it; CI runs MinIO as a service container, and
   `.github/workflows/ci.yml` names the image to run locally. The MBT
-  bridge skips without `fizz`.
+  test needs `SLEET_MBT` and skips without it.
 - `UPDATE_SCHEMAS=1 cargo test --test schema_sync` regenerates the
   files under `schema/` after changing `src/config.rs`,
   `src/response.rs`, or `src/heartbeat.rs`.
@@ -25,8 +25,15 @@ when the two drift.
   `tests/cmd/` after changing command-line behavior.
 - `UPDATE_CORPUS=1 cargo test --test corpus` cuts a wire-format corpus
   directory at each release.
-- `fizz specs/coordination.fizz` model-checks the coordination
-  protocol.
+- `fizz --experimental_no_state_returns specs/coordination.fizz`
+  model-checks the coordination protocol. The flag keeps action
+  returns out of state hashes; without it the liveness check does not
+  finish.
+- Model-based testing replays the spec's action sequences against the
+  real decision code: `fizz specs/coordination-mbt.fizz`, then
+  `fizzbee-mbt-server --states_file specs/out/latest &`, then
+  `SLEET_MBT=1 cargo test --test mbt`. After editing the spec, rebuild
+  the derived MBT spec with `UPDATE_SPECS=1 cargo test --test mbt`.
 - `cargo bench` runs the placement and registry-poll scaling benches.
 - Run `cargo fmt && cargo clippy --all-targets` before committing.
 

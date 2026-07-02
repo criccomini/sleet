@@ -1,3 +1,5 @@
+# GENERATED from coordination.fizz for MBT state generation; do not
+# edit. Regenerate with UPDATE_SPECS=1 cargo test --test mbt.
 ---
 # sleet's coordination protocol (DESIGN.md, Assignment and failover):
 # nodes heartbeat to shared storage; each reader judges liveness from
@@ -22,10 +24,9 @@
 #   one property (a livelock would flap runners/fenced forever and
 #   violate eventually-always).
 options:
-  max_actions: 30
+  max_actions: 10
   max_concurrent_actions: 1
 deadlock_detection: false
-liveness: strict
 ---
 
 NODES = ["n1", "n2", "n3"]
@@ -166,24 +167,3 @@ always assertion OnlyAliveNodesRun:
 # reachable in the model.
 exists assertion DoubleRunReachable:
     return len([db for db in DBS if len(runners[db]) > 1]) > 0
-
-# Convergence and no fence livelock: once churn stops, every database
-# is run by exactly the top-ranked alive node, nothing is fenced, and
-# it stays that way.
-eventually always assertion Converged:
-    for db in DBS:
-        expected = ""
-        for r in RANK[db]:
-            if expected == "" and alive[r]:
-                expected = r
-        if expected == "":
-            if len(runners[db]) != 0:
-                return False
-        else:
-            if runners[db] != [expected]:
-                return False
-            if holder[db] != expected:
-                return False
-        if len(fenced[db]) != 0:
-            return False
-    return True
