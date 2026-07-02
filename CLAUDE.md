@@ -14,13 +14,20 @@ when the two drift.
 
 ## Commands
 
-- `cargo test` — all tests, including schema drift checks and CLI
-  snapshots.
+- `cargo test` — all tests: unit, property, integration, chaos, DST,
+  schema drift, CLI snapshots. The MinIO test skips without Docker; the
+  MBT bridge skips without `fizz`.
 - `UPDATE_SCHEMAS=1 cargo test --test schema_sync` — regenerate the
   files under `schema/` after changing `src/config.rs`,
   `src/response.rs`, or `src/heartbeat.rs`.
 - `TRYCMD=overwrite cargo test --test cli` — update CLI snapshots in
   `tests/cmd/` after changing command-line behavior.
+- `UPDATE_CORPUS=1 cargo test --test corpus` — cut a wire-format corpus
+  directory at each release.
+- `fizz specs/coordination.fizz` — model-check the coordination
+  protocol.
+- `scripts/test-linux.sh` — run the suite on Linux in Docker.
+- `cargo bench` — placement and registry-poll scaling benches.
 - `cargo fmt && cargo clippy --all-targets` before committing.
 
 ## Architecture (from DESIGN.md)
