@@ -13,9 +13,9 @@ future work. See [DESIGN.md](DESIGN.md) for the design.
 ## Usage
 
 ```sh
+sleet register s3://ops/sleet/ s3://bucket/db   # register a database
 sleet run s3://ops/sleet/ --node-id sleet-1     # a fleet node
 sleet status s3://ops/sleet/ --queues           # nodes, databases, placement
-sleet register s3://ops/sleet/ s3://bucket/db   # register a database
 ```
 
 A fleet lives at a fleet root: `sleet.toml` holds fleet-wide policy and
