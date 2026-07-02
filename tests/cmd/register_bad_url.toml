@@ -1,0 +1,3 @@
+bin.name = "sleet"
+args = ["register", "memory:///fleet", "not a url"]
+status.code = 1

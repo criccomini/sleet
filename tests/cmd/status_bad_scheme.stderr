@@ -1,0 +1,1 @@
+error: invalid fleet root: unsupported URL scheme "ftp" (expected one of s3, s3a, gs, az, adl, azure, abfs, abfss, file, memory, http, https)

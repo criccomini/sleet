@@ -1,0 +1,3 @@
+bin.name = "sleet"
+args = ["status", "ftp://host/fleet"]
+status.code = 1
