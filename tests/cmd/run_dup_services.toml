@@ -1,0 +1,3 @@
+bin.name = "sleet"
+args = ["run", "memory:///fleet", "--node-id", "n1", "--services", "gc,compaction-workers,gc"]
+status.code = 1

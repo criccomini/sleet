@@ -97,8 +97,15 @@ async fn main() -> ExitCode {
             services,
             max_compaction_jobs,
         } => {
-            let mut services = services;
-            services.dedup();
+            // Reject duplicates loudly, like the config path does for
+            // a registry file's services list.
+            let mut seen = std::collections::HashSet::new();
+            if let Some(dup) = services.iter().find(|s| !seen.insert(**s)) {
+                return fail(format!(
+                    "--services lists \"{}\" more than once",
+                    dup.as_str()
+                ));
+            }
             let options = NodeOptions {
                 node_id,
                 services,
