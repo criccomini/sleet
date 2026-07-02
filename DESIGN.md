@@ -53,9 +53,9 @@ rendezvous hashing, and runs one supervised task per assignment it owns.
 `sleet.toml` holds fleet-wide policy:
 
 ```toml
-[fleet]
+[node]
 heartbeat_interval = "10s"
-node_timeout = "30s"
+heartbeat_timeout = "30s"
 config_poll = "1m"                   # sleet.toml / dbs/ re-read cadence
 
 [database]
@@ -72,7 +72,7 @@ fields mirror SlateDB's `GarbageCollectorOptions`, `CompactorOptions`, and
 the number of worker slots. The config types are defined by the serde
 structs in `src/spec.rs`; the JSON Schema generated from them is checked in
 at `schema/config.schema.json` (drift-checked by a test). Loading enforces
-what the schema cannot: `heartbeat_interval < node_timeout`, valid
+what the schema cannot: `heartbeat_interval < heartbeat_timeout`, valid
 object-store URLs, and bounds on the resolved settings.
 
 Nodes re-read `sleet.toml` and LIST `dbs/` every `config_poll`, skipping
@@ -108,10 +108,10 @@ fields so mixed-version fleets coexist, and `version` bumps only on
 incompatible change.
 
 A node is **live** iff its heartbeat's `LastModified` (object-store clock)
-is younger than `node_timeout` by the reader's clock; skew shifts failover
-timing, never safety. On clean shutdown a node deletes its heartbeat,
+is younger than `heartbeat_timeout` by the reader's clock; skew shifts
+failover timing, never safety. On clean shutdown a node deletes its heartbeat,
 handing its assignments off immediately. Any node deletes heartbeats older
-than 10× `node_timeout`.
+than 10× `heartbeat_timeout`.
 
 ### Assignment and failover
 
@@ -129,7 +129,7 @@ All views derive from the shared tree, so they converge within one
 `config_poll` (registry) plus one `heartbeat_interval` (liveness). Until
 they do, a pair may briefly run on two nodes — safe — or on none, delaying
 it by at most one poll. A dead node's pairs redistribute within
-~`node_timeout`; a joining node takes only the pairs it now wins.
+~`heartbeat_timeout`; a joining node takes only the pairs it now wins.
 
 Assignment is purely an efficiency mechanism: every failure mode — stale
 reads, clock skew, partitions — at worst double-runs a service, which
