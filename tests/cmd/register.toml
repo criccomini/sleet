@@ -1,3 +1,2 @@
 bin.name = "sleet"
-args = ["register", "s3://ops/sleet/", "s3://bucket/db"]
-status.code = 1
+args = ["register", "memory:///fleet", "s3://bucket/db"]

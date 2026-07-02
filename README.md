@@ -6,15 +6,15 @@ coordination, and compaction execution — outside the writer process,
 for millions of databases from a small pool of nodes, with no
 dependencies beyond object storage.
 
-**Status: early development.** The config formats and CLI surface are
-implemented; the daemon and service wiring are not. See
-[DESIGN.md](DESIGN.md) for the design.
+**Status: early development.** The daemon, services, and CLI are
+implemented against SlateDB 0.14; mirroring and auto-discovery are
+future work. See [DESIGN.md](DESIGN.md) for the design.
 
 ## Usage
 
 ```sh
-sleet run s3://ops/sleet/ --node-id sleet-1     # a fleet node (not yet implemented)
-sleet status s3://ops/sleet/                    # nodes, databases, placement
+sleet run s3://ops/sleet/ --node-id sleet-1     # a fleet node
+sleet status s3://ops/sleet/ --queues           # nodes, databases, placement
 sleet register s3://ops/sleet/ s3://bucket/db   # register a database
 ```
 

@@ -1,1 +1,3 @@
-error: `sleet run` is not implemented
+error: invalid value 'bad.id' for '--node-id <NODE_ID>': node ids are 1-128 chars of [A-Za-z0-9_-]
+
+For more information, try '--help'.

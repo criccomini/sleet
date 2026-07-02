@@ -1,2 +1,2 @@
 bin.name = "sleet"
-args = ["status", "s3://ops/sleet/"]
+args = ["status", "memory:///fleet"]

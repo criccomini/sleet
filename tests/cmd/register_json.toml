@@ -1,0 +1,2 @@
+bin.name = "sleet"
+args = ["register", "memory:///fleet", "s3://bucket/db", "--format", "json"]

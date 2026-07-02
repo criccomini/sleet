@@ -1,0 +1,5 @@
+{
+  "url": "s3://bucket/db",
+  "file": "dbs/s3%3A%2F%2Fbucket%2Fdb.toml",
+  "created": true
+}

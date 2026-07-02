@@ -21,7 +21,7 @@ Options:
           [default: gc,compactor-coordinator,compaction-workers]
 
       --max-compaction-jobs <MAX_COMPACTION_JOBS>
-          Maximum concurrent compaction jobs. Default: derived from the machine
+          Maximum databases compacting on this node at once. Default: the machine's available parallelism
 
   -h, --help
           Print help (see a summary with '-h')

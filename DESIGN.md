@@ -259,7 +259,8 @@ to the degree their poll floors are long.
   derives fleet state from the tree: node liveness, roles, and versions
   from `nodes/`, intent from `sleet.toml` and `dbs/`, placement by
   computing the same rendezvous ranking, and compaction queue depth from
-  `.compactions`. Services no live node offers are reported, not silent.
+  `.compactions` (behind `--queues`: one read per database). Services no
+  live node offers are reported, not silent.
 - Structured logs per `(database, service)`.
 
 ## Crate layout
@@ -268,8 +269,12 @@ A single `sleet` crate with one binary: `sleet run <root>` is the
 long-running daemon; `status` and `register` are one-shots. Config types
 (`sleet.toml`, `dbs/*.toml`) live in `src/config.rs`
 (`schema/config.schema.json`); the heartbeat format lives in
-`src/heartbeat.rs` (`schema/heartbeat.schema.json`). One-shot subcommands
-take `--format json`; response types in `src/response.rs` generate
+`src/heartbeat.rs` (`schema/heartbeat.schema.json`). The frozen
+rendezvous hash lives in `src/placement.rs`, registry naming in
+`src/registry.rs`, fleet-root reads in `src/root.rs`, the daemon in
+`src/daemon.rs`, the SlateDB service wrappers in `src/services.rs`, and
+the one-shots in `src/ops.rs`. One-shot subcommands take `--format
+json`; response types in `src/response.rs` generate
 `schema/cli.schema.json` (one `$defs` entry per command), and text
 rendering lives in `src/render.rs`.
 
