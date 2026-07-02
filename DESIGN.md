@@ -58,16 +58,16 @@ heartbeat_interval = "10s"
 node_timeout = "30s"
 config_poll = "1m"                   # sleet.toml / dbs/ re-read cadence
 
-[defaults]
+[database]
 services = ["gc", "compactor", "workers"]
 
-[defaults.workers]
+[database.workers]
 count = 1                            # worker slots per database
 ```
 
-`[defaults]` and `dbs/<db>.toml` files accept the same optional `services`
-list and `gc`/`compactor`/`workers` tables, whose fields mirror SlateDB's
-`GarbageCollectorOptions`, `CompactorOptions`, and
+The `[database]` table and `dbs/<db>.toml` files share the same shape: an
+optional `services` list and `gc`/`compactor`/`workers` tables, whose
+fields mirror SlateDB's `GarbageCollectorOptions`, `CompactorOptions`, and
 `CompactionWorkerOptions` with SlateDB's defaults; `workers.count` sets
 the number of worker slots. The config types are defined by the serde
 structs in `src/spec.rs`; the JSON Schema generated from them is checked in
@@ -95,7 +95,7 @@ register <url>`; contents are overrides only:
 Deleting the file unregisters the database.
 
 Effective config is resolved per-field at read time by the assignment
-owner: built-in defaults → `[defaults]` → `dbs/<db>.toml`. Unset fields
+owner: built-in defaults → `[database]` → `dbs/<db>.toml`. Unset fields
 fall through to the previous layer.
 
 ### Nodes and liveness
