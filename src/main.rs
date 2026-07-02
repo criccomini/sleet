@@ -3,9 +3,9 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
+use sleet::config::Service;
 use sleet::render::Render;
 use sleet::response::StatusResponse;
-use sleet::spec::Service;
 
 #[derive(Parser)]
 #[command(name = "sleet", about = "SlateDB fleet manager", version)]

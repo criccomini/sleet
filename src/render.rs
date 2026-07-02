@@ -10,8 +10,8 @@
 
 use std::io::{self, Write};
 
+use crate::config::Service;
 use crate::response::{RegisterResponse, StatusResponse};
-use crate::spec::Service;
 
 /// Human-readable rendering of a response.
 pub trait Render {

@@ -9,7 +9,7 @@ use std::time::Duration;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::spec::{HumanDuration, Service};
+use crate::config::{HumanDuration, Service};
 
 /// The subcommand response JSON Schema, pretty-printed.
 pub fn schema_json() -> String {

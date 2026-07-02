@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `DESIGN.md` is the design source of truth; read it before making changes
 and keep it consistent when the design evolves. The fleet config format
 (`sleet.toml` and `dbs/<db>.toml`) is defined by the serde structs in
-`src/spec.rs`, which generate `schema/config.schema.json`; a test fails
+`src/config.rs`, which generate `schema/config.schema.json`; a test fails
 when the two drift.
 
 ## Commands
@@ -16,8 +16,8 @@ when the two drift.
 - `cargo test` — all tests, including schema drift checks and CLI
   snapshots.
 - `UPDATE_SCHEMAS=1 cargo test --test schema_sync` — regenerate the
-  files under `schema/` after changing `src/spec.rs`, `src/response.rs`,
-  or `src/heartbeat.rs`.
+  files under `schema/` after changing `src/config.rs`,
+  `src/response.rs`, or `src/heartbeat.rs`.
 - `TRYCMD=overwrite cargo test --test cli` — update CLI snapshots in
   `tests/cmd/` after changing command-line behavior.
 - `cargo fmt && cargo clippy --all-targets` before committing.

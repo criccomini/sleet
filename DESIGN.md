@@ -70,10 +70,10 @@ optional `services` list and `gc`/`compactor-coordinator`/
 `CompactionWorkerOptions` with SlateDB's defaults;
 `compaction-workers.count` sets how many nodes run workers for a
 database. The config types are defined by the serde structs in
-`src/spec.rs`; the JSON Schema generated from them is checked in at
+`src/config.rs`; the JSON Schema generated from them is checked in at
 `schema/config.schema.json` (drift-checked by a test). Loading enforces
-what the schema cannot: `heartbeat_interval < heartbeat_timeout`, valid
-object-store URLs, and bounds on the resolved settings.
+what the schema cannot: `heartbeat_interval < heartbeat_timeout` and
+bounds on the resolved settings.
 
 Nodes re-read `sleet.toml` and LIST `dbs/` every `config_poll`; on a
 failed read a node keeps the last good config. The listing carries each
@@ -89,9 +89,8 @@ file is valid. Files are created by operators, directly or with `sleet
 register <url>`. `register` canonicalizes URLs before encoding so one
 database cannot be registered under two spellings; `status` flags entries
 that alias after canonicalization. A file's contents are exactly a
-`[database]` table: any
-field `sleet.toml`'s `[database]` section accepts may be set per database,
-and set fields override the fleet-wide value:
+`[database]` table: any field `sleet.toml`'s `[database]` section accepts
+may be set per database, and set fields override the fleet-wide value:
 
 - absent file — unregistered.
 - empty file — managed with the fleet-wide config.
@@ -106,10 +105,12 @@ fall through to the previous layer.
 ### Nodes and liveness
 
 Each node PUTs a heartbeat at `nodes/<node_id>.<services>` every
-`heartbeat_interval`, where `<services>` compactly encodes the service set
-the node offers. Everything assignment needs is in the listing — names
-carry roles, `LastModified` carries liveness — so one LIST of `nodes/` per
-tick is the only read; heartbeat bodies are never fetched for placement.
+`heartbeat_interval`, where `<services>` is the offered services' letters
+(`c` = compactor-coordinator, `g` = gc, `w` = compaction-workers) sorted
+ascending — e.g. `sleet-1.cgw`; node ids must not contain `.`. Everything
+assignment needs is in the listing — names carry roles, `LastModified`
+carries liveness — so one LIST of `nodes/` per tick is the only read;
+heartbeat bodies are never fetched for placement.
 The body carries the node's `sleet` and `slatedb` versions and summary
 service states for `sleet status`; it is defined by the structs in
 `src/heartbeat.rs` (`schema/heartbeat.schema.json`). Readers ignore
@@ -133,9 +134,9 @@ Ownership is decided by rendezvous hashing. For a given `(database,
 service)`, every live node whose heartbeat offers that service gets a
 score — the hash of the pair combined with the node's id — and the
 ranking assigns owners: `gc` and `compactor-coordinator` run on the
-top-ranked node, and `compaction-workers` runs on the top `count` nodes,
-so exactly `count` distinct nodes poll a database's compaction queue (all
-of them, if the pool is smaller). Removing a node moves only the pairs it
+top-ranked node, and `compaction-workers` runs on the top `count` nodes —
+`count` distinct pollers per database, or every offering node if there
+are fewer. Removing a node moves only the pairs it
 owned; adding one moves only the pairs it now wins. Every node recomputes
 ownership each heartbeat tick from the same shared inputs — the `dbs/`
 registry and the live set — and runs exactly the pairs it owns. No
@@ -222,8 +223,8 @@ stall.
 
 Runs SlateDB `CompactionWorker`s (RFC-0025 / `slatedb run-worker`) against
 each database for which the node ranks in the top `count` workers.
-Workers are stateless: they
-poll `.compactions` for `Scheduled` jobs, claim them by CAS, execute (with
+Workers are stateless: they poll `.compactions` for `Scheduled` jobs,
+claim them by CAS, execute (with
 subcompaction parallelism per RFC-0028), heartbeat, and write back
 `Compacted`. Per-database poll intervals back off exponentially while a
 database is idle, so mostly-idle fleets cost little.
@@ -256,8 +257,8 @@ to the degree their poll floors are long.
 
 - Nodes run no HTTP server and export no metrics API. `sleet status`
   derives fleet state from the tree: node liveness, roles, and versions
-  from `nodes/`, intent from `sleet.toml` and `dbs/`, ownership by
-  computing the same rendezvous hash, and compaction queue depth from
+  from `nodes/`, intent from `sleet.toml` and `dbs/`, placement by
+  computing the same rendezvous ranking, and compaction queue depth from
   `.compactions`. Services no live node offers are reported, not silent.
 - Structured logs per `(database, service)`.
 
@@ -265,12 +266,12 @@ to the degree their poll floors are long.
 
 A single `sleet` crate with one binary: `sleet run <root>` is the
 long-running daemon; `status` and `register` are one-shots. Config types
-(`sleet.toml`, `dbs/*.toml`) live in `src/spec.rs`
-(`schema/config.schema.json`). The
-heartbeat body lives in `src/heartbeat.rs` (`schema/heartbeat.schema.json`).
-One-shot subcommands take `--format json`; response types in
-`src/response.rs` generate `schema/cli.schema.json` (one `$defs` entry per
-command), and text rendering lives in `src/render.rs`.
+(`sleet.toml`, `dbs/*.toml`) live in `src/config.rs`
+(`schema/config.schema.json`); the heartbeat format lives in
+`src/heartbeat.rs` (`schema/heartbeat.schema.json`). One-shot subcommands
+take `--format json`; response types in `src/response.rs` generate
+`schema/cli.schema.json` (one `$defs` entry per command), and text
+rendering lives in `src/render.rs`.
 
 Depends on `slatedb` (Admin, GarbageCollector, Compactor, CompactionWorker),
 `slatedb-txn-obj` (CAS primitives), and `object_store`.

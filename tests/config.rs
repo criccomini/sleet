@@ -1,10 +1,10 @@
 use std::path::Path;
 use std::time::Duration;
 
-use sleet::spec::{self, DatabaseConfig, Service, SleetConfig};
+use sleet::config::{self, DatabaseConfig, Service, SleetConfig};
 
 fn config(s: &str) -> SleetConfig {
-    spec::parse_config(s).expect("config parses and validates")
+    config::parse_config(s).expect("config parses and validates")
 }
 
 fn config_errors(s: &str) -> String {
@@ -16,7 +16,7 @@ fn config_errors(s: &str) -> String {
 }
 
 fn database(fleet: &SleetConfig, s: &str) -> DatabaseConfig {
-    spec::parse_database(fleet, s).expect("database file parses and validates")
+    config::parse_database(fleet, s).expect("database file parses and validates")
 }
 
 fn read(path: &str) -> String {
@@ -144,7 +144,7 @@ fn scheduler_bounds_check_the_layered_result() {
         min_compaction_sources = 6
         "#,
     );
-    let msg = spec::parse_database(
+    let msg = config::parse_database(
         &fleet,
         r#"
         [compactor-coordinator.scheduler]

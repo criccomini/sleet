@@ -1,7 +1,17 @@
+//! `sleet` is a fleet manager for [SlateDB](https://slatedb.io)
+//! databases: it runs their background services — garbage collection,
+//! compaction coordination, and compaction execution — outside the
+//! writer process. See DESIGN.md for the design.
+//!
+//! This crate currently defines the formats and CLI surface: the fleet
+//! config (`config`), the heartbeat wire format (`heartbeat`), and the
+//! subcommand responses (`response`, rendered by `render`). Each format
+//! module generates a JSON Schema checked in under `schema/`.
+
+pub mod config;
 pub mod heartbeat;
 pub mod render;
 pub mod response;
-pub mod spec;
 
 /// A type's JSON Schema, pretty-printed.
 pub(crate) fn schema_pretty<T: schemars::JsonSchema>() -> String {

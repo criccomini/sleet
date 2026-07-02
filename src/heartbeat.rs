@@ -18,7 +18,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::spec::Service;
+use crate::config::Service;
 
 /// Current heartbeat format version.
 pub const VERSION: u32 = 1;
