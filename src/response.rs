@@ -77,7 +77,7 @@ pub struct DatabaseStatus {
     pub services: Vec<ServicePlacement>,
 
     /// Compaction queue depth from `.compactions`; present only with
-    /// `sleet status --queues`.
+    /// `sleet status --compactions`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queue: Option<QueueStatus>,
 }

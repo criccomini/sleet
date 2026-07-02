@@ -168,7 +168,7 @@ async fn daemon_compacts_a_real_database() {
     })
     .await;
 
-    // Queue depth is readable through status --queues.
+    // Queue depth is readable through status --compactions.
     let status = ops::status(&root, true).await.unwrap();
     assert!(status.databases[0].queue.is_some());
 

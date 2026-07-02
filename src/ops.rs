@@ -51,8 +51,8 @@ pub async fn register(root: &FleetRoot, url: &str) -> Result<RegisterResponse, O
 /// Derive fleet status from the tree: node liveness, roles, and
 /// versions from `nodes/`, intent from `sleet.toml` and `dbs/`, and
 /// placement by computing the same rendezvous ranking the nodes do.
-/// With `queues`, also read each database's `.compactions` depth.
-pub async fn status(root: &FleetRoot, queues: bool) -> Result<StatusResponse, OpsError> {
+/// With `compactions`, also read each database's `.compactions` depth.
+pub async fn status(root: &FleetRoot, compactions: bool) -> Result<StatusResponse, OpsError> {
     let mut poller = ConfigPoller::default();
     let state = poller.poll(root).await;
     let mut warnings = state.warnings.clone();
@@ -86,7 +86,7 @@ pub async fn status(root: &FleetRoot, queues: bool) -> Result<StatusResponse, Op
                 nodes: owners.into_iter().map(String::from).collect(),
             });
         }
-        let queue = if queues {
+        let queue = if compactions {
             match queue_status(url).await {
                 Ok(queue) => Some(queue),
                 Err(e) => {

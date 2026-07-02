@@ -50,7 +50,7 @@ enum Command {
         /// Also read each database's compaction queue depth from
         /// `.compactions` (one read per database).
         #[arg(long)]
-        queues: bool,
+        compactions: bool,
 
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
@@ -119,14 +119,14 @@ async fn main() -> ExitCode {
         }
         Command::Status {
             root,
-            queues,
+            compactions,
             format,
         } => {
             let root = match FleetRoot::open(&root) {
                 Ok(root) => root,
                 Err(e) => return fail(e),
             };
-            match ops::status(&root, queues).await {
+            match ops::status(&root, compactions).await {
                 Ok(response) => emit(&response, format),
                 Err(e) => fail(e),
             }

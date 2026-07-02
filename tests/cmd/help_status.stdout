@@ -7,7 +7,7 @@ Arguments:
           Fleet root URL, e.g. s3://ops/sleet/
 
 Options:
-      --queues
+      --compactions
           Also read each database's compaction queue depth from `.compactions` (one read per database)
 
       --format <FORMAT>

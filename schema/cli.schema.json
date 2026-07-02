@@ -16,7 +16,7 @@
       "type": "object",
       "properties": {
         "queue": {
-          "description": "Compaction queue depth from `.compactions`; present only with\n`sleet status --queues`.",
+          "description": "Compaction queue depth from `.compactions`; present only with\n`sleet status --compactions`.",
           "anyOf": [
             {
               "$ref": "#/$defs/QueueStatus"

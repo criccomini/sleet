@@ -264,8 +264,8 @@ poll floors keep a million mostly-idle databases affordable.
   derives fleet state from the tree: node liveness, roles, and versions
   from `nodes/`, intent from `sleet.toml` and `dbs/`, placement by
   computing the same rendezvous ranking, and compaction queue depth from
-  `.compactions` (behind `--queues`: one read per database). If no live
-  node offers a service, `status` says so.
+  `.compactions` (behind `--compactions`: one read per database). If no
+  live node offers a service, `status` says so.
 - Structured logs per `(database, service)`.
 
 ## Crate layout

@@ -30,7 +30,8 @@ sleet status s3://ops/sleet/
 Grow the fleet by starting more nodes with different ids; they find
 each other through the root. `--services` restricts what a node
 offers, so a heterogeneous fleet can point its large machines at
-compaction work alone. `status --queues` adds compaction queue depth.
+compaction work alone. `status --compactions` adds compaction queue
+depth.
 
 The fleet root holds everything:
 
