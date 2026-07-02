@@ -26,16 +26,15 @@ defined by the serde structs in `src/spec.rs`, which generate
 - A single Rust crate, one `sleet` binary: `sleet run <root>` is the
   long-running daemon; other subcommands are one-shot operator tools.
 - A fleet lives under one object-store URL, the fleet root: `sleet.toml`
-  (policy: defaults, discovery roots, timing), `dbs/` (registry; one file
-  per database, empty = defaults, `services = []` = tombstone), `nodes/`
-  (heartbeats: liveness, offered services, sleet/slatedb versions). Nodes
-  are stateless; the only node-local config is flags.
-- Nodes discover databases under discovery roots (a prefix with
-  `manifest/*.manifest` is a database) and create-only-PUT registry stubs.
-  Each `(database, service, slot)` is owned by the live node that wins a
-  frozen rendezvous hash over the nodes offering that service; no
-  assignment state is stored, ownership is recomputed each tick from the
-  shared tree.
+  (policy: defaults, timing), `dbs/` (registry; one file per database,
+  empty = defaults, `services = []` = disabled), `nodes/` (heartbeats:
+  liveness, offered services, sleet/slatedb versions). Nodes are
+  stateless; the only node-local config is flags.
+- Databases are registered manually — `sleet register <url>` or writing
+  `dbs/<db>.toml` directly; auto-discovery is future work. Each
+  `(database, service, slot)` is owned by the live node that wins a frozen
+  rendezvous hash over the nodes offering that service; no assignment
+  state is stored, ownership is recomputed each tick from the shared tree.
 - Per-database services wrap SlateDB primitives via `slatedb::Admin`:
   garbage collection, standalone compaction coordinators (RFC-0025), and
   compaction workers (slot owners poll `.compactions` with idle backoff).

@@ -11,9 +11,8 @@ choose to run them separately.
   databases from a small pool of `sleet` nodes. Per-database fleet state is
   one registry file, coordination traffic is independent of database count,
   and idle databases cost only backed-off polling.
-- Register databases explicitly — with the CLI or by writing
-  `dbs/<db>.toml` — or let optional discovery scan bucket prefixes and
-  register what it finds.
+- Register databases explicitly, with the CLI or by writing
+  `dbs/<db>.toml`.
 - No dependencies beyond object storage. Mutual exclusion comes from
   SlateDB's primitives — manifest CAS, epoch fencing, and `.compactions`
   claims (RFC-0001, RFC-0013, RFC-0025). `sleet` stores no assignment state:
@@ -41,14 +40,13 @@ sleet run s3://ops/sleet/
 
 ```
 <root>/
-  sleet.toml        # policy: defaults, discovery roots, timing
+  sleet.toml        # policy: defaults, timing
   dbs/<db>.toml     # registry: one file per database, overrides only
   nodes/<node>.json # liveness: heartbeat, offered services, versions
 ```
 
-Each node heartbeats under `nodes/`, scans discovery roots into `dbs/`,
-computes its assignments by rendezvous hashing, and runs one supervised
-task per assignment it owns.
+Each node heartbeats under `nodes/`, computes its assignments by
+rendezvous hashing, and runs one supervised task per assignment it owns.
 
 ### Fleet config
 
@@ -65,24 +63,17 @@ services = ["gc", "compactor", "workers"]
 
 [defaults.workers]
 count = 1                            # worker slots per database
-
-[[discover]]
-url = "s3://prod-us/"                # credentials via env/profile
-rescan = "5m"
-max_depth = 3
-exclude = ["**/tmp/**"]
 ```
 
-`[defaults]`, `[[discover]]` entries, and `dbs/<db>.toml` files all accept
-the same optional `services` list and `gc`/`compactor`/`workers` tables,
-whose fields mirror SlateDB's `GarbageCollectorOptions`, `CompactorOptions`,
-and `CompactionWorkerOptions` with SlateDB's defaults; `workers.count` sets
+`[defaults]` and `dbs/<db>.toml` files accept the same optional `services`
+list and `gc`/`compactor`/`workers` tables, whose fields mirror SlateDB's
+`GarbageCollectorOptions`, `CompactorOptions`, and
+`CompactionWorkerOptions` with SlateDB's defaults; `workers.count` sets
 the number of worker slots. The config types are defined by the serde
 structs in `src/spec.rs`; the JSON Schema generated from them is checked in
 at `schema/config.schema.json` (drift-checked by a test). Loading enforces
 what the schema cannot: `heartbeat_interval < node_timeout`, valid
-object-store URLs and exclude globs, unique discovery roots, and bounds on
-the resolved settings.
+object-store URLs, and bounds on the resolved settings.
 
 Nodes re-read `sleet.toml` and LIST `dbs/` every `config_poll`, skipping
 unchanged objects by ETag; on a failed read a node keeps the last good
@@ -92,36 +83,20 @@ config.
 
 `dbs/<db>.toml` registers a database. `<db>` is the percent-encoded
 database URL, so the filename alone identifies the database and an empty
-file is valid. Files are created by operators — directly or with `sleet
-register <url>` — or by discovery; contents are overrides only:
+file is valid. Files are created by operators, directly or with `sleet
+register <url>`; contents are overrides only:
 
-- absent file — unmanaged (undiscovered).
+- absent file — unregistered.
 - empty file — managed with defaults.
 - `services` list or `gc`/`compactor`/`workers` tables — per-database
   overrides.
-- `services = []` — explicitly unmanaged. The file tombstones the entry so
-  discovery cannot re-create it.
+- `services = []` — registered but disabled; no services run.
 
-A file is deleted only when its database no longer exists; deleting the
-file for a live database under a discovery root only lasts until the next
-scan re-creates it.
+Deleting the file unregisters the database.
 
 Effective config is resolved per-field at read time by the assignment
-owner: built-in defaults → `[defaults]` → longest matching `[[discover]]`
-root → `dbs/<db>.toml`. Unset fields fall through to the previous layer.
-
-### Discovery
-
-Discovery is optional: a fleet with no `[[discover]]` entries manages only
-explicitly registered databases.
-
-Each node walks every discovery root every `rescan` using delimited LISTs.
-A prefix is a database iff `<prefix>/manifest/` contains a `.manifest`
-object; database roots aren't recursed into, other prefixes are, up to
-`max_depth`. For each database found, the scanner PUTs an empty
-`dbs/<db>.toml` with `If-None-Match: *` — create-only, so concurrent
-scanners are idempotent and operator edits and tombstones are never
-overwritten.
+owner: built-in defaults → `[defaults]` → `dbs/<db>.toml`. Unset fields
+fall through to the previous layer.
 
 ### Nodes and liveness
 
@@ -163,8 +138,8 @@ lightweight polling loops; the expensive work, compaction execution, is
 pulled through `.compactions` job claims and bounded by node capacity
 caps.
 
-Nodes must be able to reach every discovery root for the services they
-offer; placement is capability-blind by construction.
+Nodes must be able to reach every registered database for the services
+they offer; placement is capability-blind by construction.
 
 ### Process model
 
@@ -250,11 +225,15 @@ Depends on `slatedb` (Admin, GarbageCollector, Compactor, CompactionWorker),
   checkpoint and a `GcFilter` protecting not-yet-copied files from GC.
 - **Elastic workers**: size worker pools or per-database slot counts from
   fleet-wide compaction backlog.
+- **Auto-discovery**: scan configured bucket prefixes for databases (a
+  prefix with `manifest/*.manifest` is a database) and register what is
+  found via create-only PUTs, so concurrent scanners are idempotent and
+  never overwrite operator edits.
 
 ## Open questions
 
-1. LIST cardinality on very large fleets: discovery walks and `dbs/` polls
-   are delimited LISTs; at millions of databases both may want an
+1. LIST cardinality on very large fleets: `dbs/` polls are delimited
+   LISTs; at millions of databases the registry may want an
    inventory-based backend (e.g. S3 Inventory).
 2. Every owned database gets its own polling tasks (manifest,
    `.compactions`); idle backoff bounds the cost, but a multiplexed poller
