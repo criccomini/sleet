@@ -62,7 +62,12 @@ enum TaskState {
     Backoff,
 }
 
-type TaskStates = Arc<Mutex<HashMap<Assignment, TaskState>>>;
+/// States are tagged with the supervisor instance that wrote them: on a
+/// config-change restart the old and new supervisor briefly share a
+/// key, and the old one's shutdown must not erase the new one's entry.
+type TaskStates = Arc<Mutex<HashMap<Assignment, (u64, TaskState)>>>;
+
+static NEXT_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 struct RunningTask {
     token: CancellationToken,
@@ -164,7 +169,7 @@ impl Node {
             .iter()
             .map(|&service| (service, ServiceSummary::empty(service)))
             .collect();
-        for ((_, service), state) in self.states.lock().expect("states lock").iter() {
+        for ((_, service), (_, state)) in self.states.lock().expect("states lock").iter() {
             let summary = summaries
                 .entry(*service)
                 .or_insert(ServiceSummary::empty(*service));
@@ -321,11 +326,12 @@ async fn supervise_with<F, Fut>(
     F: FnMut(CancellationToken) -> Fut,
     Fut: Future<Output = Result<(), services::ServiceError>>,
 {
+    let instance = NEXT_INSTANCE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let (url, service) = &key;
     let mut backoff = Duration::from_secs(1);
     const MAX_BACKOFF: Duration = Duration::from_secs(60);
     loop {
-        set_state(&states, &key, TaskState::Running);
+        set_state(&states, &key, instance, TaskState::Running);
         let result = run(token.child_token()).await;
         if token.is_cancelled() {
             break;
@@ -345,20 +351,29 @@ async fn supervise_with<F, Fut>(
                 backoff
             }
         };
-        set_state(&states, &key, TaskState::Backoff);
+        set_state(&states, &key, instance, TaskState::Backoff);
         tokio::select! {
             _ = token.cancelled() => break,
             _ = tokio::time::sleep(delay) => {}
         }
     }
-    states.lock().expect("states lock").remove(&key);
+    // Remove only our own entry: a replacement supervisor for the same
+    // key may already have written a newer one.
+    let mut states = states.lock().expect("states lock");
+    if states.get(&key).is_some_and(|(id, _)| *id == instance) {
+        states.remove(&key);
+    }
 }
 
-fn set_state(states: &TaskStates, key: &Assignment, state: TaskState) {
-    states
-        .lock()
-        .expect("states lock")
-        .insert(key.clone(), state);
+/// Write a state unless a newer supervisor instance owns the entry.
+fn set_state(states: &TaskStates, key: &Assignment, instance: u64, state: TaskState) {
+    let mut states = states.lock().expect("states lock");
+    match states.get(key) {
+        Some((id, _)) if *id > instance => {}
+        _ => {
+            states.insert(key.clone(), (instance, state));
+        }
+    }
 }
 
 /// Change-detection fingerprint of a resolved config; not a wire format.

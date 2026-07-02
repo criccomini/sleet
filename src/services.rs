@@ -29,9 +29,10 @@ use crate::registry;
 /// from `compactions_poll_interval` up to this ceiling.
 const IDLE_POLL_MAX: Duration = Duration::from_secs(300);
 
-/// While the worker runs, sleet checks the queue on this cadence and
-/// stops the worker after two consecutive empty checks.
-const IDLE_CHECK_MIN: Duration = Duration::from_secs(30);
+/// While the worker runs, sleet checks the queue every six poll
+/// intervals (30s at the default 5s poll) and stops the worker after
+/// two consecutive empty checks.
+const IDLE_CHECKS: u32 = 6;
 
 /// A service task failure.
 #[derive(Debug, thiserror::Error)]
@@ -156,7 +157,7 @@ async fn run_worker_until_drained(
 ) -> Result<(), ServiceError> {
     let worker_token = token.child_token();
     let options = worker_options(resolved);
-    let check_every = (resolved.compactions_poll_interval * 6).max(IDLE_CHECK_MIN);
+    let check_every = resolved.compactions_poll_interval * IDLE_CHECKS;
     let run = db
         .admin
         .run_compaction_worker_with_options(worker_token.clone(), options);
