@@ -25,24 +25,25 @@ defined by the serde structs in `src/spec.rs`, which generate
 
 - A single Rust crate, one `sleet` binary: `sleet run <root>` is the
   long-running daemon; other subcommands are one-shot operator tools.
-- A fleet is a `.sleet/` tree under one object-store URL: `fleet.toml`
-  (policy), `dbs/` (registry; one file per database, empty = defaults,
-  `services = []` = tombstone), `nodes/` (heartbeats + offered services),
-  `assignments/` (ownership records), `queue/` (pending-compaction
-  markers). Nodes are stateless; the only node-local config is flags.
+- A fleet is a `.sleet/` tree under one object-store URL: `sleet.toml`
+  (policy: defaults, discovery roots, timing), `dbs/` (registry; one file
+  per database, empty = defaults, `services = []` = tombstone), `nodes/`
+  (heartbeats: liveness, offered services, sleet/slatedb versions). Nodes
+  are stateless; the only node-local config is flags.
 - Nodes discover databases under discovery roots (a prefix with
   `manifest/*.manifest` is a database) and create-only-PUT registry stubs.
-  Each `(database, service, slot)` is one assignment object acquired by
-  conditional PUT; validity rides on the holder's heartbeat liveness. No
-  hashing, no membership agreement.
+  Each `(database, service, slot)` is owned by the live node that wins a
+  frozen rendezvous hash over the nodes offering that service; no
+  assignment state is stored, ownership is recomputed each tick from the
+  shared tree.
 - Per-database services wrap SlateDB primitives via `slatedb::Admin`:
   garbage collection, standalone compaction coordinators (RFC-0025), and
-  compaction workers (slot holders poll `.compactions`, gated by the
-  `queue/` index). Mirroring is future work.
+  compaction workers (slot owners poll `.compactions` with idle backoff).
+  Mirroring is future work.
 - Core invariant: safety never depends on sleet's scheduling. Duplicate or
   stale processes must be harmless; mutual exclusion comes only from
   SlateDB's manifest CAS, epoch fencing, and `.compactions` claims —
-  assignments are efficiency only. The only dependency is object storage —
+  assignment is efficiency only. The only dependency is object storage —
   no etcd/ZK/leader election.
 
 ## SlateDB reference
