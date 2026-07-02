@@ -26,19 +26,65 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
+      # Every test target must be run by a job below; a new tests/*.rs
+      # that no job names fails here instead of silently not running.
+      - name: check this workflow runs every test target
+        run: |
+          for f in tests/*.rs; do
+            t=$(basename "$f" .rs)
+            grep -qE -- "--test $t( |$)" .github/workflows/ci.yml \
+              || { echo "tests/$t.rs is not run by any CI job" >&2; exit 1; }
+          done
 
-  # Runs the full suite: unit, property, integration, chaos, DST, schema
-  # drift, CLI snapshots, and the MinIO test. scripts/minio.sh starts
-  # MinIO; with SLEET_S3_ENDPOINT set, an unreachable MinIO fails the
-  # test instead of skipping it. The fizz MBT bridge skips itself
-  # without `fizz`.
+  # One job per test type; fail-fast off so one failing type still
+  # reports the others. The fizz MBT bridge (dst) skips itself without
+  # `fizz`.
   test:
+    name: test (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: unit
+            args: --lib --bins
+          - name: doc
+            args: --doc
+          - name: props
+            args: --test props
+          - name: integration
+            args: >-
+              --test fleet --test cluster --test config --test cli
+              --test schemas --test schema_sync --test corpus
+          - name: chaos
+            args: --test chaos
+          - name: dst
+            args: --test dst
+          - name: system
+            args: --test system
+          - name: perf
+            args: --test perf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+      - run: cargo test --locked ${{ matrix.args }}
+
+  # The S3 semantics test, against MinIO started by scripts/minio.sh.
+  # With SLEET_S3_ENDPOINT set, an unreachable MinIO fails the test
+  # instead of skipping it.
+  minio:
+    name: test (minio)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
       - run: scripts/minio.sh
-      - run: cargo test --locked
+      - run: cargo test --locked --test s3
         env:
           SLEET_S3_ENDPOINT: http://127.0.0.1:9000
