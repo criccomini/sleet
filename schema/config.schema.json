@@ -418,6 +418,15 @@
           "format": "uint32",
           "minimum": 0
         },
+        "heartbeat_bytes": {
+          "description": "Bytes a worker must process before emitting a heartbeat.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "heartbeat_min_interval": {
           "description": "Minimum wall-clock time between heartbeat writes.",
           "anyOf": [
