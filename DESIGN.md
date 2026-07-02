@@ -84,12 +84,12 @@ config.
 `dbs/<db>.toml` registers a database. `<db>` is the percent-encoded
 database URL, so the filename alone identifies the database and an empty
 file is valid. Files are created by operators, directly or with `sleet
-register <url>`; contents are overrides only:
+register <url>`. A file's contents are exactly a `[database]` table: any
+field `sleet.toml`'s `[database]` section accepts may be set per database,
+and set fields override the fleet-wide value:
 
 - absent file — unregistered.
-- empty file — managed with defaults.
-- `services` list or `gc`/`compactor`/`workers` tables — per-database
-  overrides.
+- empty file — managed with the fleet-wide config.
 - `services = []` — registered but disabled; no services run.
 
 Deleting the file unregisters the database.
