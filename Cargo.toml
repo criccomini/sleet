@@ -26,5 +26,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"
 
 [dev-dependencies]
+jsonschema = "0.46.8"
+proptest = "1.11.0"
 tempfile = "3.27.0"
 trycmd = "1.2.0"

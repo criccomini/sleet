@@ -41,7 +41,7 @@ pub struct StatusResponse {
 
     /// Fleet-level problems: registry entries that alias the same
     /// database, services no live node offers, and the like.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
 

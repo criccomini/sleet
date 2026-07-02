@@ -20,6 +20,10 @@ const ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'_')
     .remove(b'~');
 
+/// Object stores cap keys at 1024 bytes; registry names must leave room
+/// for the fleet root prefix and `dbs/`.
+const MAX_FILE_NAME: usize = 900;
+
 /// A database URL that cannot be registered.
 #[derive(Debug, thiserror::Error)]
 pub enum UrlError {
@@ -30,6 +34,11 @@ pub enum UrlError {
     },
     #[error("unsupported URL scheme {scheme:?} (expected one of {})", URL_SCHEMES.join(", "))]
     UnsupportedScheme { scheme: String },
+    #[error(
+        "database URL too long: its registry file name is {len} bytes \
+         (max {MAX_FILE_NAME}; object-store keys cap at 1024)"
+    )]
+    TooLong { len: usize },
 }
 
 /// Canonicalize a database URL: lowercase scheme and host, drop trailing
@@ -57,7 +66,12 @@ pub fn canonicalize_url(url: &str) -> Result<String, UrlError> {
                 source,
             })?;
     }
-    Ok(parsed.as_str().trim_end_matches('/').to_string())
+    let canonical = parsed.as_str().trim_end_matches('/').to_string();
+    let len = file_name(&canonical).len();
+    if len > MAX_FILE_NAME {
+        return Err(UrlError::TooLong { len });
+    }
+    Ok(canonical)
 }
 
 /// The registry file name for a canonical database URL.
@@ -112,5 +126,20 @@ mod tests {
     fn non_registry_names_are_ignored() {
         assert_eq!(parse_file_name("README.md"), None);
         assert_eq!(parse_file_name("s3%FF.toml"), None);
+    }
+
+    #[test]
+    fn oversized_urls_are_rejected() {
+        let long = format!("s3://bucket/{}", "x".repeat(1000));
+        assert!(matches!(
+            canonicalize_url(&long),
+            Err(UrlError::TooLong { .. })
+        ));
+        // Percent-encoding expansion counts: 300 spaces encode 3x.
+        let expansive = format!("s3://bucket/{}", "µ".repeat(400));
+        assert!(matches!(
+            canonicalize_url(&expansive),
+            Err(UrlError::TooLong { .. })
+        ));
     }
 }

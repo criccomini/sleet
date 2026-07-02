@@ -204,8 +204,7 @@
       },
       "required": [
         "nodes",
-        "databases",
-        "warnings"
+        "databases"
       ]
     }
   }
