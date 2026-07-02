@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "node_id": "sleet-1",
+  "sleet_version": "0.1.0",
+  "slatedb_version": "0.14.1",
+  "services": [
+    {
+      "service": "gc",
+      "running": 12,
+      "backoff": 1
+    },
+    {
+      "service": "compaction-workers",
+      "running": 3,
+      "backoff": 0
+    }
+  ]
+}

@@ -107,7 +107,7 @@ impl Sim {
     }
 
     async fn shutdown(mut self) {
-        for (_, (token, _)) in &self.nodes {
+        for (token, _) in self.nodes.values() {
             token.cancel();
         }
         for (_, (_, handle)) in std::mem::take(&mut self.nodes) {

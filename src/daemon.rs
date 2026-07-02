@@ -524,7 +524,7 @@ mod tests {
         // n3's own heartbeat reads as stale (its clock may be wrong),
         // but self-liveness is axiomatic: it keeps exactly the share it
         // wins over the full candidate set, same as everyone else.
-        for (key, _) in &n3 {
+        for key in n3.keys() {
             let (url, service) = key;
             let count = if *service == Service::CompactionWorkers {
                 2

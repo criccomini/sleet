@@ -1,0 +1,5 @@
+s3://bucket/db	s3%3A%2F%2Fbucket%2Fdb.toml
+s3://bucket/tenants/acme%20db	s3%3A%2F%2Fbucket%2Ftenants%2Facme%2520db.toml
+gs://analytics/events	gs%3A%2F%2Fanalytics%2Fevents.toml
+file:///var/data/db1	file%3A%2F%2F%2Fvar%2Fdata%2Fdb1.toml
+s3://bucket/uni%C3%A7ode/p%C3%A4th	s3%3A%2F%2Fbucket%2Funi%25C3%25A7ode%2Fp%25C3%25A4th.toml

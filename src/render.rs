@@ -136,3 +136,57 @@ impl Render for RegisterResponse {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::response::{DatabaseStatus, NodeStatus, QueueStatus, ServicePlacement};
+    use std::time::Duration;
+
+    /// A populated status renders exactly this text; trycmd pins the
+    /// empty case, this pins the full one deterministically.
+    #[test]
+    fn populated_status_renders_stably() {
+        let response = StatusResponse {
+            nodes: vec![NodeStatus {
+                node_id: "sleet-1".into(),
+                live: true,
+                heartbeat_age: Duration::from_secs(2).into(),
+                services: vec![Service::Gc, Service::CompactionWorkers],
+                sleet_version: Some("0.1.0".into()),
+                slatedb_version: None,
+            }],
+            databases: vec![DatabaseStatus {
+                url: "s3://b/db".into(),
+                services: vec![
+                    ServicePlacement {
+                        service: Service::Gc,
+                        nodes: vec!["sleet-1".into()],
+                    },
+                    ServicePlacement {
+                        service: Service::CompactorCoordinator,
+                        nodes: vec![],
+                    },
+                ],
+                queue: Some(QueueStatus {
+                    claimable: 3,
+                    running: 1,
+                }),
+            }],
+            warnings: vec!["no live node offers compactor-coordinator".into()],
+        };
+        let mut out = Vec::new();
+        response.render(&mut out).unwrap();
+        let expected = "\
+NODE     LIVE  HEARTBEAT  SERVICES               SLEET  SLATEDB
+sleet-1  yes   2s         gc,compaction-workers  0.1.0  -
+
+DATABASE   SERVICE                NODES    QUEUE
+s3://b/db  gc                     sleet-1  3 waiting, 1 running
+s3://b/db  compactor-coordinator  -        3 waiting, 1 running
+
+warning: no live node offers compactor-coordinator
+";
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
+    }
+}

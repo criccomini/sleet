@@ -25,7 +25,7 @@ use tokio_util::sync::CancellationToken;
 
 /// Fast intervals so tests converge in seconds.
 pub const FAST: &str = "[node]\nheartbeat_interval = \"200ms\"\n\
-                        heartbeat_timeout = \"1s\"\nconfig_poll = \"400ms\"\n";
+                        heartbeat_timeout = \"2s\"\nconfig_poll = \"400ms\"\n";
 
 pub struct Cluster {
     /// The shared backing store all nodes ultimately write to.

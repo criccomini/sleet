@@ -27,6 +27,16 @@ async fn faulted_fleet_converges_after_healing() {
     for id in ids {
         cluster.spawn(id, &Service::ALL);
     }
+    // Wait for every node's first heartbeat before injecting faults: a
+    // fault on a node's *initial* config read would leave it on
+    // built-in defaults (10s heartbeat), which isn't the scenario —
+    // the design assumes a node reads its config once before faults.
+    for id in ids {
+        poll_until("node heartbeats before faults", || async {
+            cluster.body(id, &Service::ALL).await.map(|_| ())
+        })
+        .await;
+    }
 
     // Fault every operation type nodes use, deterministically seeded.
     cluster.store.fail_probability(0.2, 42);
@@ -135,14 +145,17 @@ async fn skewed_reader_takes_over_everything_safely() {
     })
     .await;
 
-    // The overlap is stable, not a crash loop: hold for 2s and recheck.
+    // The overlap is stable, not a crash loop: hold, then require the
+    // same steady state again (poll-based: parallel test load can
+    // starve heartbeats transiently, which is itself a legal skew).
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert!(!cluster.any_node_died());
-    assert_eq!(
-        cluster.task_count("fast", &[Service::Gc]).await,
-        dbs.len() as u64
-    );
-    assert_eq!(cluster.task_count("sane", &[Service::Gc]).await, sane_share);
+    poll_until("overlap steady after hold", || async {
+        (cluster.task_count("fast", &[Service::Gc]).await == dbs.len() as u64
+            && cluster.task_count("sane", &[Service::Gc]).await == sane_share)
+            .then_some(())
+    })
+    .await;
 
     // The fleet stays observable throughout.
     let status = ops::status(&cluster.root, false).await.unwrap();

@@ -1,0 +1,37 @@
+# Example sleet.toml: fleet-wide policy, stored at the fleet root.
+# Full field reference: schema/config.schema.json
+
+[node]
+heartbeat_interval = "10s"
+heartbeat_timeout = "30s"
+config_poll = "1m"
+
+# Applied to every registered database; a dbs/<db>.toml file overrides
+# any field per database. Unset fields use SlateDB's defaults.
+[database]
+services = ["gc", "compactor-coordinator", "compaction-workers"]
+
+[database.gc.manifest]
+interval = "60s"
+min_age = "5m"
+
+[database.gc.wal_fence]
+dry_run = true                         # deleting young fences can lose writes
+
+[database.gc.compacted]
+min_age = "10m"
+
+[database.compactor-coordinator]
+poll_interval = "5s"
+max_concurrent_compactions = 4
+worker_heartbeat_timeout = "30s"
+
+[database.compactor-coordinator.scheduler]
+min_compaction_sources = 4
+max_compaction_sources = 8
+include_size_threshold = 4.0
+
+[database.compaction-workers]
+count = 2                              # worker nodes per database
+max_sst_size = 268435456               # 256 MiB
+max_subcompactions = 4
