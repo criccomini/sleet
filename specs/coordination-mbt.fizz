@@ -141,8 +141,7 @@ action Init:
     fresh = {"n1": True, "n2": True, "n3": True}
     runners = {"db1": [], "db2": []}
     fenced = {"db1": [], "db2": []}
-    # "" means no holder yet; the MBT server cannot serialize None.
-    holder = {"db1": "", "db2": ""}
+    holder = {"db1": None, "db2": None}
     nodes = []
     for nid in NODES:
         nodes.append(Node(nid=nid))
@@ -151,7 +150,7 @@ action Init:
 # itself in the fenced set.
 always assertion CurrentHolderNeverFenced:
     for db in DBS:
-        if holder[db] != "" and (holder[db] in fenced[db]):
+        if holder[db] != None and (holder[db] in fenced[db]):
             return False
     return True
 
