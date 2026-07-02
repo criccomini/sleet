@@ -3,9 +3,10 @@ SlateDB fleet manager
 Usage: sleet <COMMAND>
 
 Commands:
-  run     Run the fleet daemon
-  status  Show fleet nodes, service assignments, and service health, derived from object storage
-  help    Print this message or the help of the given subcommand(s)
+  run       Run a fleet node
+  status    Show fleet nodes, registered databases, and service placement, derived from the fleet root
+  register  Register a database: write its dbs/<db>.toml registry file
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help

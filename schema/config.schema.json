@@ -1,40 +1,37 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "sleet fleet spec",
-  "description": "The sleet fleet spec: the set of managed databases and which services\neach gets.",
+  "title": "sleet fleet config",
+  "description": "The fleet config: `sleet.toml` at the fleet root.",
   "type": "object",
   "properties": {
     "database": {
-      "description": "Explicitly managed databases; an entry wins over discovery for the\nsame URL.",
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/DatabaseEntry"
-      }
-    },
-    "defaults": {
-      "description": "Service settings applied to every database.",
-      "$ref": "#/$defs/ServiceOverrides",
+      "description": "Service settings applied to every database; a `dbs/<db>.toml`\nfile overrides them per field.",
+      "$ref": "#/$defs/DatabaseConfig",
       "default": {}
     },
-    "discover": {
-      "description": "Roots scanned for databases.",
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/DiscoverRoot"
-      }
-    },
-    "fleet": {
-      "description": "Node identity and fleet membership.",
-      "$ref": "#/$defs/Fleet",
+    "node": {
+      "description": "Settings every node follows.",
+      "$ref": "#/$defs/NodeConfig",
       "default": {
+        "config_poll": "1m",
         "heartbeat_interval": "10s",
-        "node_timeout": "30s"
+        "heartbeat_timeout": "30s"
       }
     }
   },
   "additionalProperties": false,
   "$defs": {
-    "CompactorOverrides": {
+    "CompressionCodec": {
+      "description": "SST compression codec.",
+      "type": "string",
+      "enum": [
+        "snappy",
+        "zlib",
+        "lz4",
+        "zstd"
+      ]
+    },
+    "CoordinatorOverrides": {
       "description": "Compaction coordinator settings (SlateDB `CompactorOptions`; sleet\nalways runs the coordinator without an embedded worker).",
       "type": "object",
       "properties": {
@@ -105,25 +102,27 @@
       },
       "additionalProperties": false
     },
-    "CompressionCodec": {
-      "description": "SST compression codec.",
-      "type": "string",
-      "enum": [
-        "snappy",
-        "zlib",
-        "lz4",
-        "zstd"
-      ]
-    },
-    "DatabaseEntry": {
-      "description": "An explicitly managed database.",
+    "DatabaseConfig": {
+      "title": "sleet database config",
+      "description": "Per-database service settings: the `[database]` table of `sleet.toml`\nand, verbatim, the contents of a `dbs/<db>.toml` registry file. All\nfields are optional; unset fields fall through to the next precedence\nlayer.",
       "type": "object",
       "properties": {
-        "compactor": {
-          "description": "Compaction coordinator settings for this database.",
+        "compaction-workers": {
+          "description": "Compaction worker settings.",
           "anyOf": [
             {
-              "$ref": "#/$defs/CompactorOverrides"
+              "$ref": "#/$defs/WorkersOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compactor-coordinator": {
+          "description": "Compaction coordinator settings.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CoordinatorOverrides"
             },
             {
               "type": "null"
@@ -131,7 +130,7 @@
           ]
         },
         "gc": {
-          "description": "Garbage collection settings for this database.",
+          "description": "Garbage collection settings.",
           "anyOf": [
             {
               "$ref": "#/$defs/GcOverrides"
@@ -142,7 +141,7 @@
           ]
         },
         "services": {
-          "description": "Which services run for this database.",
+          "description": "Which services run for the database. Default: all of them. An\nexplicit empty list registers the database but runs nothing.",
           "type": [
             "array",
             "null"
@@ -150,131 +149,6 @@
           "items": {
             "$ref": "#/$defs/Service"
           }
-        },
-        "url": {
-          "description": "Object-store URL of the database root, e.g. `\"gs://analytics/events\"`.",
-          "type": "string"
-        },
-        "workers": {
-          "description": "Compaction worker pool settings for this database.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WorkersOverrides"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "url"
-      ]
-    },
-    "DiscoverRoot": {
-      "description": "A root prefix scanned for databases every `rescan`.",
-      "type": "object",
-      "properties": {
-        "compactor": {
-          "description": "Compaction coordinator settings for databases under this root.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CompactorOverrides"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "exclude": {
-          "description": "Glob patterns for prefixes to skip.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "gc": {
-          "description": "Garbage collection settings for databases under this root.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/GcOverrides"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "max_depth": {
-          "description": "Maximum prefix depth below the root to descend.",
-          "type": "integer",
-          "format": "uint32",
-          "default": 3,
-          "minimum": 0
-        },
-        "rescan": {
-          "description": "How often the root is rescanned.",
-          "$ref": "#/$defs/HumanDuration",
-          "default": "5m"
-        },
-        "services": {
-          "description": "Which services run for databases under this root.",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/$defs/Service"
-          }
-        },
-        "url": {
-          "description": "Object-store URL to scan, e.g. `\"s3://prod-us/\"`.",
-          "type": "string"
-        },
-        "workers": {
-          "description": "Compaction worker pool settings for databases under this root.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WorkersOverrides"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "url"
-      ]
-    },
-    "Fleet": {
-      "description": "Node identity and fleet membership.",
-      "type": "object",
-      "properties": {
-        "heartbeat_interval": {
-          "description": "How often this node writes its heartbeat object.",
-          "$ref": "#/$defs/HumanDuration",
-          "default": "10s"
-        },
-        "heartbeats": {
-          "description": "Object-store prefix for node heartbeats. Omit to run single-node.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "node_id": {
-          "description": "Node identity within the fleet. Default: hostname.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "node_timeout": {
-          "description": "Nodes whose heartbeat is older than this are treated as dead.",
-          "$ref": "#/$defs/HumanDuration",
-          "default": "30s"
         }
       },
       "additionalProperties": false
@@ -425,6 +299,28 @@
       "type": "string",
       "pattern": "^([0-9]+ *[a-zµ]+ *)+$"
     },
+    "NodeConfig": {
+      "description": "Settings every node follows. These are fleet-wide agreements: nodes\nmust judge liveness with the same timeout for placement to converge.",
+      "type": "object",
+      "properties": {
+        "config_poll": {
+          "description": "How often nodes re-read `sleet.toml` and LIST `dbs/`.",
+          "$ref": "#/$defs/HumanDuration",
+          "default": "1m"
+        },
+        "heartbeat_interval": {
+          "description": "How often each node writes its heartbeat object.",
+          "$ref": "#/$defs/HumanDuration",
+          "default": "10s"
+        },
+        "heartbeat_timeout": {
+          "description": "Nodes whose heartbeat is older than this are treated as dead.",
+          "$ref": "#/$defs/HumanDuration",
+          "default": "30s"
+        }
+      },
+      "additionalProperties": false
+    },
     "SchedulerOverrides": {
       "description": "Size-tiered compaction scheduler settings (SlateDB\n`SizeTieredCompactionSchedulerOptions`).",
       "type": "object",
@@ -469,67 +365,17 @@
         {
           "description": "Standalone compaction coordinator (RFC-0025).",
           "type": "string",
-          "const": "compactor"
+          "const": "compactor-coordinator"
         },
         {
-          "description": "Compaction worker pool (RFC-0025).",
+          "description": "Compaction workers (RFC-0025).",
           "type": "string",
-          "const": "workers"
+          "const": "compaction-workers"
         }
       ]
     },
-    "ServiceOverrides": {
-      "description": "Per-database service settings. All fields are optional; unset fields\nfall through to the next precedence layer.",
-      "type": "object",
-      "properties": {
-        "compactor": {
-          "description": "Compaction coordinator settings.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CompactorOverrides"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "gc": {
-          "description": "Garbage collection settings.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/GcOverrides"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "services": {
-          "description": "Which services run for the database. Default: all of them.",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/$defs/Service"
-          }
-        },
-        "workers": {
-          "description": "Compaction worker pool settings.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WorkersOverrides"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "additionalProperties": false
-    },
     "WorkersOverrides": {
-      "description": "Compaction worker pool settings (SlateDB `CompactionWorkerOptions`\nplus the pool size).",
+      "description": "Compaction worker settings (SlateDB `CompactionWorkerOptions` plus\n`count`).",
       "type": "object",
       "properties": {
         "bytes_to_fetch": {
@@ -553,7 +399,7 @@
           ]
         },
         "count": {
-          "description": "Worker slots for this database across the fleet.",
+          "description": "Worker nodes for this database: the top `count` nodes of the\ndatabase's rendezvous ranking poll its compaction queue.",
           "type": [
             "integer",
             "null"
@@ -627,7 +473,7 @@
           "minimum": 0
         },
         "poll_interval": {
-          "description": "How often workers poll `.compactions` for `Scheduled` jobs.",
+          "description": "How often workers poll `.compactions` for `Scheduled` jobs; the\ninterval backs off exponentially while the database is idle.",
           "anyOf": [
             {
               "$ref": "#/$defs/HumanDuration"

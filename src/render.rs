@@ -10,7 +10,8 @@
 
 use std::io::{self, Write};
 
-use crate::response::StatusResponse;
+use crate::response::{RegisterResponse, StatusResponse};
+use crate::spec::Service;
 
 /// Human-readable rendering of a response.
 pub trait Render {
@@ -63,30 +64,62 @@ impl Table {
     }
 }
 
+fn join_services(services: &[Service]) -> String {
+    services
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 impl Render for StatusResponse {
     fn render(&self, w: &mut dyn Write) -> io::Result<()> {
-        let mut nodes = Table::new(&["NODE", "LIVE", "HEARTBEAT"]);
+        let mut nodes = Table::new(&["NODE", "LIVE", "HEARTBEAT", "SERVICES", "SLEET", "SLATEDB"]);
         for n in &self.nodes {
             nodes.row(vec![
                 n.node_id.clone(),
                 if n.live { "yes" } else { "no" }.into(),
                 humantime::format_duration(n.heartbeat_age.0).to_string(),
+                join_services(&n.services),
+                n.sleet_version.clone(),
+                n.slatedb_version.clone(),
             ]);
         }
         nodes.write(w)?;
         writeln!(w)?;
 
-        let mut services = Table::new(&["DATABASE", "SERVICE", "NODE", "STATE"]);
+        let mut services = Table::new(&["DATABASE", "SERVICE", "NODES"]);
         for db in &self.databases {
             for s in &db.services {
                 services.row(vec![
                     db.url.clone(),
                     s.service.as_str().into(),
-                    s.node_id.clone(),
-                    s.state.as_str().into(),
+                    if s.nodes.is_empty() {
+                        "-".into()
+                    } else {
+                        s.nodes.join(",")
+                    },
                 ]);
             }
         }
-        services.write(w)
+        services.write(w)?;
+
+        if !self.warnings.is_empty() {
+            writeln!(w)?;
+            for warning in &self.warnings {
+                writeln!(w, "warning: {warning}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Render for RegisterResponse {
+    fn render(&self, w: &mut dyn Write) -> io::Result<()> {
+        if self.created {
+            writeln!(w, "registered {} at {}", self.url, self.file)
+        } else {
+            writeln!(w, "{} already registered at {}", self.url, self.file)
+        }
     }
 }

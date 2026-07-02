@@ -1,7 +1,27 @@
-Run the fleet daemon
+Run a fleet node
 
-Usage: sleet run --spec <SPEC>
+Usage: sleet run [OPTIONS] --node-id <NODE_ID> <ROOT>
+
+Arguments:
+  <ROOT>
+          Fleet root URL, e.g. s3://ops/sleet/
 
 Options:
-      --spec <SPEC>  Path to the fleet spec TOML file
-  -h, --help         Print help
+      --node-id <NODE_ID>
+          Node identity; must be unique within the fleet
+
+      --services <SERVICES>
+          Services this node offers
+
+          Possible values:
+          - gc:                    Garbage collection
+          - compactor-coordinator: Standalone compaction coordinator (RFC-0025)
+          - compaction-workers:    Compaction workers (RFC-0025)
+          
+          [default: gc,compactor-coordinator,compaction-workers]
+
+      --max-compaction-jobs <MAX_COMPACTION_JOBS>
+          Maximum concurrent compaction jobs. Default: derived from the machine
+
+  -h, --help
+          Print help (see a summary with '-h')

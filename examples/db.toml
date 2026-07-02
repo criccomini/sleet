@@ -1,0 +1,9 @@
+# Example dbs/<db>.toml: one registered database. The filename is the
+# percent-encoded database URL, so an empty file is valid and registers
+# the database with the fleet-wide config. Contents are exactly a
+# [database] table; set fields override the fleet-wide value.
+
+services = ["gc"]
+
+[gc.compacted]
+min_age = "30m"

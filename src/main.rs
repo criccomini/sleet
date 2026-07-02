@@ -1,12 +1,11 @@
 use std::io;
-use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use sleet::render::Render;
 use sleet::response::StatusResponse;
-use sleet::spec::LoadError;
+use sleet::spec::Service;
 
 #[derive(Parser)]
 #[command(name = "sleet", about = "SlateDB fleet manager", version)]
@@ -17,18 +16,46 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run the fleet daemon.
+    /// Run a fleet node.
     Run {
-        /// Path to the fleet spec TOML file.
+        /// Fleet root URL, e.g. s3://ops/sleet/.
+        root: String,
+
+        /// Node identity; must be unique within the fleet.
         #[arg(long)]
-        spec: PathBuf,
+        node_id: String,
+
+        /// Services this node offers.
+        #[arg(
+            long,
+            value_delimiter = ',',
+            default_value = "gc,compactor-coordinator,compaction-workers"
+        )]
+        services: Vec<Service>,
+
+        /// Maximum concurrent compaction jobs. Default: derived from the
+        /// machine.
+        #[arg(long)]
+        max_compaction_jobs: Option<u32>,
     },
-    /// Show fleet nodes, service assignments, and service health,
-    /// derived from object storage.
+    /// Show fleet nodes, registered databases, and service placement,
+    /// derived from the fleet root.
     Status {
-        /// Path to the fleet spec TOML file.
-        #[arg(long)]
-        spec: PathBuf,
+        /// Fleet root URL, e.g. s3://ops/sleet/.
+        root: String,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
+    },
+    /// Register a database: write its dbs/<db>.toml registry file.
+    Register {
+        /// Fleet root URL, e.g. s3://ops/sleet/.
+        root: String,
+
+        /// Database URL, e.g. s3://bucket/db.
+        url: String,
+
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
@@ -45,33 +72,25 @@ enum Format {
 
 fn main() -> ExitCode {
     match Cli::parse().command {
-        Command::Run { spec } => run(&spec),
-        Command::Status { spec, format } => status(&spec, format),
-    }
-}
-
-fn run(spec: &Path) -> ExitCode {
-    // TODO: heartbeat loop, discovery, rendezvous assignment, and
-    // per-(database, service) supervised tasks.
-    match sleet::spec::load(spec) {
-        Ok(_) => {
+        // TODO: heartbeat loop, config/registry polling, rendezvous
+        // placement, and per-(database, service) supervised tasks.
+        Command::Run { .. } => {
             eprintln!("error: `sleet run` is not implemented");
             ExitCode::FAILURE
         }
-        Err(e) => fail(e),
-    }
-}
-
-fn status(spec: &Path, format: Format) -> ExitCode {
-    // TODO: LIST heartbeat objects under `fleet.heartbeats`, read the
-    // assignments and service states each carries, and take compaction
-    // queue depth from `.compactions`.
-    match sleet::spec::load(spec) {
-        Ok(_) => {
+        // TODO: LIST nodes/ for liveness and roles, LIST dbs/ for the
+        // registry, compute placement with the same rendezvous ranking,
+        // and take compaction queue depth from `.compactions`.
+        Command::Status { format, .. } => {
             eprintln!("note: stub response; status from object storage is not implemented");
             emit(&StatusResponse::stub(), format)
         }
-        Err(e) => fail(e),
+        // TODO: canonicalize the URL and create-only PUT the registry
+        // file.
+        Command::Register { .. } => {
+            eprintln!("error: `sleet register` is not implemented");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -86,9 +105,4 @@ fn emit<T: Serialize + Render>(response: &T, format: Format) -> ExitCode {
         ),
     }
     ExitCode::SUCCESS
-}
-
-fn fail(e: LoadError) -> ExitCode {
-    eprintln!("{e}");
-    ExitCode::FAILURE
 }

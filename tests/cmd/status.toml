@@ -1,2 +1,2 @@
 bin.name = "sleet"
-args = ["status", "--spec", "fleet.toml"]
+args = ["status", "s3://ops/sleet/"]

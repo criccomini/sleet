@@ -1,10 +1,13 @@
-Show fleet nodes, registered databases, and service placement, derived from the fleet root
+Register a database: write its dbs/<db>.toml registry file
 
-Usage: sleet status [OPTIONS] <ROOT>
+Usage: sleet register [OPTIONS] <ROOT> <URL>
 
 Arguments:
   <ROOT>
           Fleet root URL, e.g. s3://ops/sleet/
+
+  <URL>
+          Database URL, e.g. s3://bucket/db
 
 Options:
       --format <FORMAT>

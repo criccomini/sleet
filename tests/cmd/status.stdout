@@ -1,10 +1,10 @@
-NODE     LIVE  HEARTBEAT
-sleet-1  yes   2s
-sleet-2  yes   4s
-sleet-3  no    1m 12s
+NODE     LIVE  HEARTBEAT  SERVICES                                     SLEET  SLATEDB
+sleet-1  yes   2s         gc,compactor-coordinator,compaction-workers  0.1.0  0.9.0
+sleet-2  yes   4s         compaction-workers                           0.1.0  0.9.0
+sleet-3  no    1m 12s     gc,compactor-coordinator,compaction-workers  0.1.0  0.9.0
 
-DATABASE               SERVICE    NODE     STATE
-s3://prod-us/db1       gc         sleet-1  running
-s3://prod-us/db1       compactor  sleet-2  running
-s3://prod-us/db1       workers    sleet-1  running
-gs://analytics/events  gc         sleet-2  backoff
+DATABASE               SERVICE                NODES
+s3://prod-us/db1       gc                     sleet-1
+s3://prod-us/db1       compactor-coordinator  sleet-1
+s3://prod-us/db1       compaction-workers     sleet-2,sleet-1
+gs://analytics/events  gc                     sleet-1

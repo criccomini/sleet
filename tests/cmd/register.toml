@@ -1,0 +1,3 @@
+bin.name = "sleet"
+args = ["register", "s3://ops/sleet/", "s3://bucket/db"]
+status.code = 1

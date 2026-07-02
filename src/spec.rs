@@ -1,17 +1,18 @@
-//! The fleet spec: the TOML file loaded by `sleet run --spec <path>`.
+//! The fleet config: `sleet.toml` at the fleet root, plus the
+//! per-database registry files under `dbs/`.
 //!
-//! These structs are the source of truth for the spec format. The JSON
+//! These structs are the source of truth for the config format. The JSON
 //! Schema at `schema/config.schema.json` is generated from them by
-//! `tests/schema_sync.rs`, which fails if the two drift.
+//! `tests/schema_sync.rs`, which fails if the two drift. `sleet.toml`
+//! validates against the root schema; a `dbs/<db>.toml` file is exactly a
+//! `[database]` table and validates against `#/$defs/DatabaseConfig`.
 //!
-//! Settings resolve in precedence order: built-in defaults (SlateDB's
-//! where a field maps to a SlateDB option) -> `[defaults]` -> longest
-//! matching `[[discover]]` root -> exact `[[database]]` entry. Unset
-//! fields fall through to the previous layer.
+//! Settings resolve per-field in precedence order: built-in defaults
+//! (SlateDB's where a field maps to a SlateDB option) -> `[database]` ->
+//! `dbs/<db>.toml`. Unset fields fall through to the previous layer.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::path::Path;
 use std::time::Duration;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
@@ -56,58 +57,45 @@ impl JsonSchema for HumanDuration {
     }
 }
 
-/// The sleet fleet spec: the set of managed databases and which services
-/// each gets.
+/// The fleet config: `sleet.toml` at the fleet root.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(title = "sleet fleet spec")]
-pub struct FleetSpec {
-    /// Node identity and fleet membership.
+#[schemars(title = "sleet fleet config")]
+pub struct SleetConfig {
+    /// Settings every node follows.
     #[serde(default)]
-    pub fleet: Fleet,
+    pub node: NodeConfig,
 
-    /// Service settings applied to every database.
+    /// Service settings applied to every database; a `dbs/<db>.toml`
+    /// file overrides them per field.
     #[serde(default)]
-    pub defaults: ServiceOverrides,
-
-    /// Roots scanned for databases.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub discover: Vec<DiscoverRoot>,
-
-    /// Explicitly managed databases; an entry wins over discovery for the
-    /// same URL.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub database: Vec<DatabaseEntry>,
+    pub database: DatabaseConfig,
 }
 
-/// Node identity and fleet membership.
+/// Settings every node follows. These are fleet-wide agreements: nodes
+/// must judge liveness with the same timeout for placement to converge.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Fleet {
-    /// Node identity within the fleet. Default: hostname.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub node_id: Option<String>,
-
-    /// Object-store prefix for node heartbeats. Omit to run single-node.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub heartbeats: Option<String>,
-
-    /// How often this node writes its heartbeat object.
+pub struct NodeConfig {
+    /// How often each node writes its heartbeat object.
     #[serde(default = "default_heartbeat_interval")]
     pub heartbeat_interval: HumanDuration,
 
     /// Nodes whose heartbeat is older than this are treated as dead.
-    #[serde(default = "default_node_timeout")]
-    pub node_timeout: HumanDuration,
+    #[serde(default = "default_heartbeat_timeout")]
+    pub heartbeat_timeout: HumanDuration,
+
+    /// How often nodes re-read `sleet.toml` and LIST `dbs/`.
+    #[serde(default = "default_config_poll")]
+    pub config_poll: HumanDuration,
 }
 
-impl Default for Fleet {
+impl Default for NodeConfig {
     fn default() -> Self {
         Self {
-            node_id: None,
-            heartbeats: None,
             heartbeat_interval: default_heartbeat_interval(),
-            node_timeout: default_node_timeout(),
+            heartbeat_timeout: default_heartbeat_timeout(),
+            config_poll: default_config_poll(),
         }
     }
 }
@@ -116,38 +104,58 @@ fn default_heartbeat_interval() -> HumanDuration {
     Duration::from_secs(10).into()
 }
 
-fn default_node_timeout() -> HumanDuration {
+fn default_heartbeat_timeout() -> HumanDuration {
     Duration::from_secs(30).into()
 }
 
+fn default_config_poll() -> HumanDuration {
+    Duration::from_secs(60).into()
+}
+
 /// A per-database service.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, clap::ValueEnum,
+)]
+#[serde(rename_all = "kebab-case")]
 pub enum Service {
     /// Garbage collection.
     Gc,
     /// Standalone compaction coordinator (RFC-0025).
-    Compactor,
-    /// Compaction worker pool (RFC-0025).
-    Workers,
+    CompactorCoordinator,
+    /// Compaction workers (RFC-0025).
+    CompactionWorkers,
 }
 
 impl Service {
     pub fn as_str(self) -> &'static str {
         match self {
             Service::Gc => "gc",
-            Service::Compactor => "compactor",
-            Service::Workers => "workers",
+            Service::CompactorCoordinator => "compactor-coordinator",
+            Service::CompactionWorkers => "compaction-workers",
+        }
+    }
+
+    /// The service's letter in a heartbeat object name (see
+    /// `crate::heartbeat`).
+    pub fn letter(self) -> char {
+        match self {
+            Service::Gc => 'g',
+            Service::CompactorCoordinator => 'c',
+            Service::CompactionWorkers => 'w',
         }
     }
 }
 
-/// Per-database service settings. All fields are optional; unset fields
-/// fall through to the next precedence layer.
+/// Per-database service settings: the `[database]` table of `sleet.toml`
+/// and, verbatim, the contents of a `dbs/<db>.toml` registry file. All
+/// fields are optional; unset fields fall through to the next precedence
+/// layer.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ServiceOverrides {
-    /// Which services run for the database. Default: all of them.
+#[schemars(title = "sleet database config")]
+pub struct DatabaseConfig {
+    /// Which services run for the database. Default: all of them. An
+    /// explicit empty list registers the database but runs nothing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub services: Option<Vec<Service>>,
 
@@ -156,12 +164,15 @@ pub struct ServiceOverrides {
     pub gc: Option<GcOverrides>,
 
     /// Compaction coordinator settings.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub compactor: Option<CompactorOverrides>,
+    #[serde(
+        rename = "compactor-coordinator",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub compactor_coordinator: Option<CoordinatorOverrides>,
 
-    /// Compaction worker pool settings.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workers: Option<WorkersOverrides>,
+    /// Compaction worker settings.
+    #[serde(rename = "compaction-workers", skip_serializing_if = "Option::is_none")]
+    pub compaction_workers: Option<WorkersOverrides>,
 }
 
 /// Garbage collection settings, per SlateDB resource directory.
@@ -232,7 +243,7 @@ pub struct GcDetachOverrides {
 /// always runs the coordinator without an embedded worker).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CompactorOverrides {
+pub struct CoordinatorOverrides {
     /// How often the coordinator polls the manifest to schedule compactions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poll_interval: Option<HumanDuration>,
@@ -277,12 +288,13 @@ pub struct SchedulerOverrides {
     pub include_size_threshold: Option<f32>,
 }
 
-/// Compaction worker pool settings (SlateDB `CompactionWorkerOptions`
-/// plus the pool size).
+/// Compaction worker settings (SlateDB `CompactionWorkerOptions` plus
+/// `count`).
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkersOverrides {
-    /// Worker slots for this database across the fleet.
+    /// Worker nodes for this database: the top `count` nodes of the
+    /// database's rendezvous ranking poll its compaction queue.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<u32>,
 
@@ -290,7 +302,8 @@ pub struct WorkersOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_concurrent_compactions: Option<u32>,
 
-    /// How often workers poll `.compactions` for `Scheduled` jobs.
+    /// How often workers poll `.compactions` for `Scheduled` jobs; the
+    /// interval backs off exponentially while the database is idle.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poll_interval: Option<HumanDuration>,
 
@@ -340,96 +353,6 @@ pub enum CompressionCodec {
     Zstd,
 }
 
-/// A root prefix scanned for databases every `rescan`.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct DiscoverRoot {
-    /// Object-store URL to scan, e.g. `"s3://prod-us/"`.
-    pub url: String,
-
-    /// How often the root is rescanned.
-    #[serde(default = "default_rescan")]
-    pub rescan: HumanDuration,
-
-    /// Maximum prefix depth below the root to descend.
-    #[serde(default = "default_max_depth")]
-    pub max_depth: u32,
-
-    /// Glob patterns for prefixes to skip.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub exclude: Vec<String>,
-
-    /// Which services run for databases under this root.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub services: Option<Vec<Service>>,
-
-    /// Garbage collection settings for databases under this root.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gc: Option<GcOverrides>,
-
-    /// Compaction coordinator settings for databases under this root.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub compactor: Option<CompactorOverrides>,
-
-    /// Compaction worker pool settings for databases under this root.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workers: Option<WorkersOverrides>,
-}
-
-fn default_rescan() -> HumanDuration {
-    Duration::from_secs(300).into()
-}
-
-fn default_max_depth() -> u32 {
-    3
-}
-
-impl DiscoverRoot {
-    pub fn overrides(&self) -> ServiceOverrides {
-        ServiceOverrides {
-            services: self.services.clone(),
-            gc: self.gc.clone(),
-            compactor: self.compactor.clone(),
-            workers: self.workers,
-        }
-    }
-}
-
-/// An explicitly managed database.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct DatabaseEntry {
-    /// Object-store URL of the database root, e.g. `"gs://analytics/events"`.
-    pub url: String,
-
-    /// Which services run for this database.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub services: Option<Vec<Service>>,
-
-    /// Garbage collection settings for this database.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gc: Option<GcOverrides>,
-
-    /// Compaction coordinator settings for this database.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub compactor: Option<CompactorOverrides>,
-
-    /// Compaction worker pool settings for this database.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workers: Option<WorkersOverrides>,
-}
-
-impl DatabaseEntry {
-    pub fn overrides(&self) -> ServiceOverrides {
-        ServiceOverrides {
-            services: self.services.clone(),
-            gc: self.gc.clone(),
-            compactor: self.compactor.clone(),
-            workers: self.workers,
-        }
-    }
-}
-
 // ---------------------------------------------------------------------
 // Resolved settings
 // ---------------------------------------------------------------------
@@ -439,16 +362,20 @@ impl DatabaseEntry {
 pub struct ResolvedServices {
     pub services: Vec<Service>,
     pub gc: ResolvedGc,
-    pub compactor: ResolvedCompactor,
+    pub coordinator: ResolvedCoordinator,
     pub workers: ResolvedWorkers,
 }
 
 impl Default for ResolvedServices {
     fn default() -> Self {
         Self {
-            services: vec![Service::Gc, Service::Compactor, Service::Workers],
+            services: vec![
+                Service::Gc,
+                Service::CompactorCoordinator,
+                Service::CompactionWorkers,
+            ],
             gc: ResolvedGc::default(),
-            compactor: ResolvedCompactor::default(),
+            coordinator: ResolvedCoordinator::default(),
             workers: ResolvedWorkers::default(),
         }
     }
@@ -518,7 +445,7 @@ impl Default for ResolvedGcDetach {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ResolvedCompactor {
+pub struct ResolvedCoordinator {
     pub poll_interval: Duration,
     pub manifest_update_timeout: Duration,
     pub max_concurrent_compactions: u32,
@@ -527,7 +454,7 @@ pub struct ResolvedCompactor {
     pub scheduler: ResolvedScheduler,
 }
 
-impl Default for ResolvedCompactor {
+impl Default for ResolvedCoordinator {
     /// SlateDB `CompactorOptions` defaults.
     fn default() -> Self {
         Self {
@@ -593,7 +520,7 @@ impl Default for ResolvedWorkers {
     }
 }
 
-impl ServiceOverrides {
+impl DatabaseConfig {
     fn apply(&self, r: &mut ResolvedServices) {
         if let Some(services) = &self.services {
             r.services = services.clone();
@@ -601,10 +528,10 @@ impl ServiceOverrides {
         if let Some(gc) = &self.gc {
             gc.apply(&mut r.gc);
         }
-        if let Some(compactor) = &self.compactor {
-            compactor.apply(&mut r.compactor);
+        if let Some(coordinator) = &self.compactor_coordinator {
+            coordinator.apply(&mut r.coordinator);
         }
-        if let Some(workers) = &self.workers {
+        if let Some(workers) = &self.compaction_workers {
             workers.apply(&mut r.workers);
         }
     }
@@ -657,8 +584,8 @@ impl GcDetachOverrides {
     }
 }
 
-impl CompactorOverrides {
-    fn apply(&self, r: &mut ResolvedCompactor) {
+impl CoordinatorOverrides {
+    fn apply(&self, r: &mut ResolvedCoordinator) {
         if let Some(v) = self.poll_interval {
             r.poll_interval = v.0;
         }
@@ -732,197 +659,131 @@ impl WorkersOverrides {
     }
 }
 
-impl FleetSpec {
-    /// Resolve service settings for a database URL: built-in defaults ->
-    /// `[defaults]` -> longest matching discovery root -> exact
-    /// `[[database]]` entry.
-    pub fn resolve(&self, url: &str) -> ResolvedServices {
+impl SleetConfig {
+    /// Resolve service settings for a database: built-in defaults ->
+    /// `[database]` -> the database's `dbs/<db>.toml` contents, if any.
+    pub fn resolve(&self, db: Option<&DatabaseConfig>) -> ResolvedServices {
         let mut r = ResolvedServices::default();
-        self.defaults.apply(&mut r);
-        if let Some(root) = self
-            .discover
-            .iter()
-            .filter(|d| url_under_root(url, &d.url))
-            .max_by_key(|d| d.url.trim_end_matches('/').len())
-        {
-            root.overrides().apply(&mut r);
-        }
-        if let Some(db) = self
-            .database
-            .iter()
-            .find(|d| normalize_url(&d.url) == normalize_url(url))
-        {
-            db.overrides().apply(&mut r);
+        self.database.apply(&mut r);
+        if let Some(db) = db {
+            db.apply(&mut r);
         }
         r
     }
 }
 
-fn normalize_url(url: &str) -> &str {
-    url.trim_end_matches('/')
-}
-
-fn url_under_root(url: &str, root: &str) -> bool {
-    let url = normalize_url(url);
-    let root = normalize_url(root);
-    url == root || url.starts_with(&format!("{root}/"))
-}
-
 // ---------------------------------------------------------------------
-// Validation and loading
+// Validation and parsing
 // ---------------------------------------------------------------------
 
-/// URL schemes accepted for object-store locations, matching
-/// `object_store::parse_url`.
-const URL_SCHEMES: &[&str] = &[
-    "s3", "s3a", "gs", "az", "adl", "azure", "abfs", "abfss", "file", "memory", "http", "https",
-];
-
-/// One or more fleet spec validation errors.
+/// One or more config validation errors.
 #[derive(Debug, thiserror::Error)]
-#[error("invalid fleet spec:\n  {}", .0.join("\n  "))]
-pub struct SpecError(pub Vec<String>);
+#[error("invalid config:\n  {}", .0.join("\n  "))]
+pub struct ConfigError(pub Vec<String>);
 
-/// A fleet spec that failed to load.
+/// A config that failed to parse or validate.
 #[derive(Debug, thiserror::Error)]
-pub enum LoadError {
-    #[error("failed to read fleet spec: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("failed to parse fleet spec: {0}")]
-    Parse(#[from] toml::de::Error),
+pub enum ParseError {
+    #[error("failed to parse config: {0}")]
+    Toml(#[from] toml::de::Error),
     #[error(transparent)]
-    Invalid(#[from] SpecError),
+    Invalid(#[from] ConfigError),
 }
 
-/// Read, parse, and validate a fleet spec from a TOML file.
-pub fn load(path: &Path) -> Result<FleetSpec, LoadError> {
-    let spec: FleetSpec = toml::from_str(&std::fs::read_to_string(path)?)?;
-    spec.validate()?;
-    Ok(spec)
+/// Parse and validate a `sleet.toml`.
+pub fn parse_config(toml: &str) -> Result<SleetConfig, ParseError> {
+    let config: SleetConfig = toml::from_str(toml)?;
+    config.validate()?;
+    Ok(config)
 }
 
-/// The fleet spec JSON Schema, pretty-printed.
+/// Parse a `dbs/<db>.toml` registry file and validate it layered on the
+/// fleet config. An empty file is valid and means "fleet-wide config".
+pub fn parse_database(fleet: &SleetConfig, toml: &str) -> Result<DatabaseConfig, ParseError> {
+    let db: DatabaseConfig = toml::from_str(toml)?;
+    fleet.validate_database(&db)?;
+    Ok(db)
+}
+
+/// The fleet config JSON Schema, pretty-printed.
 pub fn schema_json() -> String {
-    crate::schema_pretty::<FleetSpec>()
+    crate::schema_pretty::<SleetConfig>()
 }
 
-impl FleetSpec {
+impl SleetConfig {
     /// Check cross-field invariants the schema cannot express.
-    pub fn validate(&self) -> Result<(), SpecError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         let mut errs = Vec::new();
 
-        if let Some(id) = &self.fleet.node_id {
-            let ok = !id.is_empty()
-                && id.len() <= 128
-                && id
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-            if !ok {
-                errs.push(format!(
-                    "fleet.node_id {id:?} must be 1-128 chars of [A-Za-z0-9._-]"
-                ));
-            }
+        if self.node.heartbeat_interval.0.is_zero() {
+            errs.push("node.heartbeat_interval must be > 0".into());
         }
-        if let Some(hb) = &self.fleet.heartbeats {
-            check_url(hb, "fleet.heartbeats", &mut errs);
-        }
-        if self.fleet.heartbeat_interval.0.is_zero() {
-            errs.push("fleet.heartbeat_interval must be > 0".into());
-        }
-        if self.fleet.heartbeat_interval >= self.fleet.node_timeout {
+        if self.node.heartbeat_interval >= self.node.heartbeat_timeout {
             errs.push(format!(
-                "fleet.heartbeat_interval ({}) must be < fleet.node_timeout ({})",
-                humantime::format_duration(self.fleet.heartbeat_interval.0),
-                humantime::format_duration(self.fleet.node_timeout.0),
+                "node.heartbeat_interval ({}) must be < node.heartbeat_timeout ({})",
+                humantime::format_duration(self.node.heartbeat_interval.0),
+                humantime::format_duration(self.node.heartbeat_timeout.0),
             ));
         }
-
-        check_overrides(&self.defaults, "defaults", &mut errs);
-
-        let mut roots = HashSet::new();
-        for (i, d) in self.discover.iter().enumerate() {
-            let at = format!("discover[{i}]");
-            check_url(&d.url, &format!("{at}.url"), &mut errs);
-            if !roots.insert(normalize_url(&d.url)) {
-                errs.push(format!("{at}.url {:?} duplicates an earlier root", d.url));
-            }
-            if d.max_depth == 0 {
-                errs.push(format!("{at}.max_depth must be >= 1"));
-            }
-            if d.rescan.0.is_zero() {
-                errs.push(format!("{at}.rescan must be > 0"));
-            }
-            for pat in &d.exclude {
-                if let Err(e) = globset::Glob::new(pat) {
-                    errs.push(format!("{at}.exclude glob {pat:?} is invalid: {e}"));
-                }
-            }
-            check_overrides(&d.overrides(), &at, &mut errs);
+        if self.node.config_poll.0.is_zero() {
+            errs.push("node.config_poll must be > 0".into());
         }
 
-        let mut dbs = HashSet::new();
-        for (i, db) in self.database.iter().enumerate() {
-            let at = format!("database[{i}]");
-            check_url(&db.url, &format!("{at}.url"), &mut errs);
-            if !dbs.insert(normalize_url(&db.url)) {
-                errs.push(format!("{at}.url {:?} duplicates an earlier entry", db.url));
-            }
-            check_overrides(&db.overrides(), &at, &mut errs);
-        }
-
-        // Scheduler bounds must hold after layering, not per block.
-        for (url, at) in self
-            .database
-            .iter()
-            .map(|d| (d.url.as_str(), "database"))
-            .chain(self.discover.iter().map(|d| (d.url.as_str(), "discover")))
-        {
-            let s = self.resolve(url).compactor.scheduler;
-            if s.min_compaction_sources > s.max_compaction_sources {
-                errs.push(format!(
-                    "resolved scheduler for {at} {url:?}: min_compaction_sources \
-                     ({}) exceeds max_compaction_sources ({})",
-                    s.min_compaction_sources, s.max_compaction_sources
-                ));
-            }
-        }
-        {
-            let s = self.resolve("").compactor.scheduler;
-            if s.min_compaction_sources > s.max_compaction_sources {
-                errs.push(format!(
-                    "defaults: min_compaction_sources ({}) exceeds \
-                     max_compaction_sources ({})",
-                    s.min_compaction_sources, s.max_compaction_sources
-                ));
-            }
-        }
+        check_database(&self.database, "database", &mut errs);
+        check_resolved(&self.resolve(None), "database", &mut errs);
 
         if errs.is_empty() {
             Ok(())
         } else {
-            Err(SpecError(errs))
+            Err(ConfigError(errs))
+        }
+    }
+
+    /// Check a `dbs/<db>.toml`'s fields, plus the bounds that must hold
+    /// on the layered result rather than per block.
+    pub fn validate_database(&self, db: &DatabaseConfig) -> Result<(), ConfigError> {
+        let mut errs = Vec::new();
+        check_database(db, "", &mut errs);
+        check_resolved(&self.resolve(Some(db)), "resolved", &mut errs);
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigError(errs))
         }
     }
 }
 
-fn check_url(s: &str, at: &str, errs: &mut Vec<String>) {
-    match url::Url::parse(s) {
-        Ok(u) if URL_SCHEMES.contains(&u.scheme()) => {}
-        Ok(u) => errs.push(format!(
-            "{at}: unsupported URL scheme {:?} (expected one of {})",
-            u.scheme(),
-            URL_SCHEMES.join(", ")
-        )),
-        Err(e) => errs.push(format!("{at}: invalid URL {s:?}: {e}")),
+/// `field` prefixed with its containing table, if any.
+fn loc(at: &str, field: &str) -> String {
+    if at.is_empty() {
+        field.to_string()
+    } else {
+        format!("{at}.{field}")
     }
 }
 
-fn check_overrides(o: &ServiceOverrides, at: &str, errs: &mut Vec<String>) {
+fn check_resolved(r: &ResolvedServices, at: &str, errs: &mut Vec<String>) {
+    let s = r.coordinator.scheduler;
+    if s.min_compaction_sources > s.max_compaction_sources {
+        errs.push(format!(
+            "{}: min_compaction_sources ({}) exceeds max_compaction_sources ({})",
+            loc(at, "compactor-coordinator.scheduler"),
+            s.min_compaction_sources,
+            s.max_compaction_sources
+        ));
+    }
+}
+
+fn check_database(o: &DatabaseConfig, at: &str, errs: &mut Vec<String>) {
     if let Some(services) = &o.services {
         let mut seen = HashSet::new();
         for s in services {
             if !seen.insert(*s) {
-                errs.push(format!("{at}.services lists {s:?} more than once"));
+                errs.push(format!(
+                    "{} lists {:?} more than once",
+                    loc(at, "services"),
+                    s.as_str()
+                ));
             }
         }
     }
@@ -937,16 +798,20 @@ fn check_overrides(o: &ServiceOverrides, at: &str, errs: &mut Vec<String>) {
             if let Some(dir) = dir
                 && dir.interval.is_some_and(|d| d.0.is_zero())
             {
-                errs.push(format!("{at}.gc.{name}.interval must be > 0"));
+                errs.push(format!(
+                    "{} must be > 0",
+                    loc(at, &format!("gc.{name}.interval"))
+                ));
             }
         }
         if let Some(detach) = &gc.detach
             && detach.interval.is_some_and(|d| d.0.is_zero())
         {
-            errs.push(format!("{at}.gc.detach.interval must be > 0"));
+            errs.push(format!("{} must be > 0", loc(at, "gc.detach.interval")));
         }
     }
-    if let Some(c) = &o.compactor {
+    if let Some(c) = &o.compactor_coordinator {
+        let cc = "compactor-coordinator";
         for (name, d) in [
             ("poll_interval", c.poll_interval),
             ("manifest_update_timeout", c.manifest_update_timeout),
@@ -954,59 +819,70 @@ fn check_overrides(o: &ServiceOverrides, at: &str, errs: &mut Vec<String>) {
             ("worker_heartbeat_timeout", c.worker_heartbeat_timeout),
         ] {
             if d.is_some_and(|d| d.0.is_zero()) {
-                errs.push(format!("{at}.compactor.{name} must be > 0"));
+                errs.push(format!("{} must be > 0", loc(at, &format!("{cc}.{name}"))));
             }
         }
         if c.max_concurrent_compactions == Some(0) {
             errs.push(format!(
-                "{at}.compactor.max_concurrent_compactions must be >= 1"
+                "{} must be >= 1",
+                loc(at, &format!("{cc}.max_concurrent_compactions"))
             ));
         }
         if let Some(s) = &c.scheduler {
             if s.min_compaction_sources == Some(0) {
                 errs.push(format!(
-                    "{at}.compactor.scheduler.min_compaction_sources must be >= 1"
+                    "{} must be >= 1",
+                    loc(at, &format!("{cc}.scheduler.min_compaction_sources"))
                 ));
             }
             if s.max_compaction_sources == Some(0) {
                 errs.push(format!(
-                    "{at}.compactor.scheduler.max_compaction_sources must be >= 1"
+                    "{} must be >= 1",
+                    loc(at, &format!("{cc}.scheduler.max_compaction_sources"))
                 ));
             }
             if s.include_size_threshold
                 .is_some_and(|t| !(t.is_finite() && t > 0.0))
             {
                 errs.push(format!(
-                    "{at}.compactor.scheduler.include_size_threshold must be a \
-                     positive number"
+                    "{} must be a positive number",
+                    loc(at, &format!("{cc}.scheduler.include_size_threshold"))
                 ));
             }
         }
     }
-    if let Some(w) = &o.workers {
+    if let Some(w) = &o.compaction_workers {
+        let cw = "compaction-workers";
         if w.count == Some(0) {
             errs.push(format!(
-                "{at}.workers.count must be >= 1 (drop the \"workers\" service \
-                 to run none)"
+                "{} must be >= 1 (drop \"compaction-workers\" from services to run none)",
+                loc(at, &format!("{cw}.count"))
             ));
         }
         if w.max_concurrent_compactions == Some(0) {
             errs.push(format!(
-                "{at}.workers.max_concurrent_compactions must be >= 1"
+                "{} must be >= 1",
+                loc(at, &format!("{cw}.max_concurrent_compactions"))
             ));
         }
         if w.poll_interval.is_some_and(|d| d.0.is_zero()) {
-            errs.push(format!("{at}.workers.poll_interval must be > 0"));
+            errs.push(format!(
+                "{} must be > 0",
+                loc(at, &format!("{cw}.poll_interval"))
+            ));
         }
         if w.max_fetch_tasks == Some(0) {
-            errs.push(format!("{at}.workers.max_fetch_tasks must be >= 1"));
+            errs.push(format!(
+                "{} must be >= 1",
+                loc(at, &format!("{cw}.max_fetch_tasks"))
+            ));
         }
         for (name, v) in [
             ("max_sst_size", w.max_sst_size),
             ("bytes_to_fetch", w.bytes_to_fetch),
         ] {
             if v == Some(0) {
-                errs.push(format!("{at}.workers.{name} must be > 0"));
+                errs.push(format!("{} must be > 0", loc(at, &format!("{cw}.{name}"))));
             }
         }
     }

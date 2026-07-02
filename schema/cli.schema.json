@@ -5,17 +5,20 @@
   "anyOf": [
     {
       "$ref": "#/$defs/StatusResponse"
+    },
+    {
+      "$ref": "#/$defs/RegisterResponse"
     }
   ],
   "$defs": {
     "DatabaseStatus": {
-      "description": "One managed database and its service assignments.",
+      "description": "One registered database and its service placement.",
       "type": "object",
       "properties": {
         "services": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/ServiceStatus"
+            "$ref": "#/$defs/ServicePlacement"
           }
         },
         "url": {
@@ -41,17 +44,59 @@
           "$ref": "#/$defs/HumanDuration"
         },
         "live": {
-          "description": "Whether the heartbeat is younger than `node_timeout`.",
+          "description": "Whether the heartbeat is younger than `heartbeat_timeout`.",
           "type": "boolean"
         },
         "node_id": {
+          "type": "string"
+        },
+        "services": {
+          "description": "Services the node offers, from its heartbeat object name.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Service"
+          }
+        },
+        "slatedb_version": {
+          "description": "The slatedb version the node runs, from the heartbeat body.",
+          "type": "string"
+        },
+        "sleet_version": {
+          "description": "The sleet version the node runs, from the heartbeat body.",
           "type": "string"
         }
       },
       "required": [
         "node_id",
         "live",
-        "heartbeat_age"
+        "heartbeat_age",
+        "services",
+        "sleet_version",
+        "slatedb_version"
+      ]
+    },
+    "RegisterResponse": {
+      "title": "sleet register response",
+      "description": "The `sleet register` response.",
+      "type": "object",
+      "properties": {
+        "created": {
+          "description": "False if the database was already registered.",
+          "type": "boolean"
+        },
+        "file": {
+          "description": "The registry object written, relative to the fleet root.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The canonicalized database URL.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "file",
+        "created"
       ]
     },
     "Service": {
@@ -65,63 +110,41 @@
         {
           "description": "Standalone compaction coordinator (RFC-0025).",
           "type": "string",
-          "const": "compactor"
+          "const": "compactor-coordinator"
         },
         {
-          "description": "Compaction worker pool (RFC-0025).",
+          "description": "Compaction workers (RFC-0025).",
           "type": "string",
-          "const": "workers"
+          "const": "compaction-workers"
         }
       ]
     },
-    "ServiceState": {
-      "description": "Supervised task state for one service.",
-      "oneOf": [
-        {
-          "description": "The task is running.",
-          "type": "string",
-          "const": "running"
-        },
-        {
-          "description": "The task crashed and is waiting out its restart delay.",
-          "type": "string",
-          "const": "backoff"
-        },
-        {
-          "description": "The task was shut down (unassigned or removed from the spec).",
-          "type": "string",
-          "const": "stopped"
-        }
-      ]
-    },
-    "ServiceStatus": {
-      "description": "One `(database, service)` assignment.",
+    "ServicePlacement": {
+      "description": "Where one database service runs: the top of the service's rendezvous\nranking — one node for `gc` and `compactor-coordinator`, the top\n`count` nodes for `compaction-workers`. Empty means no live node\noffers the service.",
       "type": "object",
       "properties": {
-        "node_id": {
-          "description": "Node the service is rendezvous-hashed to.",
-          "type": "string"
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "service": {
           "$ref": "#/$defs/Service"
-        },
-        "state": {
-          "$ref": "#/$defs/ServiceState"
         }
       },
       "required": [
         "service",
-        "node_id",
-        "state"
+        "nodes"
       ]
     },
     "StatusResponse": {
       "title": "sleet status response",
-      "description": "The `sleet status` response, derived from object storage: node\nliveness from heartbeat ages, assignments and service states from\nheartbeat contents.",
+      "description": "The `sleet status` response, derived from the fleet root: node\nliveness, roles, and versions from `nodes/`, registered databases\nfrom `dbs/`, and placement by computing the same rendezvous ranking\nthe nodes do.",
       "type": "object",
       "properties": {
         "databases": {
-          "description": "Managed databases and their service assignments.",
+          "description": "Registered databases and their service placement.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/DatabaseStatus"
@@ -133,11 +156,19 @@
           "items": {
             "$ref": "#/$defs/NodeStatus"
           }
+        },
+        "warnings": {
+          "description": "Fleet-level problems: registry entries that alias the same\ndatabase, services no live node offers, and the like.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
         "nodes",
-        "databases"
+        "databases",
+        "warnings"
       ]
     }
   }
