@@ -109,7 +109,12 @@ incompatible change.
 
 A node is **live** iff its heartbeat's `LastModified` (object-store clock)
 is younger than `heartbeat_timeout` by the reader's clock; skew shifts
-failover timing, never safety. On clean shutdown a node deletes its heartbeat,
+failover timing, never safety. Each tick, every node LISTs `nodes/` for
+liveness and GETs each live heartbeat for its body — O(nodes) requests. A
+node that changes its offered services (a restart with different
+`--services`) is, to the hash, a departure from one service's candidate
+pool and an arrival in another's, and converges the same way membership
+changes do. On clean shutdown a node deletes its heartbeat,
 handing its assignments off immediately. Any node deletes heartbeats older
 than 10× `heartbeat_timeout`.
 
