@@ -10,8 +10,14 @@
 
 pub mod config;
 pub mod heartbeat;
+pub mod placement;
+pub mod registry;
 pub mod render;
 pub mod response;
+
+/// The slatedb version compiled into this binary (from Cargo.lock via
+/// build.rs), carried in heartbeat bodies.
+pub const SLATEDB_VERSION: &str = env!("SLATEDB_VERSION");
 
 /// A type's JSON Schema, pretty-printed.
 pub(crate) fn schema_pretty<T: schemars::JsonSchema>() -> String {

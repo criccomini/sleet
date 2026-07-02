@@ -32,6 +32,19 @@ pub fn object_name(node_id: &str, services: &[Service]) -> String {
     format!("{node_id}.{letters}.json")
 }
 
+/// The node id and offered services a heartbeat object name encodes, if
+/// valid. Unknown service letters are ignored so newer nodes offering
+/// new services still parse.
+pub fn parse_object_name(name: &str) -> Option<(String, Vec<Service>)> {
+    let stem = name.strip_suffix(".json")?;
+    let (node_id, letters) = stem.rsplit_once('.')?;
+    if node_id.is_empty() {
+        return None;
+    }
+    let services = letters.chars().filter_map(Service::from_letter).collect();
+    Some((node_id.to_string(), services))
+}
+
 /// The body of a heartbeat object.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(title = "sleet heartbeat")]
@@ -106,6 +119,27 @@ mod tests {
         );
         assert_eq!(name, "sleet-1.cgw.json");
         assert_eq!(object_name("n", &[Service::Gc]), "n.g.json");
+    }
+
+    #[test]
+    fn object_names_roundtrip_and_reject_garbage() {
+        let (id, services) = parse_object_name("sleet-1.cgw.json").unwrap();
+        assert_eq!(id, "sleet-1");
+        assert_eq!(
+            services,
+            vec![
+                Service::CompactorCoordinator,
+                Service::Gc,
+                Service::CompactionWorkers
+            ]
+        );
+        // Unknown letters are ignored; the node still parses.
+        let (id, services) = parse_object_name("sleet-2.gx.json").unwrap();
+        assert_eq!(id, "sleet-2");
+        assert_eq!(services, vec![Service::Gc]);
+        assert_eq!(parse_object_name("no-extension.cgw"), None);
+        assert_eq!(parse_object_name("nodot.json"), None);
+        assert_eq!(parse_object_name(".g.json"), None);
     }
 
     #[test]

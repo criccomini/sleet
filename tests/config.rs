@@ -84,7 +84,7 @@ fn precedence_layers_apply_in_order() {
     assert_eq!(fleet.resolve(Some(&db)).services, vec![Service::Gc]);
     // Fields unset at every layer keep built-ins.
     assert_eq!(
-        fleet.resolve(Some(&db)).workers.poll_interval,
+        fleet.resolve(Some(&db)).workers.compactions_poll_interval,
         Duration::from_secs(5)
     );
 }

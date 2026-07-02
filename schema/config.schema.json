@@ -387,6 +387,17 @@
           "format": "uint64",
           "minimum": 0
         },
+        "compactions_poll_interval": {
+          "description": "How often workers poll `.compactions` for `Scheduled` jobs; sleet\nbacks the interval off exponentially while the database is idle.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "compression_codec": {
           "description": "Compression for SSTs the worker writes. Must match the writer's\n`compression_codec`.",
           "anyOf": [
@@ -405,15 +416,6 @@
             "null"
           ],
           "format": "uint32",
-          "minimum": 0
-        },
-        "heartbeat_bytes": {
-          "description": "Bytes a worker must process before emitting a heartbeat.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
           "minimum": 0
         },
         "heartbeat_min_interval": {
@@ -471,17 +473,6 @@
           ],
           "format": "uint32",
           "minimum": 0
-        },
-        "poll_interval": {
-          "description": "How often workers poll `.compactions` for `Scheduled` jobs; the\ninterval backs off exponentially while the database is idle.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/HumanDuration"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "additionalProperties": false

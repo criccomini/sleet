@@ -144,6 +144,23 @@ impl Service {
             Service::CompactionWorkers => 'w',
         }
     }
+
+    /// The service a heartbeat name letter encodes, if known.
+    pub fn from_letter(letter: char) -> Option<Self> {
+        match letter {
+            'g' => Some(Service::Gc),
+            'c' => Some(Service::CompactorCoordinator),
+            'w' => Some(Service::CompactionWorkers),
+            _ => None,
+        }
+    }
+
+    /// Every service, in heartbeat-letter order.
+    pub const ALL: [Service; 3] = [
+        Service::CompactorCoordinator,
+        Service::Gc,
+        Service::CompactionWorkers,
+    ];
 }
 
 /// Per-database service settings: the `[database]` table of `sleet.toml`
@@ -302,14 +319,10 @@ pub struct WorkersOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_concurrent_compactions: Option<u32>,
 
-    /// How often workers poll `.compactions` for `Scheduled` jobs; the
-    /// interval backs off exponentially while the database is idle.
+    /// How often workers poll `.compactions` for `Scheduled` jobs; sleet
+    /// backs the interval off exponentially while the database is idle.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub poll_interval: Option<HumanDuration>,
-
-    /// Bytes a worker must process before emitting a heartbeat.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub heartbeat_bytes: Option<u64>,
+    pub compactions_poll_interval: Option<HumanDuration>,
 
     /// Minimum wall-clock time between heartbeat writes.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -490,8 +503,7 @@ impl Default for ResolvedScheduler {
 pub struct ResolvedWorkers {
     pub count: u32,
     pub max_concurrent_compactions: u32,
-    pub poll_interval: Duration,
-    pub heartbeat_bytes: u64,
+    pub compactions_poll_interval: Duration,
     pub heartbeat_min_interval: Duration,
     pub max_sst_size: u64,
     pub max_fetch_tasks: u32,
@@ -507,8 +519,7 @@ impl Default for ResolvedWorkers {
         Self {
             count: 1,
             max_concurrent_compactions: 4,
-            poll_interval: Duration::from_secs(5),
-            heartbeat_bytes: 5 * 1024 * 1024,
+            compactions_poll_interval: Duration::from_secs(5),
             heartbeat_min_interval: Duration::from_secs(5),
             max_sst_size: 256 * 1024 * 1024,
             max_fetch_tasks: 4,
@@ -629,11 +640,8 @@ impl WorkersOverrides {
         if let Some(v) = self.max_concurrent_compactions {
             r.max_concurrent_compactions = v;
         }
-        if let Some(v) = self.poll_interval {
-            r.poll_interval = v.0;
-        }
-        if let Some(v) = self.heartbeat_bytes {
-            r.heartbeat_bytes = v;
+        if let Some(v) = self.compactions_poll_interval {
+            r.compactions_poll_interval = v.0;
         }
         if let Some(v) = self.heartbeat_min_interval {
             r.heartbeat_min_interval = v.0;
@@ -865,10 +873,10 @@ fn check_database(o: &DatabaseConfig, at: &str, errs: &mut Vec<String>) {
                 loc(at, &format!("{cw}.max_concurrent_compactions"))
             ));
         }
-        if w.poll_interval.is_some_and(|d| d.0.is_zero()) {
+        if w.compactions_poll_interval.is_some_and(|d| d.0.is_zero()) {
             errs.push(format!(
                 "{} must be > 0",
-                loc(at, &format!("{cw}.poll_interval"))
+                loc(at, &format!("{cw}.compactions_poll_interval"))
             ));
         }
         if w.max_fetch_tasks == Some(0) {
