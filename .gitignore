@@ -1,2 +1,3 @@
 /target
 specs/out/
+specs/*.json
