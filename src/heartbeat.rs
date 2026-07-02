@@ -5,7 +5,7 @@
 //! the name carries the node id and its offered services, and
 //! `LastModified` carries liveness. `<services>` is the offered
 //! services' letters (`c` = compactor-coordinator, `g` = gc, `w` =
-//! compaction-workers) sorted ascending — e.g. `sleet-1.cgw.json`. Node
+//! compaction-workers) sorted ascending, e.g. `sleet-1.cgw.json`. Node
 //! ids must not contain `.`.
 //!
 //! The body is observability-only, read by `sleet status` and never
@@ -24,8 +24,8 @@ use crate::config::Service;
 pub const VERSION: u32 = 1;
 
 /// Check a node id for use in heartbeat object names: nonempty, at most
-/// 128 chars of `[A-Za-z0-9_-]` — in particular no `.`, the name
-/// separator, and no `/`.
+/// 128 chars of `[A-Za-z0-9_-]`. In particular no `.` (the name
+/// separator) and no `/`.
 pub fn validate_node_id(node_id: &str) -> Result<String, String> {
     let ok = !node_id.is_empty()
         && node_id.len() <= 128
@@ -99,8 +99,8 @@ impl Heartbeat {
     }
 }
 
-/// Aggregate task states for one offered service. Counts, not
-/// per-database detail: a node may own tasks for many thousands of
+/// Aggregate task states for one offered service. Only counts are
+/// reported, because a node may own tasks for many thousands of
 /// databases.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ServiceSummary {

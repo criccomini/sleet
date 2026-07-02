@@ -7,8 +7,8 @@
 //! churn drives the fleet, and after quiescence the invariants must
 //! hold: every pair owned by exactly its ranked node, nothing crashed,
 //! and the outcome reproduces from the seed. Separate cadence tests pin
-//! the daemon's timing — heartbeat interval, config poll, failover
-//! latency — against exact virtual time.
+//! the daemon's timing (heartbeat interval, config poll, failover
+//! latency) against exact virtual time.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -251,8 +251,8 @@ async fn fizz_spec_traces_drive_the_daemon() {
     }
     steps.sort();
 
-    // Replay: spec node Node#i is daemon node n(i+1); databases and
-    // rankings differ from the spec's — the invariant is placement
+    // Replay: spec node Node#i is daemon node n(i+1). Databases and
+    // rankings differ from the spec's; the invariant is placement
     // against the real frozen hash, same as the spec's Converged.
     let mut sim = Sim::new(11).await;
     for id in ["n1", "n2", "n3"] {
@@ -324,7 +324,7 @@ async fn cadences_follow_virtual_time() {
 
 /// Failover latency, measured in virtual time: after an unclean crash
 /// the survivor owns the pair within heartbeat_timeout plus a couple of
-/// intervals — the design's stated bound.
+/// intervals, the design's stated bound.
 #[tokio::test(start_paused = true)]
 async fn failover_latency_is_bounded_in_virtual_time() {
     let mut sim = Sim::new(2).await;

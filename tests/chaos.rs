@@ -1,7 +1,7 @@
 //! Chaos tests: multi-node fleets under injected store faults, an
 //! asymmetric partition, and reader clock skew. Every run asserts the
-//! design's invariants — no panics, ownership converges after faults
-//! stop, and duplication is the worst case — never specific
+//! design's invariants (no panics, ownership converges after faults
+//! stop, and duplication is the worst case) rather than specific
 //! interleavings.
 
 mod common;
@@ -29,7 +29,7 @@ async fn faulted_fleet_converges_after_healing() {
     }
     // Wait for every node's first heartbeat before injecting faults: a
     // fault on a node's *initial* config read would leave it on
-    // built-in defaults (10s heartbeat), which isn't the scenario —
+    // built-in defaults (10s heartbeat), which isn't the scenario;
     // the design assumes a node reads its config once before faults.
     for id in ids {
         poll_until("node heartbeats before faults", || async {
@@ -110,7 +110,7 @@ async fn partitioned_node_is_taken_over_and_rejoins() {
 
 /// A reader whose clock is skewed far past `heartbeat_timeout` declares
 /// every peer dead and takes over the whole fleet. That is the design's
-/// stated worst case — a double-run — and it must be stable and safe:
+/// stated worst case, a double-run, and it must be stable and safe:
 /// the unskewed node keeps its ranked share, the skewed node runs
 /// everything, and nobody crashes.
 #[tokio::test(flavor = "multi_thread")]

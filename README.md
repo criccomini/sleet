@@ -1,10 +1,10 @@
 # sleet
 
 A fleet manager for [SlateDB](https://slatedb.io) databases. `sleet`
-runs their background services — garbage collection, compaction
-coordination, and compaction execution — outside the writer process,
-for millions of databases from a small pool of nodes, with no
-dependencies beyond object storage.
+runs their background services (garbage collection, compaction
+coordination, and compaction execution) outside the writer process. It
+is built to manage millions of databases from a small pool of nodes,
+with no dependencies beyond object storage.
 
 **Status: early development.** The daemon, services, and CLI are
 implemented against SlateDB 0.14; mirroring and auto-discovery are

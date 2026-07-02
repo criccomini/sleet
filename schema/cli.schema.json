@@ -157,7 +157,7 @@
       ]
     },
     "ServicePlacement": {
-      "description": "Where one database service runs: the top of the service's rendezvous\nranking — one node for `gc` and `compactor-coordinator`, the top\n`count` nodes for `compaction-workers`. Empty means no live node\noffers the service.",
+      "description": "Where one database service runs: the top of the service's rendezvous\nranking. One node for `gc` and `compactor-coordinator`, the top\n`count` nodes for `compaction-workers`. Empty means no live node\noffers the service.",
       "type": "object",
       "properties": {
         "nodes": {

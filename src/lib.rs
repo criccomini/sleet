@@ -1,6 +1,6 @@
 //! `sleet` is a fleet manager for [SlateDB](https://slatedb.io)
-//! databases: it runs their background services — garbage collection,
-//! compaction coordination, and compaction execution — outside the
+//! databases: it runs their background services (garbage collection,
+//! compaction coordination, and compaction execution) outside the
 //! writer process. See DESIGN.md for the design.
 //!
 //! This crate currently defines the formats and CLI surface: the fleet

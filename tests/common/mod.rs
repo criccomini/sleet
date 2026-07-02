@@ -2,8 +2,8 @@
 //! store, observable through heartbeat bodies and `sleet status`.
 //!
 //! Registered databases are plain URLs, not real SlateDB databases:
-//! their service tasks fail and back off, which is fine — ownership,
-//! liveness, and reconciliation are what these tests exercise.
+//! their service tasks fail and back off, which is fine because these
+//! tests exercise ownership, liveness, and reconciliation.
 
 // Each test binary compiles this module separately and uses a subset.
 #![allow(dead_code)]

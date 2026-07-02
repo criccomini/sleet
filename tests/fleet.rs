@@ -301,8 +301,8 @@ async fn gc_deletes_superseded_ssts() {
     .await;
 
     // SlateDB's commit protocol checkpoints the pre-commit manifest for
-    // 15 minutes, pinning the superseded L0s — GC rightly honors it.
-    // Release the pin so deletion is observable within the test; in
+    // 15 minutes, pinning the superseded L0s, and GC honors the pin.
+    // Release it so deletion is observable within the test; in
     // production GC simply lags a compaction by that checkpoint.
     {
         let db = DatabaseHandle::open(&db_url).unwrap();
@@ -327,7 +327,7 @@ async fn gc_deletes_superseded_ssts() {
 
 /// Two coordinators on one database self-resolve: the newer fences the
 /// older, `compactor_epoch` only advances, and the survivor keeps
-/// running — the safety half of the fenced-coordinators design.
+/// running. This is the safety half of the fenced-coordinators design.
 #[tokio::test(flavor = "multi_thread")]
 async fn coordinator_duel_self_resolves() {
     use sleet::config::ResolvedServices;
@@ -369,7 +369,7 @@ async fn coordinator_duel_self_resolves() {
         }
     });
 
-    // A is fenced; the exchange is bounded — B survives.
+    // A is fenced; the exchange is bounded and B survives.
     let a_result = tokio::time::timeout(Duration::from_secs(30), a)
         .await
         .expect("fenced coordinator exits")
@@ -444,7 +444,10 @@ async fn worker_semaphore_gates_and_releases() {
     {
         let db = DatabaseHandle::open(&db_url).unwrap();
         let depth = queue_depth(&db.admin).await.unwrap();
-        assert!(depth.claimable > 0, "no permit, no claims: {depth:?}");
+        assert!(
+            depth.claimable > 0,
+            "worker must not claim without a permit: {depth:?}"
+        );
         assert_eq!(depth.running, 0);
     }
 

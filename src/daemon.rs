@@ -7,8 +7,8 @@
 //! `sleet.toml` and the registry. On clean shutdown it deletes its
 //! heartbeat, handing its assignments off immediately.
 //!
-//! Assignment is purely an efficiency mechanism: every failure mode
-//! here at worst double-runs a service, which SlateDB's fencing and CAS
+//! Assignment is an efficiency mechanism only: every failure mode here
+//! at worst double-runs a service, which SlateDB's fencing and CAS
 //! claims make safe. A stale live-set read keeps the previous
 //! assignments; a fenced coordinator waits one heartbeat interval and
 //! reruns only if the next recompute still owns the pair.
@@ -205,7 +205,7 @@ impl Node {
 
     /// The assignments this node owns: for every registered database
     /// and configured service, the top of the rendezvous ranking over
-    /// live nodes offering the service — top 1 for gc and coordinator,
+    /// live nodes offering the service; top 1 for gc and coordinator,
     /// top `count` for workers.
     fn owned_assignments(
         &self,
@@ -213,11 +213,11 @@ impl Node {
         state: &FleetState,
     ) -> HashMap<Assignment, Arc<ResolvedServices>> {
         let mut nodes = node_view(entries, state.config.node.heartbeat_timeout.0);
-        // A node always counts itself live: it cannot observe its own
-        // death, and reading its own heartbeat as stale (a skewed clock,
-        // a slow PUT) must not make it abandon its share — peers that
-        // agree it is dead take over in parallel, a safe double-run,
-        // whereas self-exclusion would orphan the share entirely.
+        // A node always counts itself live. Reading its own heartbeat
+        // as stale (a skewed clock, a slow PUT) must not make it drop
+        // its share: peers that consider it dead take over in parallel,
+        // which is a safe double-run, whereas excluding itself would
+        // leave the share unowned.
         if !nodes.iter().any(|n| n.node_id == self.options.node_id) {
             nodes.push(crate::root::NodeView {
                 node_id: self.options.node_id.clone(),
@@ -301,9 +301,9 @@ impl Node {
 }
 
 /// Supervise one `(database, service)` task: run it, restart with
-/// backoff on failure. A fence is treated as view skew, not a plain
-/// failure: wait one heartbeat interval — giving the rival time to
-/// refresh and stand down — then rerun; if the pair has actually moved,
+/// backoff on failure. A fence is treated as view skew rather than a
+/// plain failure: wait one heartbeat interval (giving the rival time to
+/// refresh and stand down), then rerun; if the pair has actually moved,
 /// the daemon's next ownership recompute cancels this task.
 async fn supervise(
     key: Assignment,
@@ -522,8 +522,9 @@ mod tests {
         let n3 = node("n3", &Service::ALL).owned_assignments(&entries, &dbs);
         assert!(n1.contains_key(&worker_key) && n2.contains_key(&worker_key));
         // n3's own heartbeat reads as stale (its clock may be wrong),
-        // but self-liveness is axiomatic: it keeps exactly the share it
-        // wins over the full candidate set, same as everyone else.
+        // but a node always counts itself live: it keeps exactly the
+        // share it wins over the full candidate set, same as everyone
+        // else.
         for key in n3.keys() {
             let (url, service) = key;
             let count = if *service == Service::CompactionWorkers {

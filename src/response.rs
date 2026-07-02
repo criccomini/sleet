@@ -92,7 +92,7 @@ pub struct QueueStatus {
 }
 
 /// Where one database service runs: the top of the service's rendezvous
-/// ranking — one node for `gc` and `compactor-coordinator`, the top
+/// ranking. One node for `gc` and `compactor-coordinator`, the top
 /// `count` nodes for `compaction-workers`. Empty means no live node
 /// offers the service.
 #[derive(Clone, Debug, Serialize, JsonSchema)]

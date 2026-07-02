@@ -1,4 +1,4 @@
-//! Text rendering for subcommand responses — the human-readable half of
+//! Text rendering for subcommand responses: the human-readable half of
 //! the CLI. `--format json` bypasses this layer entirely, so every
 //! response type carries data only and presentation lives here.
 //!

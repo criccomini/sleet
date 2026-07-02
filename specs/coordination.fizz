@@ -1,22 +1,22 @@
 ---
 # sleet's coordination protocol (DESIGN.md, Assignment and failover):
 # nodes heartbeat to shared storage; each reader judges liveness from
-# heartbeat freshness (counting itself live axiomatically); ownership
+# heartbeat freshness (always counting itself live); ownership
 # of each database is the top of a frozen ranking over the reader's
 # live view; coordinators fence predecessors on acquisition (the
 # compactor_epoch abstraction: `holder` is the current epoch owner,
 # and a newly acquired holder fences whoever else is running).
 #
 # Checked claims:
-# - CurrentHolderNeverFenced: fencing is ordered — the newest acquirer
+# - CurrentHolderNeverFenced: fencing is ordered; the newest acquirer
 #   is never itself fenced.
 # - DoubleRunReachable: the design's stated worst case (a transient
 #   double-run) is actually explored, not vacuously absent.
 # - Converged (eventually always): after churn stops, every database
 #   is run by exactly the top-ranked alive node, with no fenced tasks
-#   left — convergence and the absence of fence livelock in one
-#   property (a livelock would flap runners/fenced forever and violate
-#   eventually-always).
+#   left. This checks convergence and the absence of fence livelock in
+#   one property (a livelock would flap runners/fenced forever and
+#   violate eventually-always).
 options:
   max_actions: 30
   max_concurrent_actions: 1
@@ -134,7 +134,7 @@ always assertion OnlyAliveNodesRun:
                 return False
     return True
 
-# The design's stated worst case — a transient double-run — really is
+# The design's stated worst case, a transient double-run, is
 # reachable in the model.
 exists assertion DoubleRunReachable:
     return len([db for db in DBS if len(runners[db]) > 1]) > 0

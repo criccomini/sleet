@@ -59,7 +59,7 @@
       ]
     },
     "ServiceSummary": {
-      "description": "Aggregate task states for one offered service. Counts, not\nper-database detail: a node may own tasks for many thousands of\ndatabases.",
+      "description": "Aggregate task states for one offered service. Only counts are\nreported, because a node may own tasks for many thousands of\ndatabases.",
       "type": "object",
       "properties": {
         "backoff": {

@@ -1,7 +1,7 @@
 //! Rendezvous placement: which nodes own a `(database, service)`.
 //!
-//! Every live node offering a service gets a score — a hash of the pair
-//! combined with the node's id — and the ranking assigns owners: `gc`
+//! Every live node offering a service gets a score (a hash of the pair
+//! combined with the node's id), and the ranking assigns owners: `gc`
 //! and `compactor-coordinator` run on the top-ranked node,
 //! `compaction-workers` on the top `count` nodes. Removing a node moves
 //! only the pairs it owned; adding one moves only the pairs it now wins.
@@ -51,7 +51,7 @@ pub fn rank<'a>(database: &str, service: Service, candidates: &[&'a str]) -> Vec
 }
 
 /// The owners of a `(database, service)`: the top `count` of the
-/// ranking — `count` is 1 for `gc` and `compactor-coordinator`, the
+/// ranking. `count` is 1 for `gc` and `compactor-coordinator`, and the
 /// database's `compaction-workers.count` for workers.
 pub fn owners<'a>(
     database: &str,

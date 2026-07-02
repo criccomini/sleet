@@ -1,5 +1,5 @@
 //! Real S3 semantics via MinIO in Docker: conditional PUTs, ETags, and
-//! LIST pagination — the behaviors `file://` and `memory://` don't
+//! LIST pagination, the behaviors `file://` and `memory://` don't
 //! exercise. Skips (with a note) when Docker isn't available.
 
 use std::process::Command;

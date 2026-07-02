@@ -1,4 +1,4 @@
-//! The checked-in JSON Schemas must accept real documents — the drift
+//! The checked-in JSON Schemas must accept real documents. The drift
 //! test only proves generation is stable, not that documents validate.
 
 use jsonschema::Validator;

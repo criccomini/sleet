@@ -3,12 +3,12 @@
 //! promises the frozen formats make to mixed-version fleets.
 //!
 //! Each `tests/corpus/v<version>/` directory holds:
-//! - `heartbeat.json` — a heartbeat body; must still deserialize.
-//! - `config.toml`, `db.toml` — fleet and registry configs; must still
+//! - `heartbeat.json`: a heartbeat body; must still deserialize.
+//! - `config.toml`, `db.toml`: fleet and registry configs; must still
 //!   parse and validate.
-//! - `registry-names.tsv` — `url <tab> file_name`; the current encoder
+//! - `registry-names.tsv`: `url <tab> file_name`; the current encoder
 //!   must produce and decode the same names.
-//! - `placement-scores.tsv` — `db <tab> service <tab> node <tab> hex`;
+//! - `placement-scores.tsv`: `db <tab> service <tab> node <tab> hex`;
 //!   the current hash must produce identical scores.
 //!
 //! Cut a new corpus directory at each release with:
@@ -98,7 +98,7 @@ fn service_by_name(name: &str) -> Service {
         .unwrap_or_else(|| panic!("unknown service {name:?} in corpus"))
 }
 
-/// Every corpus directory — one per past release — must parse and
+/// Every corpus directory (one per past release) must parse and
 /// re-verify with the current code.
 #[test]
 fn corpus_of_every_release_still_parses() {

@@ -4,7 +4,7 @@
 //! Every runner takes a `CancellationToken` and blocks until cancelled
 //! or failed. Safety is SlateDB's: GC deletes are idempotent,
 //! coordinators are fenced by `compactor_epoch`, and workers claim jobs
-//! by CAS — sleet only decides where these loops run.
+//! by CAS. sleet only decides where these loops run.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -333,7 +333,7 @@ mod tests {
     /// toward the ceiling instead of polling at the base interval.
     /// Under paused time, 1000 virtual seconds of a 1s base interval
     /// would mean ~1000 reads without backoff; with it, wakeups follow
-    /// 1, 2, 4, ... capped at 300s — a handful of reads.
+    /// 1, 2, 4, ... capped at 300s, so only a handful of reads.
     #[tokio::test(start_paused = true)]
     async fn worker_polling_backs_off_while_idle() {
         use crate::testing::{Op, TestStore};

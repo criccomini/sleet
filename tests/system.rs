@@ -74,8 +74,8 @@ async fn sigint_shuts_down_cleanly_and_deletes_the_heartbeat() {
 
 /// A worker killed with SIGKILL mid-job leaves a claimed entry behind;
 /// the coordinator reclaims it after `worker_heartbeat_timeout` and a
-/// replacement worker completes it — SlateDB's safety surviving a real
-/// process crash under sleet's scheduling.
+/// replacement worker completes it. SlateDB's reclaim protocol survives
+/// a real process crash under sleet's scheduling.
 #[tokio::test(flavor = "multi_thread")]
 async fn sigkill_mid_compaction_is_reclaimed_and_completed() {
     let dir = tempfile::tempdir().unwrap();

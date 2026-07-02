@@ -1,7 +1,7 @@
 //! Test support: the seams TESTS.md's chaos and DST levels need.
 //!
 //! `TestStore` decorates any `ObjectStore` with per-operation counters,
-//! deterministic fault injection, and — when given a `TestClock` — a
+//! deterministic fault injection, and, when given a `TestClock`, a
 //! simulated `LastModified`, so heartbeat ages follow virtual time
 //! instead of the wall clock. `TestClock` also implements
 //! `crate::root::Clock` for injection into `FleetRoot`.

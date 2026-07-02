@@ -114,7 +114,7 @@ pub async fn status(root: &FleetRoot, queues: bool) -> Result<StatusResponse, Op
     })
 }
 
-/// Every fleet member with a heartbeat object — dead or alive — with
+/// Every fleet member with a heartbeat object, dead or alive, with
 /// versions from the youngest body per node.
 async fn node_statuses(
     root: &FleetRoot,

@@ -42,7 +42,7 @@ pub enum UrlError {
 }
 
 /// Canonicalize a database URL: lowercase scheme and host, drop trailing
-/// slashes. One database, one spelling.
+/// slashes. This keeps each database to a single spelling.
 pub fn canonicalize_url(url: &str) -> Result<String, UrlError> {
     let mut parsed = url::Url::parse(url).map_err(|source| UrlError::Invalid {
         url: url.into(),

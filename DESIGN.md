@@ -1,8 +1,8 @@
-# sleet — a SlateDB fleet manager
+# sleet: a SlateDB fleet manager
 
 `sleet` operates fleets of [SlateDB](https://slatedb.io) databases. It runs
-their background services — garbage collection, compaction coordination, and
-compaction execution — outside the writer process, for deployments that
+their background services (garbage collection, compaction coordination, and
+compaction execution) outside the writer process, for deployments that
 choose to run them separately.
 
 ## Goals
@@ -12,9 +12,10 @@ choose to run them separately.
 - Register databases explicitly, with the CLI or by writing
   `dbs/<db>.toml`.
 - No dependencies beyond object storage. Mutual exclusion comes from
-  SlateDB's primitives — manifest CAS, epoch fencing, and `.compactions`
-  claims (RFC-0001, RFC-0013, RFC-0025). `sleet` stores no assignment state:
-  ownership is a pure function of shared fleet state in object storage.
+  SlateDB's primitives: manifest CAS, epoch fencing, and `.compactions`
+  claims (RFC-0001, RFC-0013, RFC-0025). `sleet` stores no assignment
+  state; ownership is a pure function of shared fleet state in object
+  storage.
 - Safety never depends on `sleet`'s own scheduling. Duplicate or stale
   `sleet` processes must be harmless.
 
@@ -28,8 +29,8 @@ choose to run them separately.
 
 ## Architecture
 
-`sleet`'s entire state — policy, the database registry, and node liveness —
-lives under a single object-store URL, the **fleet root**. Nodes are
+All of `sleet`'s state (policy, the database registry, and node liveness)
+lives under a single object-store URL called the **fleet root**. Nodes are
 stateless, interchangeable processes pointed at the root:
 
 ```
@@ -77,7 +78,7 @@ bounds on the resolved settings.
 
 Nodes re-read `sleet.toml` and LIST `dbs/` every `config_poll`; on a
 failed read a node keeps the last good config. The listing carries each
-entry's size and ETag, so empty registry files — the common case — are
+entry's size and ETag, so empty registry files (the common case) are
 never fetched, and override files are fetched only when their ETag
 changes.
 
@@ -92,14 +93,14 @@ that alias after canonicalization. A file's contents are exactly a
 `[database]` table: any field `sleet.toml`'s `[database]` section accepts
 may be set per database, and set fields override the fleet-wide value:
 
-- absent file — unregistered.
-- empty file — managed with the fleet-wide config.
-- `services = []` — registered but disabled; no services run.
+- absent file: unregistered.
+- empty file: managed with the fleet-wide config.
+- `services = []`: registered but disabled; no services run.
 
 Deleting the file unregisters the database.
 
 Effective config is resolved per-field at read time by the assignment
-owner: built-in defaults → `[database]` → `dbs/<db>.toml`. Unset fields
+owner: built-in defaults -> `[database]` -> `dbs/<db>.toml`. Unset fields
 fall through to the previous layer.
 
 ### Nodes and liveness
@@ -107,10 +108,10 @@ fall through to the previous layer.
 Each node PUTs a heartbeat at `nodes/<node_id>.<services>.json` every
 `heartbeat_interval`, where `<services>` is the offered services' letters
 (`c` = compactor-coordinator, `g` = gc, `w` = compaction-workers) sorted
-ascending — e.g. `sleet-1.cgw.json`; node ids must not contain `.`. Everything
-assignment needs is in the listing — names carry roles, `LastModified`
-carries liveness — so one LIST of `nodes/` per tick is the only read;
-heartbeat bodies are never fetched for placement.
+ascending, e.g. `sleet-1.cgw.json`; node ids must not contain `.`.
+Everything assignment needs is in the listing: names carry roles and
+`LastModified` carries liveness, so one LIST of `nodes/` per tick is the
+only read, and heartbeat bodies are never fetched for placement.
 The body carries the node's `sleet` and `slatedb` versions and summary
 service states for `sleet status`; it is defined by the structs in
 `src/heartbeat.rs` (`schema/heartbeat.schema.json`). Readers ignore
@@ -119,68 +120,70 @@ on incompatible change.
 
 A node is **live** iff its heartbeat's `LastModified` (object-store clock)
 is younger than `heartbeat_timeout` by the reader's clock; skew shifts
-failover timing, never safety. A node always counts itself live, whatever
-its own heartbeat's age reads: it cannot observe its own death, and peers
-that disagree take over in parallel — a double-run at worst, where
-self-exclusion would orphan its share. A node that changes its offered services
-restarts under a new heartbeat name and deletes its old one at startup; if
-both are briefly visible, the youngest name per `node_id` wins. To the
-hash, a role change is a departure from one service's candidate pool and
-an arrival in another's, converging like any membership change. On clean
-shutdown a node deletes its heartbeat, handing its assignments off
-immediately. Any node deletes heartbeats older than 10×
+failover timing but not safety. A node always counts itself live, even
+when its own heartbeat reads as stale: a node cannot reliably judge its
+own death, and peers that believe it dead take over in parallel, so the
+worst case is a double-run, whereas excluding itself would leave its
+share unowned. A node that changes its offered services restarts under a
+new heartbeat name and deletes its old one at startup; if both are
+briefly visible, the youngest name per `node_id` wins. To the hash, a
+role change is a departure from one service's candidate pool and an
+arrival in another's, and converges like any other membership change. On
+clean shutdown a node deletes its heartbeat, handing its assignments off
+immediately. Any node deletes heartbeats older than 10x
 `heartbeat_timeout`.
 
 ### Assignment and failover
 
 Ownership is decided by rendezvous hashing. For a given `(database,
 service)`, every live node whose heartbeat offers that service gets a
-score — the hash of the pair combined with the node's id — and the
-ranking assigns owners: `gc` and `compactor-coordinator` run on the
-top-ranked node, and `compaction-workers` runs on the top `count` nodes —
-`count` distinct pollers per database, or every offering node if there
-are fewer. Removing a node moves only the pairs it
-owned; adding one moves only the pairs it now wins. Every node recomputes
-ownership each heartbeat tick from the same shared inputs — the `dbs/`
-registry and the live set — and runs exactly the pairs it owns. No
-assignment state is stored. The hash and its key encoding are frozen,
-like a wire format, so mixed-version fleets compute identical placements.
+score, the hash of the pair combined with the node's id, and the ranking
+assigns owners: `gc` and `compactor-coordinator` run on the top-ranked
+node, and `compaction-workers` runs on the top `count` nodes (`count`
+distinct pollers per database, or every offering node if there are
+fewer). Removing a node moves only the pairs it owned; adding one moves
+only the pairs it now wins. Every node recomputes ownership each
+heartbeat tick from the same shared inputs, the `dbs/` registry and the
+live set, and runs exactly the pairs it owns. No assignment state is
+stored. The hash and its key encoding are frozen, like a wire format, so
+mixed-version fleets compute identical placements.
 
 All views derive from the shared tree, so they converge within one
 `config_poll` (registry) plus one `heartbeat_interval` (liveness). Until
-they do, a pair may briefly run on two nodes — safe — or on none, delaying
-it by at most one poll. A dead node's pairs redistribute within
-~`heartbeat_timeout`; a joining node takes only the pairs it now wins.
+they do, a pair may briefly run on two nodes, which is safe, or on none,
+which delays it by at most one poll. A dead node's pairs redistribute
+within ~`heartbeat_timeout`; a joining node takes only the pairs it now
+wins.
 
-Assignment is purely an efficiency mechanism: every failure mode — stale
-reads, clock skew, partitions — at worst double-runs a service, which
-SlateDB's fencing and CAS claims make safe. The hash pushes only
+Assignment is an efficiency mechanism only: every failure mode (stale
+reads, clock skew, partitions) at worst double-runs a service, and
+SlateDB's fencing and CAS claims make that safe. The hash places only
 lightweight polling loops; the expensive work, compaction execution, is
 pulled through `.compactions` job claims and bounded by node capacity
 caps.
 
 Nodes must be able to reach every registered database for the services
-they offer; placement is capability-blind by construction.
+they offer; placement does not consider reachability.
 
 #### Fenced coordinators
 
 A running coordinator can be fenced by `compactor_epoch` at any time: it
 means another node started a coordinator for the same database, so the
-two disagree about ownership. Fencing is treated as a signal of view
-skew, not a plain failure. Instead of blindly restarting, the fenced
-task refreshes its inputs — re-reads `nodes/` and the database's
-registry entry — and recomputes ownership:
+two disagree about ownership. `sleet` treats fencing as a sign of view
+skew rather than an ordinary failure. Instead of restarting blindly, the
+fenced task refreshes its inputs (re-reads `nodes/` and the database's
+registry entry) and recomputes ownership:
 
-- still the owner — restart the coordinator after one
+- Still the owner: restart the coordinator after one
   `heartbeat_interval`. Restarting bumps `compactor_epoch` and fences
   the rival, which follows this same rule, refreshes, computes that it
   lost, and stands down.
-- no longer the owner — stop; the pair has moved.
+- No longer the owner: stop; the pair has moved.
 
 The wait gives the rival time to refresh and stand down before the
-re-fence lands. Mutual fencing lasts only as long as views diverge —
-bounded by one `config_poll` plus one `heartbeat_interval` — and costs a
-brief compaction stall, never correctness.
+re-fence lands. Mutual fencing lasts only as long as views diverge,
+bounded by one `config_poll` plus one `heartbeat_interval`, and costs
+nothing more than a brief compaction stall.
 
 ### Process model
 
@@ -188,7 +191,7 @@ brief compaction stall, never correctness.
 node-specific: `--node-id` (required; ids must be unique within a fleet),
 `--services` (default: all services), and capacity caps defaulted from
 the machine (e.g. maximum concurrent compaction jobs). Heterogeneous
-fleets run the same binary with different flags — e.g. large machines
+fleets run the same binary with different flags, e.g. large machines
 with `--services compaction-workers`. Each owned assignment is a
 supervised task built on the `slatedb::Admin` API, restarted with backoff
 on failure. One-shot subcommands read the fleet root and object storage;
@@ -210,7 +213,7 @@ concurrent GCs perform redundant but idempotent deletes.
 
 ### 2. Compactor coordinators
 
-Runs the SlateDB `Compactor` per database with `worker: None` — the
+Runs the SlateDB `Compactor` per database with `worker: None`, the
 standalone coordinator mode from RFC-0025 (`slatedb run-compactor
 --no-embedded-worker`). The coordinator polls the manifest, schedules
 compactions via the configured `CompactionScheduler`, writes `Scheduled`
@@ -227,10 +230,10 @@ stall.
 Runs SlateDB `CompactionWorker`s (RFC-0025 / `slatedb run-worker`) against
 each database for which the node ranks in the top `count` workers.
 Workers are stateless: they poll `.compactions` for `Scheduled` jobs,
-claim them by CAS, execute (with
-subcompaction parallelism per RFC-0028), heartbeat, and write back
-`Compacted`. Per-database poll intervals back off exponentially while a
-database is idle, so mostly-idle fleets cost little.
+claim them by CAS, execute (with subcompaction parallelism per
+RFC-0028), heartbeat, and write back `Compacted`. Per-database poll
+intervals back off exponentially while a database is idle, so
+mostly-idle fleets cost little.
 
 The ranking bounds who polls; job claims arbitrate execution, so overlap
 from reassignment at worst loses a claim race. Per-database parallelism
@@ -242,7 +245,7 @@ competing for its jobs, or every worker node if the pool is smaller.
 Coordination cost scales with nodes, not databases. Each node PUTs one
 heartbeat and LISTs `nodes/` once per tick; assignment is computed in
 memory, never written, and needs recomputing only when the registry or a
-candidate set changes. Failover latency — one `heartbeat_timeout` — is
+candidate set changes. Failover latency is one `heartbeat_timeout`,
 independent of database count.
 
 Fleet state scales with databases: one registry object each, written at
@@ -252,9 +255,8 @@ first thing to replace with an inventory feed (open question 1).
 
 Steady-state traffic against the databases themselves scales with how many
 are managed: GC and coordinators poll each one on their configured
-intervals, and worker polling backs off while a database is idle. The
-intervals are the lever — a million mostly-idle databases are affordable
-to the degree their poll floors are long.
+intervals, and worker polling backs off while a database is idle. Long
+poll floors are what make a million mostly-idle databases affordable.
 
 ## Observability
 
@@ -262,8 +264,8 @@ to the degree their poll floors are long.
   derives fleet state from the tree: node liveness, roles, and versions
   from `nodes/`, intent from `sleet.toml` and `dbs/`, placement by
   computing the same rendezvous ranking, and compaction queue depth from
-  `.compactions` (behind `--queues`: one read per database). Services no
-  live node offers are reported, not silent.
+  `.compactions` (behind `--queues`: one read per database). If no live
+  node offers a service, `status` says so.
 - Structured logs per `(database, service)`.
 
 ## Crate layout
@@ -287,7 +289,7 @@ Depends on `slatedb` (`Admin` drives GC, coordinators, and workers) and
 ## Future work
 
 - **Mirroring**: continuously replicate a database into another bucket (same
-  or different cloud) via manifest-driven copy — copy each manifest's SST
+  or different cloud) via manifest-driven copy: copy each manifest's SST
   diff, then conditional-PUT the manifest as the commit point, with a source
   checkpoint and a `GcFilter` protecting not-yet-copied files from GC.
 - **Elastic workers**: size worker pools or per-database `count` from
