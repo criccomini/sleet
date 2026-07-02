@@ -113,8 +113,21 @@ fn default_config_poll() -> HumanDuration {
 }
 
 /// A per-database service.
+// Declaration order is the canonical listing order (`Ord`,
+// `Service::ALL`, status output).
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, clap::ValueEnum,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    clap::ValueEnum,
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum Service {
@@ -127,6 +140,8 @@ pub enum Service {
 }
 
 impl Service {
+    /// The service's kebab-case name, e.g. `compactor-coordinator`, as
+    /// used in config `services` lists and CLI output.
     pub fn as_str(self) -> &'static str {
         match self {
             Service::Gc => "gc",
@@ -155,10 +170,10 @@ impl Service {
         }
     }
 
-    /// Every service, in heartbeat-letter order.
+    /// Every service, in canonical order.
     pub const ALL: [Service; 3] = [
-        Service::CompactorCoordinator,
         Service::Gc,
+        Service::CompactorCoordinator,
         Service::CompactionWorkers,
     ];
 }
@@ -364,9 +379,13 @@ pub struct WorkersOverrides {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CompressionCodec {
+    /// Snappy.
     Snappy,
+    /// Zlib (deflate).
     Zlib,
+    /// LZ4.
     Lz4,
+    /// Zstandard.
     Zstd,
 }
 
@@ -377,20 +396,20 @@ pub enum CompressionCodec {
 /// Fully resolved service settings for one database.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedServices {
+    /// Which services run for the database.
     pub services: Vec<Service>,
+    /// Garbage collection settings.
     pub gc: ResolvedGc,
+    /// Compaction coordinator settings.
     pub coordinator: ResolvedCoordinator,
+    /// Compaction worker settings.
     pub workers: ResolvedWorkers,
 }
 
 impl Default for ResolvedServices {
     fn default() -> Self {
         Self {
-            services: vec![
-                Service::Gc,
-                Service::CompactorCoordinator,
-                Service::CompactionWorkers,
-            ],
+            services: Service::ALL.to_vec(),
             gc: ResolvedGc::default(),
             coordinator: ResolvedCoordinator::default(),
             workers: ResolvedWorkers::default(),
@@ -398,13 +417,21 @@ impl Default for ResolvedServices {
     }
 }
 
+/// Resolved garbage collection settings, per SlateDB resource
+/// directory.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedGc {
+    /// The manifest directory.
     pub manifest: ResolvedGcDirectory,
+    /// The WAL directory.
     pub wal: ResolvedGcDirectory,
+    /// Zero-byte WAL fence objects.
     pub wal_fence: ResolvedGcDirectory,
+    /// The compacted SST directory.
     pub compacted: ResolvedGcDirectory,
+    /// The compactions directory (`.compactions` job state).
     pub compactions: ResolvedGcDirectory,
+    /// The clone-detach pass.
     pub detach: ResolvedGcDetach,
 }
 
@@ -427,11 +454,16 @@ impl Default for ResolvedGc {
     }
 }
 
+/// Resolved GC settings for one resource directory.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedGcDirectory {
+    /// Whether GC runs for this directory.
     pub enabled: bool,
+    /// How often the GC pass runs.
     pub interval: Duration,
+    /// Minimum object age before deletion.
     pub min_age: Duration,
+    /// Log deletions without performing them.
     pub dry_run: bool,
 }
 
@@ -446,9 +478,12 @@ impl Default for ResolvedGcDirectory {
     }
 }
 
+/// Resolved settings for the clone-detach GC pass.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedGcDetach {
+    /// Whether the detach pass runs.
     pub enabled: bool,
+    /// How often the detach pass runs.
     pub interval: Duration,
 }
 
@@ -461,13 +496,22 @@ impl Default for ResolvedGcDetach {
     }
 }
 
+/// Resolved compaction coordinator settings.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedCoordinator {
+    /// How often the coordinator polls the manifest to schedule
+    /// compactions.
     pub poll_interval: Duration,
+    /// How long manifest updates are retried before giving up.
     pub manifest_update_timeout: Duration,
+    /// Maximum compactions scheduled concurrently.
     pub max_concurrent_compactions: u32,
+    /// How often `Compacted` results are committed to the manifest.
     pub commit_compacted_interval: Duration,
+    /// Reclaim a `Running` job whose worker heartbeat is older than
+    /// this.
     pub worker_heartbeat_timeout: Duration,
+    /// Size-tiered compaction scheduler settings.
     pub scheduler: ResolvedScheduler,
 }
 
@@ -485,10 +529,15 @@ impl Default for ResolvedCoordinator {
     }
 }
 
+/// Resolved size-tiered compaction scheduler settings.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedScheduler {
+    /// Minimum sources included together in one compaction.
     pub min_compaction_sources: u32,
+    /// Maximum sources included together in one compaction.
     pub max_compaction_sources: u32,
+    /// A sorted run joins a compaction if its size is below this
+    /// multiple of the smallest run already included.
     pub include_size_threshold: f32,
 }
 
@@ -503,18 +552,33 @@ impl Default for ResolvedScheduler {
     }
 }
 
+/// Resolved compaction worker settings.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedWorkers {
+    /// Worker nodes for this database: the top `count` nodes of the
+    /// database's rendezvous ranking poll its compaction queue.
     pub count: u32,
+    /// Jobs a single worker may hold simultaneously.
     pub max_concurrent_compactions: u32,
+    /// How often workers poll `.compactions` for `Scheduled` jobs.
     pub compactions_poll_interval: Duration,
+    /// Bytes a worker must process before emitting a heartbeat.
     pub heartbeat_bytes: u64,
+    /// Minimum wall-clock time between heartbeat writes.
     pub heartbeat_min_interval: Duration,
+    /// Maximum output SST size in bytes before a new one is rolled.
     pub max_sst_size: u64,
+    /// Concurrent block-fetch tasks per input SST.
     pub max_fetch_tasks: u32,
+    /// Read-ahead request size in bytes while iterating input SSTs.
     pub bytes_to_fetch: u64,
+    /// Maximum subcompactions per job; values <= 1 disable
+    /// subcompactions.
     pub max_subcompactions: u32,
+    /// Write bloom filters for SSTs with at least this many keys.
     pub min_filter_keys: u32,
+    /// Compression for SSTs the worker writes; `None` writes
+    /// uncompressed.
     pub compression_codec: Option<CompressionCodec>,
 }
 
@@ -701,8 +765,10 @@ pub struct ConfigError(pub Vec<String>);
 /// A config that failed to parse or validate.
 #[derive(Debug, thiserror::Error)]
 pub enum ParseError {
+    /// The TOML did not parse.
     #[error("failed to parse config: {0}")]
     Toml(#[from] toml::de::Error),
+    /// The config parsed but failed validation.
     #[error(transparent)]
     Invalid(#[from] ConfigError),
 }

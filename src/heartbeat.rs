@@ -49,15 +49,16 @@ pub fn object_name(node_id: &str, services: &[Service]) -> String {
 }
 
 /// The node id and offered services a heartbeat object name encodes, if
-/// valid. Unknown service letters are ignored so newer nodes offering
-/// new services still parse.
+/// valid, with services in canonical order. Unknown service letters are
+/// ignored so newer nodes offering new services still parse.
 pub fn parse_object_name(name: &str) -> Option<(String, Vec<Service>)> {
     let stem = name.strip_suffix(".json")?;
     let (node_id, letters) = stem.rsplit_once('.')?;
     if node_id.is_empty() {
         return None;
     }
-    let services = letters.chars().filter_map(Service::from_letter).collect();
+    let mut services: Vec<Service> = letters.chars().filter_map(Service::from_letter).collect();
+    services.sort_unstable();
     Some((node_id.to_string(), services))
 }
 
@@ -84,6 +85,8 @@ pub struct Heartbeat {
 }
 
 impl Heartbeat {
+    /// A current-version heartbeat body for this node, stamping in the
+    /// running sleet version.
     pub fn new(
         node_id: impl Into<String>,
         slatedb_version: impl Into<String>,
@@ -104,6 +107,7 @@ impl Heartbeat {
 /// databases.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ServiceSummary {
+    /// The offered service these counts cover.
     pub service: Service,
 
     /// Owned tasks currently running.
@@ -114,6 +118,7 @@ pub struct ServiceSummary {
 }
 
 impl ServiceSummary {
+    /// A zero-count summary for a service with no owned tasks.
     pub fn empty(service: Service) -> Self {
         Self {
             service,
@@ -151,14 +156,7 @@ mod tests {
     fn object_names_roundtrip_and_reject_garbage() {
         let (id, services) = parse_object_name("sleet-1.cgw.json").unwrap();
         assert_eq!(id, "sleet-1");
-        assert_eq!(
-            services,
-            vec![
-                Service::CompactorCoordinator,
-                Service::Gc,
-                Service::CompactionWorkers
-            ]
-        );
+        assert_eq!(services, Service::ALL.to_vec());
         // Unknown letters are ignored; the node still parses.
         let (id, services) = parse_object_name("sleet-2.gx.json").unwrap();
         assert_eq!(id, "sleet-2");
