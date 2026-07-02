@@ -212,7 +212,19 @@ impl Node {
         entries: &[HeartbeatEntry],
         state: &FleetState,
     ) -> HashMap<Assignment, Arc<ResolvedServices>> {
-        let nodes = node_view(entries, state.config.node.heartbeat_timeout.0);
+        let mut nodes = node_view(entries, state.config.node.heartbeat_timeout.0);
+        // A node always counts itself live: it cannot observe its own
+        // death, and reading its own heartbeat as stale (a skewed clock,
+        // a slow PUT) must not make it abandon its share — peers that
+        // agree it is dead take over in parallel, a safe double-run,
+        // whereas self-exclusion would orphan the share entirely.
+        if !nodes.iter().any(|n| n.node_id == self.options.node_id) {
+            nodes.push(crate::root::NodeView {
+                node_id: self.options.node_id.clone(),
+                services: self.options.services.clone(),
+                age: Duration::ZERO,
+            });
+        }
         let mut owned = HashMap::new();
         for (url, db) in &state.databases {
             let resolved = Arc::new(state.config.resolve(Some(db)));
@@ -509,7 +521,21 @@ mod tests {
         let n2 = node("n2", &Service::ALL).owned_assignments(&entries, &dbs);
         let n3 = node("n3", &Service::ALL).owned_assignments(&entries, &dbs);
         assert!(n1.contains_key(&worker_key) && n2.contains_key(&worker_key));
-        assert!(n3.is_empty(), "a dead node owns nothing it can see");
+        // n3's own heartbeat reads as stale (its clock may be wrong),
+        // but self-liveness is axiomatic: it keeps exactly the share it
+        // wins over the full candidate set, same as everyone else.
+        for (key, _) in &n3 {
+            let (url, service) = key;
+            let count = if *service == Service::CompactionWorkers {
+                2
+            } else {
+                1
+            };
+            assert!(
+                placement::owners(url, *service, count, &["n1", "n2", "n3"]).contains(&"n3"),
+                "{key:?}"
+            );
+        }
         for owned in [&n1, &n2] {
             assert!(!owned.keys().any(|(url, _)| url == "s3://b/off"));
         }

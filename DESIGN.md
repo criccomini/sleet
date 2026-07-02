@@ -119,7 +119,10 @@ on incompatible change.
 
 A node is **live** iff its heartbeat's `LastModified` (object-store clock)
 is younger than `heartbeat_timeout` by the reader's clock; skew shifts
-failover timing, never safety. A node that changes its offered services
+failover timing, never safety. A node always counts itself live, whatever
+its own heartbeat's age reads: it cannot observe its own death, and peers
+that disagree take over in parallel — a double-run at worst, where
+self-exclusion would orphan its share. A node that changes its offered services
 restarts under a new heartbeat name and deletes its old one at startup; if
 both are briefly visible, the youngest name per `node_id` wins. To the
 hash, a role change is a departure from one service's candidate pool and

@@ -1,137 +1,14 @@
 //! Multi-node integration tests over one shared in-memory store: the
 //! design's failover, partitioning, and propagation claims.
-//!
-//! Registered databases here are plain URLs, not real SlateDB
-//! databases: their service tasks fail and back off, which is fine —
-//! ownership, liveness, and reconciliation are what's under test, and
-//! task counts are observable in heartbeat bodies.
+
+mod common;
 
 use std::time::Duration;
 
+use common::{Cluster, expected_pairs, poll_until};
 use object_store::ObjectStoreExt;
-use object_store::path::Path as StorePath;
 use sleet::config::Service;
-use sleet::daemon::{self, NodeOptions};
-use sleet::heartbeat::{self, Heartbeat};
-use sleet::root::FleetRoot;
-use sleet::testing::TestStore;
-use sleet::{ops, placement, registry};
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
-
-/// Fast intervals so tests converge in seconds.
-const FAST: &str = "[node]\nheartbeat_interval = \"200ms\"\n\
-                    heartbeat_timeout = \"1s\"\nconfig_poll = \"400ms\"\n";
-
-struct Cluster {
-    root: FleetRoot,
-    nodes: Vec<(String, CancellationToken, JoinHandle<()>)>,
-}
-
-impl Cluster {
-    async fn new() -> Self {
-        let store = TestStore::in_memory();
-        let root = FleetRoot::from_parts(store, StorePath::from("fleet"), "memory:///fleet");
-        root.store()
-            .put(&root.config_path(), FAST.into())
-            .await
-            .unwrap();
-        Self {
-            root,
-            nodes: Vec::new(),
-        }
-    }
-
-    fn spawn(&mut self, node_id: &str, services: &[Service]) {
-        let token = CancellationToken::new();
-        let handle = tokio::spawn({
-            let root = self.root.clone();
-            let options = NodeOptions {
-                node_id: node_id.into(),
-                services: services.to_vec(),
-                max_compaction_jobs: 1,
-            };
-            let token = token.clone();
-            async move {
-                daemon::run(root, options, token).await.unwrap();
-            }
-        });
-        self.nodes.push((node_id.into(), token, handle));
-    }
-
-    /// Kill a node without any cleanup: its heartbeat object stays
-    /// behind and goes stale.
-    fn kill(&mut self, node_id: &str) {
-        let i = self
-            .nodes
-            .iter()
-            .position(|(id, ..)| id == node_id)
-            .unwrap();
-        let (_, _, handle) = self.nodes.remove(i);
-        handle.abort();
-    }
-
-    /// Stop a node cleanly (it deletes its heartbeat).
-    async fn stop(&mut self, node_id: &str) {
-        let i = self
-            .nodes
-            .iter()
-            .position(|(id, ..)| id == node_id)
-            .unwrap();
-        let (_, token, handle) = self.nodes.remove(i);
-        token.cancel();
-        handle.await.unwrap();
-    }
-
-    async fn shutdown(mut self) {
-        for (_, token, _) in &self.nodes {
-            token.cancel();
-        }
-        for (_, _, handle) in self.nodes.drain(..) {
-            let _ = handle.await;
-        }
-    }
-
-    async fn register(&self, url: &str) {
-        ops::register(&self.root, url).await.unwrap();
-    }
-
-    /// The youngest heartbeat body for a node, if readable.
-    async fn body(&self, node_id: &str, services: &[Service]) -> Option<Heartbeat> {
-        let path = self
-            .root
-            .node_path(&heartbeat::object_name(node_id, services));
-        let get = self.root.store().get(&path).await.ok()?;
-        serde_json::from_slice(&get.bytes().await.ok()?).ok()
-    }
-
-    /// Total supervised tasks a node reports across services.
-    async fn task_count(&self, node_id: &str, services: &[Service]) -> u64 {
-        self.body(node_id, services)
-            .await
-            .map(|b| b.services.iter().map(|s| s.running + s.backoff).sum())
-            .unwrap_or(0)
-    }
-}
-
-/// Poll an async condition every 100ms for up to 30s.
-async fn poll_until<T, F, Fut>(what: &str, mut check: F) -> T
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Option<T>>,
-{
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    loop {
-        if let Some(value) = check().await {
-            return value;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timed out waiting for: {what}"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
+use sleet::{ops, placement};
 
 /// The design's core failover claim: a node that dies without cleanup
 /// is declared dead within `heartbeat_timeout`, its pairs move to the
@@ -199,21 +76,8 @@ async fn placement_partitions_across_nodes() {
         cluster.spawn(id, &Service::ALL);
     }
 
-    // Expected pairs per node, straight from the pure ranking.
-    let expected = |node: &str| -> u64 {
-        let mut count = 0;
-        for db in &dbs {
-            for service in Service::ALL {
-                if placement::owners(db, service, 1, &ids)[0] == node {
-                    count += 1;
-                }
-            }
-        }
-        count
-    };
-
     for id in ids {
-        let want = expected(id);
+        let want = expected_pairs(id, &ids, &dbs);
         poll_until("node runs exactly its share", || async {
             (cluster.task_count(id, &Service::ALL).await == want).then_some(())
         })
@@ -224,13 +88,9 @@ async fn placement_partitions_across_nodes() {
     let status = ops::status(&cluster.root, false).await.unwrap();
     assert_eq!(status.databases.len(), dbs.len());
     for db in &status.databases {
-        for placement_entry in &db.services {
-            let want = placement::owners(&db.url, placement_entry.service, 1, &ids);
-            assert_eq!(
-                placement_entry.nodes, want,
-                "{} {:?}",
-                db.url, placement_entry.service
-            );
+        for entry in &db.services {
+            let want = placement::owners(&db.url, entry.service, 1, &ids);
+            assert_eq!(entry.nodes, want, "{} {:?}", db.url, entry.service);
         }
     }
 
@@ -244,9 +104,7 @@ async fn config_changes_propagate() {
     let mut cluster = Cluster::new().await;
     let db = "memory:///dbs/prop";
     cluster.register(db).await;
-    let file = cluster
-        .root
-        .database_path(&registry::canonicalize_url(db).unwrap());
+    let file = cluster.db_file(db);
     cluster
         .root
         .store()
@@ -311,13 +169,13 @@ async fn roles_split_and_worker_count_spans_nodes() {
     let mut cluster = Cluster::new().await;
     let db = "memory:///dbs/roles";
     cluster.register(db).await;
-    let file = cluster
-        .root
-        .database_path(&registry::canonicalize_url(db).unwrap());
     cluster
         .root
         .store()
-        .put(&file, "[compaction-workers]\ncount = 2".into())
+        .put(
+            &cluster.db_file(db),
+            "[compaction-workers]\ncount = 2".into(),
+        )
         .await
         .unwrap();
 
