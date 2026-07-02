@@ -26,7 +26,6 @@ when the two drift.
   directory at each release.
 - `fizz specs/coordination.fizz` model-checks the coordination
   protocol.
-- `scripts/test-linux.sh` runs the suite on Linux in Docker.
 - `cargo bench` runs the placement and registry-poll scaling benches.
 - Run `cargo fmt && cargo clippy --all-targets` before committing.
 
