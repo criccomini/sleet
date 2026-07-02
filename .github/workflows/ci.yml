@@ -89,13 +89,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test
+      # Both tarballs wrap their contents in a versioned top-level
+      # directory; strip it so the binaries land where the steps below
+      # expect them.
       - name: Install fizzbee and fizzbee-mbt
         run: |
           mkdir -p "$HOME/fizzbee" "$HOME/fizzbee-mbt"
           curl -sSfL https://github.com/fizzbee-io/fizzbee/releases/download/v0.5.1/fizzbee-v0.5.1-linux_x86.tar.gz \
-            | tar xz -C "$HOME/fizzbee"
+            | tar xz --strip-components=1 -C "$HOME/fizzbee"
           curl -sSfL https://github.com/fizzbee-io/fizzbee-mbt-releases/releases/download/v0.2.0/fizzbee-mbt-0.2.0-linux_x86.tar.gz \
-            | tar xz -C "$HOME/fizzbee-mbt"
+            | tar xz --strip-components=1 -C "$HOME/fizzbee-mbt"
           echo "$HOME/fizzbee-mbt" >> "$GITHUB_PATH"
       - name: Model-check the spec and generate MBT states
         run: |
