@@ -10,7 +10,7 @@
 
 use std::io::{self, Write};
 
-use crate::response::{DbEditAction, DbEditResponse, DbListResponse, StatusResponse};
+use crate::response::StatusResponse;
 
 /// Human-readable rendering of a response.
 pub trait Render {
@@ -88,50 +88,5 @@ impl Render for StatusResponse {
             }
         }
         services.write(w)
-    }
-}
-
-impl Render for DbListResponse {
-    fn render(&self, w: &mut dyn Write) -> io::Result<()> {
-        let mut databases = Table::new(&["DATABASE", "SERVICES"]);
-        for db in &self.databases {
-            let services = match &db.services {
-                Some(s) => s.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","),
-                None => "(defaults)".into(),
-            };
-            databases.row(vec![db.url.clone(), services]);
-        }
-        databases.write(w)?;
-
-        if !self.roots.is_empty() {
-            writeln!(w)?;
-            let mut roots = Table::new(&["ROOT", "RESCAN", "MAX_DEPTH"]);
-            for r in &self.roots {
-                roots.row(vec![
-                    r.url.clone(),
-                    humantime::format_duration(r.rescan.0).to_string(),
-                    r.max_depth.to_string(),
-                ]);
-            }
-            roots.write(w)?;
-        }
-        Ok(())
-    }
-}
-
-impl Render for DbEditResponse {
-    fn render(&self, w: &mut dyn Write) -> io::Result<()> {
-        match (self.action, self.changed) {
-            (DbEditAction::Added, true) => writeln!(w, "added {} to {}", self.url, self.spec),
-            (DbEditAction::Added, false) => {
-                writeln!(w, "{} already in {}; no change", self.url, self.spec)
-            }
-            (DbEditAction::Removed, true) => {
-                writeln!(w, "removed {} from {}", self.url, self.spec)
-            }
-            (DbEditAction::Removed, false) => {
-                writeln!(w, "{} not found in {}; no change", self.url, self.spec)
-            }
-        }
     }
 }

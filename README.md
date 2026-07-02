@@ -14,10 +14,9 @@ are implemented; the daemon and service wiring are not. See
 
 ```sh
 sleet run --spec /etc/sleet/fleet.toml   # the daemon (not yet implemented)
-sleet status                             # nodes, assignments, health
-sleet db list --spec fleet.toml          # databases in a spec
+sleet status --spec fleet.toml           # nodes, assignments, health
 sleet validate --spec fleet.toml         # check a spec
-sleet schema [config|cli]                # print a JSON Schema
+sleet schema [config|cli|heartbeat]      # print a JSON Schema
 ```
 
 The fleet spec is a TOML file; see [examples/fleet.toml](examples/fleet.toml)

@@ -129,7 +129,7 @@ only member. On a failed spec reload, a node keeps its last good spec.
 
 `sleet run` is a tokio process. Each `(database, service)` is a supervised
 task built on the `slatedb::Admin` API, restarted with backoff on failure.
-One-shot subcommands read/edit the fleet spec and object storage; nodes
+One-shot subcommands read the fleet spec and object storage; nodes
 serve no API.
 
 ## Services
@@ -182,8 +182,7 @@ depth across the fleet.
 ## Crate layout
 
 A single `sleet` crate with one binary: `sleet run --spec <path>` is the
-long-running daemon; `status`, `db list|add|remove`, `validate`, and
-`schema` are one-shots. The fleet spec types live in `src/spec.rs`.
+long-running daemon; `status`, `validate`, and `schema` are one-shots. The fleet spec types live in `src/spec.rs`.
 One-shot subcommands take `--format json`; response types in
 `src/response.rs` generate `schema/cli.schema.json` (one `$defs`
 entry per command), and text rendering lives in `src/render.rs`. The

@@ -1,9 +1,0 @@
-[[discover]]
-url = "s3://prod-us/"
-
-[[database]]
-url = "gs://analytics/events"
-services = ["gc"]
-
-[[database]]
-url = "s3://prod-us/tenants/acme"

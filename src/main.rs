@@ -5,10 +5,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use sleet::render::Render;
-use sleet::response::{
-    DbEditAction, DbEditResponse, DbListResponse, StatusResponse, ValidateResponse,
-};
-use sleet::spec::{LoadError, Service};
+use sleet::response::{StatusResponse, ValidateResponse};
+use sleet::spec::LoadError;
 
 #[derive(Parser)]
 #[command(name = "sleet", about = "SlateDB fleet manager", version)]
@@ -35,9 +33,6 @@ enum Command {
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
     },
-    /// Inspect and edit the databases in a fleet spec.
-    #[command(subcommand)]
-    Db(DbCommand),
     /// Parse and validate a fleet spec.
     Validate {
         /// Path to the fleet spec TOML file.
@@ -52,44 +47,6 @@ enum Command {
         /// Which schema to print.
         #[arg(value_enum, default_value = "config")]
         kind: SchemaKind,
-    },
-}
-
-#[derive(Subcommand)]
-enum DbCommand {
-    /// List explicit databases and discovery roots in a fleet spec.
-    List {
-        /// Path to the fleet spec TOML file.
-        #[arg(long)]
-        spec: PathBuf,
-        /// Output format.
-        #[arg(long, value_enum, default_value = "text")]
-        format: Format,
-    },
-    /// Add an explicit database entry to a fleet spec.
-    Add {
-        /// Object-store URL of the database root.
-        url: String,
-        /// Path to the fleet spec TOML file.
-        #[arg(long)]
-        spec: PathBuf,
-        /// Services for the entry (default: inherit `[defaults]`).
-        #[arg(long, value_delimiter = ',', value_parser = parse_service)]
-        services: Option<Vec<Service>>,
-        /// Output format.
-        #[arg(long, value_enum, default_value = "text")]
-        format: Format,
-    },
-    /// Remove an explicit database entry from a fleet spec.
-    Remove {
-        /// Object-store URL of the database root.
-        url: String,
-        /// Path to the fleet spec TOML file.
-        #[arg(long)]
-        spec: PathBuf,
-        /// Output format.
-        #[arg(long, value_enum, default_value = "text")]
-        format: Format,
     },
 }
 
@@ -112,22 +69,10 @@ enum Format {
     Json,
 }
 
-fn parse_service(s: &str) -> Result<Service, String> {
-    match s {
-        "gc" => Ok(Service::Gc),
-        "compactor" => Ok(Service::Compactor),
-        "workers" => Ok(Service::Workers),
-        _ => Err(format!(
-            "unknown service {s:?} (expected gc, compactor, or workers)"
-        )),
-    }
-}
-
 fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Run { spec } => run(&spec),
         Command::Status { spec, format } => status(&spec, format),
-        Command::Db(cmd) => db(cmd),
         Command::Validate { spec, format } => validate(&spec, format),
         Command::Schema { kind } => {
             let json = match kind {
@@ -161,52 +106,6 @@ fn status(spec: &Path, format: Format) -> ExitCode {
         Ok(_) => {
             eprintln!("note: stub response; status from object storage is not implemented");
             emit(&StatusResponse::stub(), format)
-        }
-        Err(e) => fail(e),
-    }
-}
-
-fn db(cmd: DbCommand) -> ExitCode {
-    match cmd {
-        DbCommand::List { spec, format } => match sleet::spec::load(&spec) {
-            Ok(s) => emit(&DbListResponse::from_spec(&s), format),
-            Err(e) => fail(e),
-        },
-        DbCommand::Add {
-            url,
-            spec,
-            services: _services,
-            format,
-        } => db_edit(&spec, url, DbEditAction::Added, format),
-        DbCommand::Remove { url, spec, format } => {
-            db_edit(&spec, url, DbEditAction::Removed, format)
-        }
-    }
-}
-
-fn db_edit(spec: &Path, url: String, action: DbEditAction, format: Format) -> ExitCode {
-    match sleet::spec::load(spec) {
-        Ok(s) => {
-            let exists = s
-                .database
-                .iter()
-                .any(|d| d.url.trim_end_matches('/') == url.trim_end_matches('/'));
-            let changed = match action {
-                DbEditAction::Added => !exists,
-                DbEditAction::Removed => exists,
-            };
-            // TODO: apply the edit with toml_edit, preserving comments,
-            // and write `--services` into added entries.
-            eprintln!("note: stub response; {} was not modified", spec.display());
-            emit(
-                &DbEditResponse {
-                    spec: spec.display().to_string(),
-                    url,
-                    action,
-                    changed,
-                },
-                format,
-            )
         }
         Err(e) => fail(e),
     }

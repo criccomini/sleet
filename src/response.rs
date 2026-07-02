@@ -28,8 +28,6 @@ pub fn schema_json() -> String {
 pub enum Response {
     Validate(ValidateResponse),
     Status(StatusResponse),
-    DbList(DbListResponse),
-    DbEdit(DbEditResponse),
 }
 
 /// The `sleet validate` response.
@@ -139,77 +137,4 @@ impl StatusResponse {
             ],
         }
     }
-}
-
-/// The `sleet db list` response.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[schemars(title = "sleet db list response")]
-pub struct DbListResponse {
-    /// Explicit `[[database]]` entries in the spec.
-    pub databases: Vec<DbListEntry>,
-    /// Discovery roots; databases under them are known only to running
-    /// nodes.
-    pub roots: Vec<DbListRoot>,
-}
-
-/// One explicit database entry.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct DbListEntry {
-    pub url: String,
-    /// The entry's services override, if it sets one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub services: Option<Vec<Service>>,
-}
-
-/// One discovery root.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct DbListRoot {
-    pub url: String,
-    pub rescan: HumanDuration,
-    pub max_depth: u32,
-}
-
-impl DbListResponse {
-    pub fn from_spec(spec: &FleetSpec) -> Self {
-        Self {
-            databases: spec
-                .database
-                .iter()
-                .map(|d| DbListEntry {
-                    url: d.url.clone(),
-                    services: d.services.clone(),
-                })
-                .collect(),
-            roots: spec
-                .discover
-                .iter()
-                .map(|d| DbListRoot {
-                    url: d.url.clone(),
-                    rescan: d.rescan,
-                    max_depth: d.max_depth,
-                })
-                .collect(),
-        }
-    }
-}
-
-/// The `sleet db add`/`db remove` response.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[schemars(title = "sleet db edit response")]
-pub struct DbEditResponse {
-    /// Path of the spec that was edited.
-    pub spec: String,
-    /// The database URL the edit applied to.
-    pub url: String,
-    pub action: DbEditAction,
-    /// False when the edit was a no-op (already present or not found).
-    pub changed: bool,
-}
-
-/// What a `db` edit did.
-#[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum DbEditAction {
-    Added,
-    Removed,
 }

@@ -8,12 +8,6 @@
     },
     {
       "$ref": "#/$defs/StatusResponse"
-    },
-    {
-      "$ref": "#/$defs/DbListResponse"
-    },
-    {
-      "$ref": "#/$defs/DbEditResponse"
     }
   ],
   "$defs": {
@@ -34,111 +28,6 @@
       "required": [
         "url",
         "services"
-      ]
-    },
-    "DbEditAction": {
-      "description": "What a `db` edit did.",
-      "type": "string",
-      "enum": [
-        "added",
-        "removed"
-      ]
-    },
-    "DbEditResponse": {
-      "title": "sleet db edit response",
-      "description": "The `sleet db add`/`db remove` response.",
-      "type": "object",
-      "properties": {
-        "action": {
-          "$ref": "#/$defs/DbEditAction"
-        },
-        "changed": {
-          "description": "False when the edit was a no-op (already present or not found).",
-          "type": "boolean"
-        },
-        "spec": {
-          "description": "Path of the spec that was edited.",
-          "type": "string"
-        },
-        "url": {
-          "description": "The database URL the edit applied to.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "spec",
-        "url",
-        "action",
-        "changed"
-      ]
-    },
-    "DbListEntry": {
-      "description": "One explicit database entry.",
-      "type": "object",
-      "properties": {
-        "services": {
-          "description": "The entry's services override, if it sets one.",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/$defs/Service"
-          }
-        },
-        "url": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "url"
-      ]
-    },
-    "DbListResponse": {
-      "title": "sleet db list response",
-      "description": "The `sleet db list` response.",
-      "type": "object",
-      "properties": {
-        "databases": {
-          "description": "Explicit `[[database]]` entries in the spec.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/DbListEntry"
-          }
-        },
-        "roots": {
-          "description": "Discovery roots; databases under them are known only to running\nnodes.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/DbListRoot"
-          }
-        }
-      },
-      "required": [
-        "databases",
-        "roots"
-      ]
-    },
-    "DbListRoot": {
-      "description": "One discovery root.",
-      "type": "object",
-      "properties": {
-        "max_depth": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "rescan": {
-          "$ref": "#/$defs/HumanDuration"
-        },
-        "url": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "url",
-        "rescan",
-        "max_depth"
       ]
     },
     "HumanDuration": {

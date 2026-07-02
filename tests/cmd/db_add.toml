@@ -1,2 +1,0 @@
-bin.name = "sleet"
-args = ["db", "add", "s3://prod-us/tenants/new", "--spec", "fleet.toml"]
