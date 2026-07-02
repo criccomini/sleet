@@ -152,6 +152,26 @@ caps.
 Nodes must be able to reach every registered database for the services
 they offer; placement is capability-blind by construction.
 
+#### Fenced coordinators
+
+A running coordinator can be fenced by `compactor_epoch` at any time: it
+means another node started a coordinator for the same database, so the
+two disagree about ownership. Fencing is treated as a signal of view
+skew, not a plain failure. Instead of blindly restarting, the fenced
+task refreshes its inputs — re-reads `nodes/` and the database's
+registry entry — and recomputes ownership:
+
+- still the owner — restart the coordinator after one
+  `heartbeat_interval`. Restarting bumps `compactor_epoch` and fences
+  the rival, which follows this same rule, refreshes, computes that it
+  lost, and stands down.
+- no longer the owner — stop; the pair has moved.
+
+The wait gives the rival time to refresh and stand down before the
+re-fence lands. Mutual fencing lasts only as long as views diverge —
+bounded by one `config_poll` plus one `heartbeat_interval` — and costs a
+brief compaction stall, never correctness.
+
 ### Process model
 
 `sleet run <root>` is a tokio process. Flags cover only what is
