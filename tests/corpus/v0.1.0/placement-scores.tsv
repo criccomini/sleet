@@ -4,12 +4,12 @@ s3://bucket/db	gc	sleet-1	7fbdefc620b02fc1
 s3://bucket/db	gc	sleet-2	7fbdecc620b02aa8
 s3://bucket/db	compaction-workers	sleet-1	c6e81dd16bf6a090
 s3://bucket/db	compaction-workers	sleet-2	c6e820d16bf6a5a9
-s3://bucket/tenants/acme db	compactor-coordinator	sleet-1	495b3c22b3b25cac
-s3://bucket/tenants/acme db	compactor-coordinator	sleet-2	495b3f22b3b261c5
-s3://bucket/tenants/acme db	gc	sleet-1	957c48920b66190d
-s3://bucket/tenants/acme db	gc	sleet-2	957c45920b6613f4
-s3://bucket/tenants/acme db	compaction-workers	sleet-1	5d3102b63184495c
-s3://bucket/tenants/acme db	compaction-workers	sleet-2	5d3105b631844e75
+s3://bucket/tenants/acme%20db	compactor-coordinator	sleet-1	c1e4d8053d606581
+s3://bucket/tenants/acme%20db	compactor-coordinator	sleet-2	c1e4d5053d606068
+s3://bucket/tenants/acme%20db	gc	sleet-1	2869e298e656ec5a
+s3://bucket/tenants/acme%20db	gc	sleet-2	2869e198e656eaa7
+s3://bucket/tenants/acme%20db	compaction-workers	sleet-1	81cd918dc28b2bf7
+s3://bucket/tenants/acme%20db	compaction-workers	sleet-2	81cd928dc28b2daa
 gs://analytics/events	compactor-coordinator	sleet-1	2580d0d15e568b0f
 gs://analytics/events	compactor-coordinator	sleet-2	2580d1d15e568cc2
 gs://analytics/events	gc	sleet-1	9f5211103ed8f98c
@@ -22,9 +22,9 @@ file:///var/data/db1	gc	sleet-1	8216d09fd4f6d241
 file:///var/data/db1	gc	sleet-2	8216cd9fd4f6cd28
 file:///var/data/db1	compaction-workers	sleet-1	2c4e19d9a5a1e310
 file:///var/data/db1	compaction-workers	sleet-2	2c4e1cd9a5a1e829
-s3://bucket/uniçode/päth	compactor-coordinator	sleet-1	f9fc24505b5b8bb4
-s3://bucket/uniçode/päth	compactor-coordinator	sleet-2	f9fc27505b5b90cd
-s3://bucket/uniçode/päth	gc	sleet-1	d5e6ec9857cb7055
-s3://bucket/uniçode/päth	gc	sleet-2	d5e6e99857cb6b3c
-s3://bucket/uniçode/päth	compaction-workers	sleet-1	6afc3e7700758124
-s3://bucket/uniçode/päth	compaction-workers	sleet-2	6afc41770075863d
+s3://bucket/uni%C3%A7ode/p%C3%A4th	compactor-coordinator	sleet-1	867636b3f5ff1e08
+s3://bucket/uni%C3%A7ode/p%C3%A4th	compactor-coordinator	sleet-2	867639b3f5ff2321
+s3://bucket/uni%C3%A7ode/p%C3%A4th	gc	sleet-1	b5c2320901efc491
+s3://bucket/uni%C3%A7ode/p%C3%A4th	gc	sleet-2	b5c22f0901efbf78
+s3://bucket/uni%C3%A7ode/p%C3%A4th	compaction-workers	sleet-1	4a4f49e4deb03ea0
+s3://bucket/uni%C3%A7ode/p%C3%A4th	compaction-workers	sleet-2	4a4f4ce4deb043b9

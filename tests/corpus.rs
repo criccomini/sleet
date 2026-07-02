@@ -6,10 +6,12 @@
 //! - `heartbeat.json`: a heartbeat body; must still deserialize.
 //! - `config.toml`, `db.toml`: fleet and registry configs; must still
 //!   parse and validate.
-//! - `registry-names.tsv`: `url <tab> file_name`; the current encoder
-//!   must produce and decode the same names.
-//! - `placement-scores.tsv`: `db <tab> service <tab> node <tab> hex`;
-//!   the current hash must produce identical scores.
+//! - `registry-names.tsv`: `canonical-url <tab> file_name`; the
+//!   current encoder must produce and decode the same names.
+//! - `placement-scores.tsv`: `canonical-url <tab> service <tab> node
+//!   <tab> hex`; the current hash must produce identical scores.
+//!   Canonical URLs, because placement only ever hashes registry keys,
+//!   which are canonicalized on load.
 //!
 //! Cut a new corpus directory at each release with:
 //!
@@ -78,12 +80,13 @@ fn generate() {
     std::fs::write(dir.join("registry-names.tsv"), names).unwrap();
     let mut scores = String::new();
     for url in SAMPLE_URLS {
+        let canonical = registry::canonicalize_url(url).unwrap();
         for service in Service::ALL {
             for node in ["sleet-1", "sleet-2"] {
                 scores.push_str(&format!(
-                    "{url}\t{}\t{node}\t{:016x}\n",
+                    "{canonical}\t{}\t{node}\t{:016x}\n",
                     service.as_str(),
-                    placement::score(url, service, node)
+                    placement::score(&canonical, service, node)
                 ));
             }
         }
