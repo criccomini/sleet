@@ -33,12 +33,15 @@ defined by the serde structs in `src/spec.rs`, which generate
   flags.
 - Databases are registered manually — `sleet register <url>` or writing
   `dbs/<db>.toml` directly; auto-discovery is future work. Each
-  `(database, service, slot)` is owned by the live node that wins a frozen
-  rendezvous hash over the nodes offering that service; no assignment
-  state is stored, ownership is recomputed each tick from the shared tree.
+  `(database, service)` is placed by a frozen rendezvous ranking of the
+  live nodes offering that service — top node for gc and
+  compactor-coordinator, top `count` nodes for compaction-workers; no
+  assignment state is stored, ownership is recomputed each tick from the
+  shared tree.
 - Per-database services wrap SlateDB primitives via `slatedb::Admin`:
   garbage collection, standalone compaction coordinators (RFC-0025), and
-  compaction workers (slot owners poll `.compactions` with idle backoff).
+  compaction workers (top-`count` ranked nodes poll `.compactions` with
+  idle backoff).
   Mirroring is future work.
 - Core invariant: safety never depends on sleet's scheduling. Duplicate or
   stale processes must be harmless; mutual exclusion comes only from

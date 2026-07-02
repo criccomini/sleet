@@ -60,7 +60,7 @@ config_poll = "1m"                   # sleet.toml / dbs/ re-read cadence
 services = ["gc", "compactor-coordinator", "compaction-workers"]
 
 [database.compaction-workers]
-count = 1                            # worker slots per database
+count = 1                            # worker nodes per database
 ```
 
 The `[database]` table and `dbs/<db>.toml` files share the same shape: an
@@ -68,22 +68,28 @@ optional `services` list and `gc`/`compactor-coordinator`/
 `compaction-workers` tables, whose fields mirror SlateDB's
 `GarbageCollectorOptions`, `CompactorOptions`, and
 `CompactionWorkerOptions` with SlateDB's defaults;
-`compaction-workers.count` sets the number of worker slots. The config types are defined by the serde
-structs in `src/spec.rs`; the JSON Schema generated from them is checked in
-at `schema/config.schema.json` (drift-checked by a test). Loading enforces
+`compaction-workers.count` sets how many nodes run workers for a
+database. The config types are defined by the serde structs in
+`src/spec.rs`; the JSON Schema generated from them is checked in at
+`schema/config.schema.json` (drift-checked by a test). Loading enforces
 what the schema cannot: `heartbeat_interval < heartbeat_timeout`, valid
 object-store URLs, and bounds on the resolved settings.
 
-Nodes re-read `sleet.toml` and LIST `dbs/` every `config_poll`, skipping
-unchanged objects by ETag; on a failed read a node keeps the last good
-config.
+Nodes re-read `sleet.toml` and LIST `dbs/` every `config_poll`; on a
+failed read a node keeps the last good config. The listing carries each
+entry's size and ETag, so empty registry files — the common case — are
+never fetched, and override files are fetched only when their ETag
+changes.
 
 ### Databases
 
 `dbs/<db>.toml` registers a database. `<db>` is the percent-encoded
 database URL, so the filename alone identifies the database and an empty
 file is valid. Files are created by operators, directly or with `sleet
-register <url>`. A file's contents are exactly a `[database]` table: any
+register <url>`. `register` canonicalizes URLs before encoding so one
+database cannot be registered under two spellings; `status` flags entries
+that alias after canonicalization. A file's contents are exactly a
+`[database]` table: any
 field `sleet.toml`'s `[database]` section accepts may be set per database,
 and set fields override the fleet-wide value:
 
@@ -124,17 +130,17 @@ immediately. Any node deletes heartbeats older than 10×
 ### Assignment and failover
 
 Ownership is decided by rendezvous hashing. For a given `(database,
-service, slot)`, every live node whose heartbeat offers that service gets
-a score — the hash of the triple combined with the node's id — and the
-highest score owns it. Removing a node moves only the triples it owned;
-adding one moves only the triples it now wins. `gc` and
-`compactor-coordinator` have a single slot; `compaction-workers` has
-`count` slots, so `count` bounds how many nodes poll a database's
-compaction queue. Every node recomputes
+service)`, every live node whose heartbeat offers that service gets a
+score — the hash of the pair combined with the node's id — and the
+ranking assigns owners: `gc` and `compactor-coordinator` run on the
+top-ranked node, and `compaction-workers` runs on the top `count` nodes,
+so exactly `count` distinct nodes poll a database's compaction queue (all
+of them, if the pool is smaller). Removing a node moves only the pairs it
+owned; adding one moves only the pairs it now wins. Every node recomputes
 ownership each heartbeat tick from the same shared inputs — the `dbs/`
 registry and the live set — and runs exactly the pairs it owns. No
-assignment state is stored. The hash and its key encoding are frozen, like
-a wire format, so mixed-version fleets compute identical placements.
+assignment state is stored. The hash and its key encoding are frozen,
+like a wire format, so mixed-version fleets compute identical placements.
 
 All views derive from the shared tree, so they converge within one
 `config_poll` (registry) plus one `heartbeat_interval` (liveness). Until
@@ -175,14 +181,14 @@ brief compaction stall, never correctness.
 ### Process model
 
 `sleet run <root>` is a tokio process. Flags cover only what is
-node-specific: `--node-id` (default: hostname), `--services` (default: all
-services), and capacity caps defaulted from the machine (e.g. maximum
-concurrent compaction jobs). Heterogeneous fleets run the same binary with
-different flags — e.g. large machines with `--services
-compaction-workers`. Each owned
-assignment is a supervised task built on the `slatedb::Admin` API,
-restarted with backoff on failure. One-shot subcommands read the fleet
-root and object storage; nodes serve no API.
+node-specific: `--node-id` (required; ids must be unique within a fleet),
+`--services` (default: all services), and capacity caps defaulted from
+the machine (e.g. maximum concurrent compaction jobs). Heterogeneous
+fleets run the same binary with different flags — e.g. large machines
+with `--services compaction-workers`. Each owned assignment is a
+supervised task built on the `slatedb::Admin` API, restarted with backoff
+on failure. One-shot subcommands read the fleet root and object storage;
+nodes serve no API.
 
 ## Services
 
@@ -215,16 +221,17 @@ stall.
 ### 3. Compaction workers
 
 Runs SlateDB `CompactionWorker`s (RFC-0025 / `slatedb run-worker`) against
-each database whose worker slot the node owns. Workers are stateless: they
+each database for which the node ranks in the top `count` workers.
+Workers are stateless: they
 poll `.compactions` for `Scheduled` jobs, claim them by CAS, execute (with
 subcompaction parallelism per RFC-0028), heartbeat, and write back
 `Compacted`. Per-database poll intervals back off exponentially while a
 database is idle, so mostly-idle fleets cost little.
 
-Slots bound who polls; job claims arbitrate execution, so overlap from
-reassignment at worst loses a claim race. Per-database parallelism spans
-nodes: a database with `count = 8` has its slots hashed across up to eight
-nodes competing for its jobs.
+The ranking bounds who polls; job claims arbitrate execution, so overlap
+from reassignment at worst loses a claim race. Per-database parallelism
+spans nodes: a database with `count = 8` has eight distinct nodes
+competing for its jobs, or every worker node if the pool is smaller.
 
 ## Scaling
 
@@ -274,7 +281,7 @@ Depends on `slatedb` (Admin, GarbageCollector, Compactor, CompactionWorker),
   or different cloud) via manifest-driven copy — copy each manifest's SST
   diff, then conditional-PUT the manifest as the commit point, with a source
   checkpoint and a `GcFilter` protecting not-yet-copied files from GC.
-- **Elastic workers**: size worker pools or per-database slot counts from
+- **Elastic workers**: size worker pools or per-database `count` from
   fleet-wide compaction backlog.
 - **Auto-discovery**: scan configured bucket prefixes for databases (a
   prefix with `manifest/*.manifest` is a database) and register what is
