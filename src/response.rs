@@ -4,8 +4,6 @@
 //! `tests/schema_sync.rs` regenerates it and fails if the two drift.
 //! Text rendering lives in `crate::render`.
 
-use std::time::Duration;
-
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -61,11 +59,15 @@ pub struct NodeStatus {
     /// Services the node offers, from its heartbeat object name.
     pub services: Vec<Service>,
 
-    /// The sleet version the node runs, from the heartbeat body.
-    pub sleet_version: String,
+    /// The sleet version the node runs, from the heartbeat body; absent
+    /// if the body was unreadable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sleet_version: Option<String>,
 
-    /// The slatedb version the node runs, from the heartbeat body.
-    pub slatedb_version: String,
+    /// The slatedb version the node runs, from the heartbeat body;
+    /// absent if the body was unreadable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slatedb_version: Option<String>,
 }
 
 /// One registered database and its service placement.
@@ -73,6 +75,20 @@ pub struct NodeStatus {
 pub struct DatabaseStatus {
     pub url: String,
     pub services: Vec<ServicePlacement>,
+
+    /// Compaction queue depth from `.compactions`; present only with
+    /// `sleet status --queues`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue: Option<QueueStatus>,
+}
+
+/// Compaction queue depth for one database.
+#[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
+pub struct QueueStatus {
+    /// Jobs waiting for a worker.
+    pub claimable: u64,
+    /// Jobs a worker is executing.
+    pub running: u64,
 }
 
 /// Where one database service runs: the top of the service's rendezvous
@@ -97,49 +113,4 @@ pub struct RegisterResponse {
 
     /// False if the database was already registered.
     pub created: bool,
-}
-
-impl StatusResponse {
-    /// Placeholder until status is derived from object storage.
-    pub fn stub() -> Self {
-        let node = |node_id: &str, live, age, services: &[Service]| NodeStatus {
-            node_id: node_id.into(),
-            live,
-            heartbeat_age: Duration::from_secs(age).into(),
-            services: services.to_vec(),
-            sleet_version: "0.1.0".into(),
-            slatedb_version: "0.9.0".into(),
-        };
-        let all = [
-            Service::Gc,
-            Service::CompactorCoordinator,
-            Service::CompactionWorkers,
-        ];
-        let place = |service, nodes: &[&str]| ServicePlacement {
-            service,
-            nodes: nodes.iter().map(|n| n.to_string()).collect(),
-        };
-        Self {
-            nodes: vec![
-                node("sleet-1", true, 2, &all),
-                node("sleet-2", true, 4, &[Service::CompactionWorkers]),
-                node("sleet-3", false, 72, &all),
-            ],
-            databases: vec![
-                DatabaseStatus {
-                    url: "s3://prod-us/db1".into(),
-                    services: vec![
-                        place(Service::Gc, &["sleet-1"]),
-                        place(Service::CompactorCoordinator, &["sleet-1"]),
-                        place(Service::CompactionWorkers, &["sleet-2", "sleet-1"]),
-                    ],
-                },
-                DatabaseStatus {
-                    url: "gs://analytics/events".into(),
-                    services: vec![place(Service::Gc, &["sleet-1"])],
-                },
-            ],
-            warnings: vec![],
-        }
-    }
 }

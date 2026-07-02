@@ -4,8 +4,11 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use sleet::config::Service;
+use sleet::daemon::{self, NodeOptions};
 use sleet::render::Render;
-use sleet::response::StatusResponse;
+use sleet::root::FleetRoot;
+use sleet::{heartbeat, ops};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
 #[command(name = "sleet", about = "SlateDB fleet manager", version)]
@@ -22,7 +25,7 @@ enum Command {
         root: String,
 
         /// Node identity; must be unique within the fleet.
-        #[arg(long)]
+        #[arg(long, value_parser = heartbeat::validate_node_id)]
         node_id: String,
 
         /// Services this node offers.
@@ -33,16 +36,21 @@ enum Command {
         )]
         services: Vec<Service>,
 
-        /// Maximum concurrent compaction jobs. Default: derived from the
-        /// machine.
+        /// Maximum databases compacting on this node at once. Default:
+        /// the machine's available parallelism.
         #[arg(long)]
-        max_compaction_jobs: Option<u32>,
+        max_compaction_jobs: Option<usize>,
     },
     /// Show fleet nodes, registered databases, and service placement,
     /// derived from the fleet root.
     Status {
         /// Fleet root URL, e.g. s3://ops/sleet/.
         root: String,
+
+        /// Also read each database's compaction queue depth from
+        /// `.compactions` (one read per database).
+        #[arg(long)]
+        queues: bool,
 
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
@@ -70,26 +78,68 @@ enum Format {
     Json,
 }
 
-fn main() -> ExitCode {
+#[tokio::main]
+async fn main() -> ExitCode {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "sleet=info,warn".into()),
+        )
+        .init();
     match Cli::parse().command {
-        // TODO: heartbeat loop, config/registry polling, rendezvous
-        // placement, and per-(database, service) supervised tasks.
-        Command::Run { .. } => {
-            eprintln!("error: `sleet run` is not implemented");
-            ExitCode::FAILURE
+        Command::Run {
+            root,
+            node_id,
+            services,
+            max_compaction_jobs,
+        } => {
+            let mut services = services;
+            services.dedup();
+            let options = NodeOptions {
+                node_id,
+                services,
+                max_compaction_jobs: max_compaction_jobs
+                    .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |p| p.get())),
+            };
+            let root = match FleetRoot::open(&root) {
+                Ok(root) => root,
+                Err(e) => return fail(e),
+            };
+            let shutdown = CancellationToken::new();
+            let trigger = shutdown.clone();
+            tokio::spawn(async move {
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    trigger.cancel();
+                }
+            });
+            match daemon::run(root, options, shutdown).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => fail(e),
+            }
         }
-        // TODO: LIST nodes/ for liveness and roles, LIST dbs/ for the
-        // registry, compute placement with the same rendezvous ranking,
-        // and take compaction queue depth from `.compactions`.
-        Command::Status { format, .. } => {
-            eprintln!("note: stub response; status from object storage is not implemented");
-            emit(&StatusResponse::stub(), format)
+        Command::Status {
+            root,
+            queues,
+            format,
+        } => {
+            let root = match FleetRoot::open(&root) {
+                Ok(root) => root,
+                Err(e) => return fail(e),
+            };
+            match ops::status(&root, queues).await {
+                Ok(response) => emit(&response, format),
+                Err(e) => fail(e),
+            }
         }
-        // TODO: canonicalize the URL and create-only PUT the registry
-        // file.
-        Command::Register { .. } => {
-            eprintln!("error: `sleet register` is not implemented");
-            ExitCode::FAILURE
+        Command::Register { root, url, format } => {
+            let root = match FleetRoot::open(&root) {
+                Ok(root) => root,
+                Err(e) => return fail(e),
+            };
+            match ops::register(&root, &url).await {
+                Ok(response) => emit(&response, format),
+                Err(e) => fail(e),
+            }
         }
     }
 }
@@ -105,4 +155,9 @@ fn emit<T: Serialize + Render>(response: &T, format: Format) -> ExitCode {
         ),
     }
     ExitCode::SUCCESS
+}
+
+fn fail(e: impl std::fmt::Display) -> ExitCode {
+    eprintln!("error: {e}");
+    ExitCode::FAILURE
 }

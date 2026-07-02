@@ -9,7 +9,9 @@
 //! module generates a JSON Schema checked in under `schema/`.
 
 pub mod config;
+pub mod daemon;
 pub mod heartbeat;
+pub mod ops;
 pub mod placement;
 pub mod registry;
 pub mod render;

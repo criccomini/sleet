@@ -74,6 +74,7 @@ fn join_services(services: &[Service]) -> String {
 
 impl Render for StatusResponse {
     fn render(&self, w: &mut dyn Write) -> io::Result<()> {
+        let dash = || "-".to_string();
         let mut nodes = Table::new(&["NODE", "LIVE", "HEARTBEAT", "SERVICES", "SLEET", "SLATEDB"]);
         for n in &self.nodes {
             nodes.row(vec![
@@ -81,25 +82,37 @@ impl Render for StatusResponse {
                 if n.live { "yes" } else { "no" }.into(),
                 humantime::format_duration(n.heartbeat_age.0).to_string(),
                 join_services(&n.services),
-                n.sleet_version.clone(),
-                n.slatedb_version.clone(),
+                n.sleet_version.clone().unwrap_or_else(dash),
+                n.slatedb_version.clone().unwrap_or_else(dash),
             ]);
         }
         nodes.write(w)?;
         writeln!(w)?;
 
-        let mut services = Table::new(&["DATABASE", "SERVICE", "NODES"]);
+        let with_queues = self.databases.iter().any(|db| db.queue.is_some());
+        let mut services = Table::new(if with_queues {
+            &["DATABASE", "SERVICE", "NODES", "QUEUE"][..]
+        } else {
+            &["DATABASE", "SERVICE", "NODES"][..]
+        });
         for db in &self.databases {
             for s in &db.services {
-                services.row(vec![
+                let mut row = vec![
                     db.url.clone(),
                     s.service.as_str().into(),
                     if s.nodes.is_empty() {
-                        "-".into()
+                        dash()
                     } else {
                         s.nodes.join(",")
                     },
-                ]);
+                ];
+                if with_queues {
+                    row.push(match &db.queue {
+                        Some(q) => format!("{} waiting, {} running", q.claimable, q.running),
+                        None => dash(),
+                    });
+                }
+                services.row(row);
             }
         }
         services.write(w)?;

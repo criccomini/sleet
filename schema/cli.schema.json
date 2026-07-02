@@ -15,6 +15,17 @@
       "description": "One registered database and its service placement.",
       "type": "object",
       "properties": {
+        "queue": {
+          "description": "Compaction queue depth from `.compactions`; present only with\n`sleet status --queues`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueueStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "services": {
           "type": "array",
           "items": {
@@ -58,21 +69,47 @@
           }
         },
         "slatedb_version": {
-          "description": "The slatedb version the node runs, from the heartbeat body.",
-          "type": "string"
+          "description": "The slatedb version the node runs, from the heartbeat body;\nabsent if the body was unreadable.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "sleet_version": {
-          "description": "The sleet version the node runs, from the heartbeat body.",
-          "type": "string"
+          "description": "The sleet version the node runs, from the heartbeat body; absent\nif the body was unreadable.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "node_id",
         "live",
         "heartbeat_age",
-        "services",
-        "sleet_version",
-        "slatedb_version"
+        "services"
+      ]
+    },
+    "QueueStatus": {
+      "description": "Compaction queue depth for one database.",
+      "type": "object",
+      "properties": {
+        "claimable": {
+          "description": "Jobs waiting for a worker.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "running": {
+          "description": "Jobs a worker is executing.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "claimable",
+        "running"
       ]
     },
     "RegisterResponse": {

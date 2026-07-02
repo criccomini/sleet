@@ -110,10 +110,12 @@ pub async fn run_coordinator(
 /// Run a compaction worker for one database until cancelled, polling
 /// `.compactions` with exponential backoff while the database is idle:
 /// the worker itself only runs while there is work, so mostly-idle
-/// fleets cost one queue read per backed-off interval.
+/// fleets cost one queue read per backed-off interval. `jobs` is the
+/// node-wide cap on databases compacting at once (`--max-compaction-jobs`).
 pub async fn run_workers(
     db: &DatabaseHandle,
     resolved: &ResolvedWorkers,
+    jobs: Arc<tokio::sync::Semaphore>,
     token: CancellationToken,
 ) -> Result<(), ServiceError> {
     let base = resolved
@@ -128,7 +130,13 @@ pub async fn run_workers(
         let depth = queue_depth(&db.admin).await?;
         if depth.claimable > 0 || depth.running > 0 {
             idle_poll = base;
-            run_worker_until_drained(db, resolved, &token).await?;
+            let permit = tokio::select! {
+                _ = token.cancelled() => return Ok(()),
+                permit = jobs.clone().acquire_owned() => permit.expect("semaphore never closes"),
+            };
+            let result = run_worker_until_drained(db, resolved, &token).await;
+            drop(permit);
+            result?;
         } else {
             tokio::select! {
                 _ = token.cancelled() => return Ok(()),
@@ -205,13 +213,14 @@ pub async fn run_service(
     db: &DatabaseHandle,
     service: crate::config::Service,
     resolved: &ResolvedServices,
+    jobs: Arc<tokio::sync::Semaphore>,
     token: CancellationToken,
 ) -> Result<(), ServiceError> {
     use crate::config::Service;
     match service {
         Service::Gc => run_gc(db, &resolved.gc, token).await,
         Service::CompactorCoordinator => run_coordinator(db, &resolved.coordinator, token).await,
-        Service::CompactionWorkers => run_workers(db, &resolved.workers, token).await,
+        Service::CompactionWorkers => run_workers(db, &resolved.workers, jobs, token).await,
     }
 }
 

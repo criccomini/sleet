@@ -23,6 +23,22 @@ use crate::config::Service;
 /// Current heartbeat format version.
 pub const VERSION: u32 = 1;
 
+/// Check a node id for use in heartbeat object names: nonempty, at most
+/// 128 chars of `[A-Za-z0-9_-]` — in particular no `.`, the name
+/// separator, and no `/`.
+pub fn validate_node_id(node_id: &str) -> Result<String, String> {
+    let ok = !node_id.is_empty()
+        && node_id.len() <= 128
+        && node_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'));
+    if ok {
+        Ok(node_id.to_string())
+    } else {
+        Err("node ids are 1-128 chars of [A-Za-z0-9_-]".to_string())
+    }
+}
+
 /// The name of a node's heartbeat object under `nodes/`.
 pub fn object_name(node_id: &str, services: &[Service]) -> String {
     let mut letters: Vec<char> = services.iter().map(|s| s.letter()).collect();
@@ -95,6 +111,16 @@ pub struct ServiceSummary {
 
     /// Owned tasks that crashed and are waiting out a restart delay.
     pub backoff: u64,
+}
+
+impl ServiceSummary {
+    pub fn empty(service: Service) -> Self {
+        Self {
+            service,
+            running: 0,
+            backoff: 0,
+        }
+    }
 }
 
 /// The heartbeat JSON Schema, pretty-printed.
