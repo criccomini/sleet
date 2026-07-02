@@ -7,8 +7,9 @@ Arguments:
           Which schema to print
 
           Possible values:
-          - config: The fleet spec TOML format (schema/config.schema.json)
-          - cli:    Subcommand `--format json` responses, one `$defs` entry per command (schema/cli.schema.json)
+          - config:    The fleet spec TOML format (schema/config.schema.json)
+          - cli:       Subcommand `--format json` responses, one `$defs` entry per command (schema/cli.schema.json)
+          - heartbeat: The heartbeat object body (schema/heartbeat.schema.json)
           
           [default: config]
 

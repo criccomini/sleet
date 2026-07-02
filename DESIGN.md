@@ -108,8 +108,12 @@ previous layer.
 Each node PUTs a heartbeat object at `<heartbeats>/<node_id>` every
 `heartbeat_interval`; the body is JSON carrying the node's current
 assignments and service states, so fleet state is observable from object
-storage alone. The live set is nodes whose heartbeat `LastModified`
-(object-store clock) is younger than `node_timeout`. `(database, service)`
+storage alone. The body is defined by the structs in `src/heartbeat.rs`
+(`schema/heartbeat.schema.json`); readers ignore unknown fields so
+mixed-version fleets coexist, and `version` bumps only on incompatible
+change. Liveness never depends on body contents: the live set is nodes
+whose heartbeat `LastModified` (object-store clock) is younger than
+`node_timeout`. `(database, service)`
 pairs are rendezvous-hashed over the live set, recomputed each tick — a dead
 node's databases redistribute within ~`node_timeout`, and rebalance when it
 returns. Any node deletes heartbeat objects older than 10× `node_timeout`;
@@ -182,7 +186,9 @@ long-running daemon; `status`, `db list|add|remove`, `validate`, and
 `schema` are one-shots. The fleet spec types live in `src/spec.rs`.
 One-shot subcommands take `--format json`; response types in
 `src/response.rs` generate `schema/cli.schema.json` (one `$defs`
-entry per command), and text rendering lives in `src/render.rs`.
+entry per command), and text rendering lives in `src/render.rs`. The
+heartbeat wire format lives in `src/heartbeat.rs`
+(`schema/heartbeat.schema.json`).
 
 Depends on `slatedb` (Admin, GarbageCollector, Compactor, CompactionWorker),
 `slatedb-txn-obj` (CAS primitives), and `object_store`.

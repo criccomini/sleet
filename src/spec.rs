@@ -803,8 +803,7 @@ pub fn load(path: &Path) -> Result<FleetSpec, LoadError> {
 
 /// The fleet spec JSON Schema, pretty-printed.
 pub fn schema_json() -> String {
-    let schema = schemars::schema_for!(FleetSpec);
-    serde_json::to_string_pretty(&schema).expect("schema serializes")
+    crate::schema_pretty::<FleetSpec>()
 }
 
 impl FleetSpec {

@@ -190,11 +190,22 @@
     },
     "ServiceState": {
       "description": "Supervised task state for one service.",
-      "type": "string",
-      "enum": [
-        "running",
-        "backoff",
-        "stopped"
+      "oneOf": [
+        {
+          "description": "The task is running.",
+          "type": "string",
+          "const": "running"
+        },
+        {
+          "description": "The task crashed and is waiting out its restart delay.",
+          "type": "string",
+          "const": "backoff"
+        },
+        {
+          "description": "The task was shut down (unassigned or removed from the spec).",
+          "type": "string",
+          "const": "stopped"
+        }
       ]
     },
     "ServiceStatus": {

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sleet heartbeat",
+  "description": "The body of a heartbeat object.",
+  "type": "object",
+  "properties": {
+    "assignments": {
+      "description": "The node's current service assignments and their states.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Assignment"
+      }
+    },
+    "node_id": {
+      "description": "The node that wrote this heartbeat. Duplicates the object key so\nbodies are self-describing.",
+      "type": "string"
+    },
+    "sleet_version": {
+      "description": "The sleet version the node runs.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Heartbeat format version; bumped only on incompatible change.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "version",
+    "node_id",
+    "sleet_version",
+    "assignments"
+  ],
+  "$defs": {
+    "Assignment": {
+      "description": "One `(database, service)` assignment held by a node.",
+      "type": "object",
+      "properties": {
+        "database": {
+          "description": "Object-store URL of the database root.",
+          "type": "string"
+        },
+        "service": {
+          "$ref": "#/$defs/Service"
+        },
+        "state": {
+          "$ref": "#/$defs/ServiceState"
+        }
+      },
+      "required": [
+        "database",
+        "service",
+        "state"
+      ]
+    },
+    "Service": {
+      "description": "A per-database service.",
+      "oneOf": [
+        {
+          "description": "Garbage collection.",
+          "type": "string",
+          "const": "gc"
+        },
+        {
+          "description": "Standalone compaction coordinator (RFC-0025).",
+          "type": "string",
+          "const": "compactor"
+        },
+        {
+          "description": "Compaction worker pool (RFC-0025).",
+          "type": "string",
+          "const": "workers"
+        }
+      ]
+    },
+    "ServiceState": {
+      "description": "Supervised task state for one service.",
+      "oneOf": [
+        {
+          "description": "The task is running.",
+          "type": "string",
+          "const": "running"
+        },
+        {
+          "description": "The task crashed and is waiting out its restart delay.",
+          "type": "string",
+          "const": "backoff"
+        },
+        {
+          "description": "The task was shut down (unassigned or removed from the spec).",
+          "type": "string",
+          "const": "stopped"
+        }
+      ]
+    }
+  }
+}

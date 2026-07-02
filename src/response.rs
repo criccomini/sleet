@@ -10,16 +10,12 @@ use std::time::Duration;
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::heartbeat::ServiceState;
 use crate::spec::{FleetSpec, HumanDuration, LoadError, Service};
-
-fn pretty<T: JsonSchema>() -> String {
-    let schema = schemars::schema_for!(T);
-    serde_json::to_string_pretty(&schema).expect("schema serializes")
-}
 
 /// The subcommand response JSON Schema, pretty-printed.
 pub fn schema_json() -> String {
-    pretty::<Response>()
+    crate::schema_pretty::<Response>()
 }
 
 /// A response from any subcommand run with `--format json`, one variant
@@ -99,25 +95,6 @@ pub struct ServiceStatus {
     /// Node the service is rendezvous-hashed to.
     pub node_id: String,
     pub state: ServiceState,
-}
-
-/// Supervised task state for one service.
-#[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ServiceState {
-    Running,
-    Backoff,
-    Stopped,
-}
-
-impl ServiceState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ServiceState::Running => "running",
-            ServiceState::Backoff => "backoff",
-            ServiceState::Stopped => "stopped",
-        }
-    }
 }
 
 impl StatusResponse {

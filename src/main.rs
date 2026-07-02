@@ -100,6 +100,8 @@ enum SchemaKind {
     /// Subcommand `--format json` responses, one `$defs` entry per
     /// command (schema/cli.schema.json).
     Cli,
+    /// The heartbeat object body (schema/heartbeat.schema.json).
+    Heartbeat,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -131,6 +133,7 @@ fn main() -> ExitCode {
             let json = match kind {
                 SchemaKind::Config => sleet::spec::schema_json(),
                 SchemaKind::Cli => sleet::response::schema_json(),
+                SchemaKind::Heartbeat => sleet::heartbeat::schema_json(),
             };
             println!("{json}");
             ExitCode::SUCCESS

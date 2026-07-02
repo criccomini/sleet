@@ -2,7 +2,7 @@
 //! Regenerate a stale file with:
 //! cargo run -- schema <kind> > schema/<file>
 
-use sleet::{response, spec};
+use sleet::{heartbeat, response, spec};
 
 #[track_caller]
 fn assert_current(checked_in: &str, generated: String, kind: &str, file: &str) {
@@ -31,5 +31,15 @@ fn cli_schema_is_current() {
         response::schema_json(),
         "cli",
         "cli.schema.json",
+    );
+}
+
+#[test]
+fn heartbeat_schema_is_current() {
+    assert_current(
+        include_str!("../schema/heartbeat.schema.json"),
+        heartbeat::schema_json(),
+        "heartbeat",
+        "heartbeat.schema.json",
     );
 }
