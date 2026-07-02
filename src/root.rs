@@ -221,6 +221,10 @@ pub struct ConfigPoller {
     config_etag: Option<String>,
     config: SleetConfig,
     files: HashMap<String, CachedFile>,
+    /// The last successful registry view, kept whole when a LIST fails.
+    /// The `files` cache cannot rebuild it: empty registry files (the
+    /// common case) are never fetched, so they are never cached there.
+    databases: BTreeMap<String, DatabaseConfig>,
 }
 
 struct CachedFile {
@@ -296,7 +300,7 @@ impl ConfigPoller {
             Ok(metas) => metas,
             Err(e) => {
                 warnings.push(format!("failed to list registry: {e}; keeping last good"));
-                return self.last_good_databases();
+                return self.databases.clone();
             }
         };
 
@@ -343,6 +347,7 @@ impl ConfigPoller {
         }
         self.files
             .retain(|name, _| seen.values().any(|n| n == name));
+        self.databases = databases.clone();
         databases
     }
 
@@ -403,17 +408,6 @@ impl ConfigPoller {
                 }
             }
         }
-    }
-
-    fn last_good_databases(&self) -> BTreeMap<String, DatabaseConfig> {
-        self.files
-            .iter()
-            .filter_map(|(name, cached)| {
-                let url = registry::parse_file_name(name)?;
-                let config = cached.config.clone()?;
-                Some((url, config))
-            })
-            .collect()
     }
 }
 
@@ -557,7 +551,9 @@ mod tests {
     }
 
     /// An override that turns invalid keeps its last good version; a
-    /// failed registry LIST keeps the whole last-good map.
+    /// failed registry LIST keeps the whole last-good view, including
+    /// empty-file databases (never body-fetched, so never in the file
+    /// cache) and non-canonical entries under their canonical keys.
     #[tokio::test]
     async fn poller_keeps_last_good_per_file_and_on_list_failure() {
         use crate::testing::{Op, TestStore};
@@ -569,9 +565,20 @@ mod tests {
             "services = [\"gc\"]",
         )
         .await;
+        // Registered with an empty file: the common case.
+        put(&root, &root.database_path("s3://b/empty"), "").await;
+        // Registered under a non-canonical spelling.
+        let noncanonical = StorePath::parse(format!(
+            "{}/{}",
+            root.dbs_prefix(),
+            registry::file_name("s3://b/extra/")
+        ))
+        .unwrap();
+        put(&root, &noncanonical, "").await;
 
         let mut poller = ConfigPoller::default();
         let state = poller.poll(&root).await;
+        assert_eq!(state.databases.len(), 3);
         assert_eq!(
             state
                 .config
@@ -597,11 +604,22 @@ mod tests {
                 .any(|w| w.contains("keeping last good"))
         );
 
-        // And a failed LIST keeps the whole registry view.
+        // And a failed LIST keeps the whole registry view: the override,
+        // the empty-file database, and the non-canonical entry under its
+        // canonical key.
         store.fail_next(Op::List, 1);
         let state = poller.poll(&root).await;
-        assert_eq!(state.databases.len(), 1);
-        assert!(state.databases.contains_key("s3://b/db"));
+        assert_eq!(state.databases.len(), 3, "{:?}", state.databases.keys());
+        for db in ["s3://b/db", "s3://b/empty", "s3://b/extra"] {
+            assert!(state.databases.contains_key(db), "{db} missing");
+        }
+        assert_eq!(
+            state
+                .config
+                .resolve(state.databases.get("s3://b/db"))
+                .services,
+            vec![Service::Gc]
+        );
         assert!(state.warnings.iter().any(|w| w.contains("failed to list")));
     }
 
