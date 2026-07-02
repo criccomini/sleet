@@ -8,9 +8,7 @@ choose to run them separately.
 ## Goals
 
 - Run GC, compactor coordinators, and compaction workers for millions of
-  databases from a small pool of `sleet` nodes. Per-database fleet state is
-  one registry file, coordination traffic is independent of database count,
-  and idle databases cost only backed-off polling.
+  databases from a small pool of `sleet` nodes.
 - Register databases explicitly, with the CLI or by writing
   `dbs/<db>.toml`.
 - No dependencies beyond object storage. Mutual exclusion comes from
@@ -204,6 +202,25 @@ Slots bound who polls; job claims arbitrate execution, so overlap from
 reassignment at worst loses a claim race. Per-database parallelism spans
 nodes: a database with `count = 8` has its slots hashed across up to eight
 nodes competing for its jobs.
+
+## Scaling
+
+Coordination cost scales with nodes, not databases. Each node PUTs one
+heartbeat and LISTs `nodes/` once per tick; assignment is computed in
+memory, never written, and needs recomputing only when the registry or a
+candidate set changes. Failover latency — one `heartbeat_timeout` — is
+independent of database count.
+
+Fleet state scales with databases: one registry object each, written at
+registration. The recurring cost is the registry LIST every `config_poll`,
+one request per thousand databases; at millions of databases this is the
+first thing to replace with an inventory feed (open question 1).
+
+Steady-state traffic against the databases themselves scales with how many
+are managed: GC and coordinators poll each one on their configured
+intervals, and worker polling backs off while a database is idle. The
+intervals are the lever — a million mostly-idle databases are affordable
+to the degree their poll floors are long.
 
 ## Observability
 
