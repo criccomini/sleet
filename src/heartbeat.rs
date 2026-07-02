@@ -1,12 +1,12 @@
 //! The heartbeat: one object per node under `nodes/` at the fleet root.
 //!
-//! Each node PUTs `nodes/<node_id>.<services>` every
+//! Each node PUTs `nodes/<node_id>.<services>.json` every
 //! `heartbeat_interval`. Everything placement needs is in the listing:
 //! the name carries the node id and its offered services, and
 //! `LastModified` carries liveness. `<services>` is the offered
 //! services' letters (`c` = compactor-coordinator, `g` = gc, `w` =
-//! compaction-workers) sorted ascending — e.g. `sleet-1.cgw`. Node ids
-//! must not contain `.`.
+//! compaction-workers) sorted ascending — e.g. `sleet-1.cgw.json`. Node
+//! ids must not contain `.`.
 //!
 //! The body is observability-only, read by `sleet status` and never
 //! fetched for placement. Compatibility: readers ignore unknown fields
@@ -29,7 +29,7 @@ pub fn object_name(node_id: &str, services: &[Service]) -> String {
     letters.sort_unstable();
     letters.dedup();
     let letters: String = letters.into_iter().collect();
-    format!("{node_id}.{letters}")
+    format!("{node_id}.{letters}.json")
 }
 
 /// The body of a heartbeat object.
@@ -104,8 +104,8 @@ mod tests {
                 Service::Gc,
             ],
         );
-        assert_eq!(name, "sleet-1.cgw");
-        assert_eq!(object_name("n", &[Service::Gc]), "n.g");
+        assert_eq!(name, "sleet-1.cgw.json");
+        assert_eq!(object_name("n", &[Service::Gc]), "n.g.json");
     }
 
     #[test]

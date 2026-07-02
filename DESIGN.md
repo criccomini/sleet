@@ -40,7 +40,7 @@ sleet run s3://ops/sleet/
 <root>/
   sleet.toml               # policy: defaults, timing
   dbs/<db>.toml            # registry: one file per database, overrides only
-  nodes/<node>.<services>  # liveness + offered services in the name
+  nodes/<node>.<services>.json  # liveness + offered services in the name
 ```
 
 Each node heartbeats under `nodes/`, computes its assignments by
@@ -104,10 +104,10 @@ fall through to the previous layer.
 
 ### Nodes and liveness
 
-Each node PUTs a heartbeat at `nodes/<node_id>.<services>` every
+Each node PUTs a heartbeat at `nodes/<node_id>.<services>.json` every
 `heartbeat_interval`, where `<services>` is the offered services' letters
 (`c` = compactor-coordinator, `g` = gc, `w` = compaction-workers) sorted
-ascending — e.g. `sleet-1.cgw`; node ids must not contain `.`. Everything
+ascending — e.g. `sleet-1.cgw.json`; node ids must not contain `.`. Everything
 assignment needs is in the listing — names carry roles, `LastModified`
 carries liveness — so one LIST of `nodes/` per tick is the only read;
 heartbeat bodies are never fetched for placement.
