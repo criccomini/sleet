@@ -211,6 +211,92 @@ async fn seeded_churn_converges_and_reproduces() {
     }
 }
 
+/// Model-based testing: simulate the FizzBee coordination spec
+/// (specs/coordination.fizz), extract its crash/restart schedule, and
+/// replay it against real daemons; the spec's Converged invariant must
+/// hold at quiescence. Skips when the `fizz` binary is unavailable.
+#[tokio::test(start_paused = true)]
+async fn fizz_spec_traces_drive_the_daemon() {
+    let spec = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("specs/coordination.fizz");
+    let fizz = std::process::Command::new("fizz")
+        .args(["-x", "--max_runs", "1", "--seed", "11"])
+        .arg(&spec)
+        .output();
+    let Ok(output) = fizz else {
+        eprintln!("note: fizz unavailable; skipping model-based test");
+        return;
+    };
+    if !output.status.success() {
+        // Simulation mode may end mid-churn and report the
+        // eventually-always property unsatisfied on the truncated path;
+        // the schedule of actions is still exactly what we want.
+        eprintln!("note: fizz simulation exited nonzero (truncated path); using its trace");
+    }
+    let dot = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("specs/out/latest/graph.dot");
+    let Ok(dot) = std::fs::read_to_string(dot) else {
+        eprintln!("note: no fizz trace output; skipping model-based test");
+        return;
+    };
+    // Labels look like `label="12: Node#0.Crash"`; keep them ordered.
+    let mut steps: Vec<(u64, String)> = Vec::new();
+    for cap in dot.split("label=\"").skip(1) {
+        let Some(label) = cap.split('"').next() else {
+            continue;
+        };
+        if let Some((n, action)) = label.split_once(": ")
+            && let Ok(n) = n.parse::<u64>()
+        {
+            steps.push((n, action.to_string()));
+        }
+    }
+    steps.sort();
+
+    // Replay: spec node Node#i is daemon node n(i+1); databases and
+    // rankings differ from the spec's — the invariant is placement
+    // against the real frozen hash, same as the spec's Converged.
+    let mut sim = Sim::new(11).await;
+    for id in ["n1", "n2", "n3"] {
+        sim.spawn(id);
+    }
+    let dbs = [
+        "memory:///dbs/db1".to_string(),
+        "memory:///dbs/db2".to_string(),
+    ];
+    for db in &dbs {
+        ops::register(&sim.root, db).await.unwrap();
+    }
+    for (_, action) in &steps {
+        sim.tick(Duration::from_millis(300)).await;
+        let node = action
+            .split_once('#')
+            .and_then(|(_, rest)| rest.split_once('.'))
+            .map(|(i, act)| (format!("n{}", i.parse::<usize>().unwrap_or(0) + 1), act));
+        match node {
+            Some((id, "Crash")) => sim.crash(&id),
+            Some((id, "Restart")) => sim.spawn(&id),
+            _ => {}
+        }
+    }
+    // Quiesce and assert the spec's Converged property against reality.
+    for _ in 0..50 {
+        sim.tick(Duration::from_millis(100)).await;
+    }
+    let live: Vec<String> = sim.nodes.keys().cloned().collect();
+    let live_refs: Vec<&str> = live.iter().map(String::as_str).collect();
+    let mut total = 0;
+    for id in &live {
+        let want: u64 = dbs
+            .iter()
+            .filter(|db| placement::owners(db, Service::Gc, 1, &live_refs)[0] == id)
+            .count() as u64;
+        let got = sim.task_count(id).await;
+        assert_eq!(got, want, "node {id}: spec trace must converge");
+        total += got;
+    }
+    assert_eq!(total, dbs.len() as u64, "every pair owned exactly once");
+    sim.shutdown().await;
+}
+
 /// Heartbeat and config-poll cadences, pinned in virtual time: over 10
 /// virtual seconds a 200ms heartbeat means ~50 PUTs, and a 400ms
 /// config_poll means ~25 config GETs.

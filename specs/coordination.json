@@ -1,0 +1,3801 @@
+{
+  "sourceInfo": {
+    "fileName": "coordination.fizz",
+    "start": {
+      "line": 27,
+      "column": 1
+    },
+    "end": {
+      "line": 162
+    }
+  },
+  "invariants": [
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 123,
+          "column": 1
+        },
+        "end": {
+          "line": 130
+        }
+      },
+      "name": "CurrentHolderNeverFenced",
+      "temporalOperators": [
+        "always"
+      ],
+      "block": {
+        "sourceInfo": {
+          "start": {
+            "line": 124,
+            "column": 5
+          },
+          "end": {
+            "line": 130
+          }
+        },
+        "flow": "FLOW_ATOMIC",
+        "stmts": [
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 124,
+                "column": 5
+              },
+              "end": {
+                "line": 127,
+                "column": 4
+              }
+            },
+            "forStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 124,
+                  "column": 5
+                },
+                "end": {
+                  "line": 127,
+                  "column": 4
+                }
+              },
+              "loopVars": [
+                "db"
+              ],
+              "pyExpr": "DBS",
+              "block": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 125,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 127,
+                    "column": 4
+                  }
+                },
+                "stmts": [
+                  {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 125,
+                        "column": 9
+                      },
+                      "end": {
+                        "line": 127,
+                        "column": 4
+                      }
+                    },
+                    "ifStmt": {
+                      "sourceInfo": {
+                        "start": {
+                          "line": 125,
+                          "column": 9
+                        },
+                        "end": {
+                          "line": 127,
+                          "column": 4
+                        }
+                      },
+                      "branches": [
+                        {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 125,
+                              "column": 12
+                            },
+                            "end": {
+                              "line": 127,
+                              "column": 4
+                            }
+                          },
+                          "condition": "holder[db] != None and (holder[db] in fenced[db])",
+                          "block": {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 126,
+                                "column": 13
+                              },
+                              "end": {
+                                "line": 127,
+                                "column": 4
+                              }
+                            },
+                            "stmts": [
+                              {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 126,
+                                    "column": 13
+                                  },
+                                  "end": {
+                                    "line": 127,
+                                    "column": 4
+                                  }
+                                },
+                                "returnStmt": {
+                                  "sourceInfo": {
+                                    "start": {
+                                      "line": 126,
+                                      "column": 13
+                                    },
+                                    "end": {
+                                      "line": 126,
+                                      "column": 24
+                                    }
+                                  },
+                                  "pyExpr": "False",
+                                  "expr": {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 126,
+                                        "column": 20
+                                      },
+                                      "end": {
+                                        "line": 126,
+                                        "column": 24
+                                      }
+                                    },
+                                    "pyExpr": "False"
+                                  }
+                                }
+                              }
+                            ]
+                          },
+                          "conditionExpr": {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 125,
+                                "column": 12
+                              },
+                              "end": {
+                                "line": 125,
+                                "column": 60
+                              }
+                            },
+                            "pyExpr": "holder[db] != None and (holder[db] in fenced[db])"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              "iterExpr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 124,
+                    "column": 15
+                  },
+                  "end": {
+                    "line": 124,
+                    "column": 17
+                  }
+                },
+                "pyExpr": "DBS"
+              }
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 127,
+                "column": 5
+              },
+              "end": {
+                "line": 130
+              }
+            },
+            "returnStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 127,
+                  "column": 5
+                },
+                "end": {
+                  "line": 127,
+                  "column": 15
+                }
+              },
+              "pyExpr": "True",
+              "expr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 127,
+                    "column": 12
+                  },
+                  "end": {
+                    "line": 127,
+                    "column": 15
+                  }
+                },
+                "pyExpr": "True"
+              }
+            }
+          }
+        ]
+      },
+      "pyCode": "def CurrentHolderNeverFenced():\n    for db in DBS:\n        if holder[db] != None and (holder[db] in fenced[db]):\n            return False\n    return True\n\n# Only nodes that are actually alive ever run anything.\n"
+    },
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 130,
+          "column": 1
+        },
+        "end": {
+          "line": 139
+        }
+      },
+      "name": "OnlyAliveNodesRun",
+      "temporalOperators": [
+        "always"
+      ],
+      "block": {
+        "sourceInfo": {
+          "start": {
+            "line": 131,
+            "column": 5
+          },
+          "end": {
+            "line": 139
+          }
+        },
+        "flow": "FLOW_ATOMIC",
+        "stmts": [
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 131,
+                "column": 5
+              },
+              "end": {
+                "line": 135,
+                "column": 4
+              }
+            },
+            "forStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 131,
+                  "column": 5
+                },
+                "end": {
+                  "line": 135,
+                  "column": 4
+                }
+              },
+              "loopVars": [
+                "db"
+              ],
+              "pyExpr": "DBS",
+              "block": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 132,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 135,
+                    "column": 4
+                  }
+                },
+                "stmts": [
+                  {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 132,
+                        "column": 9
+                      },
+                      "end": {
+                        "line": 135,
+                        "column": 4
+                      }
+                    },
+                    "forStmt": {
+                      "sourceInfo": {
+                        "start": {
+                          "line": 132,
+                          "column": 9
+                        },
+                        "end": {
+                          "line": 135,
+                          "column": 4
+                        }
+                      },
+                      "loopVars": [
+                        "m"
+                      ],
+                      "pyExpr": "runners[db]",
+                      "block": {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 133,
+                            "column": 13
+                          },
+                          "end": {
+                            "line": 135,
+                            "column": 4
+                          }
+                        },
+                        "stmts": [
+                          {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 133,
+                                "column": 13
+                              },
+                              "end": {
+                                "line": 135,
+                                "column": 4
+                              }
+                            },
+                            "ifStmt": {
+                              "sourceInfo": {
+                                "start": {
+                                  "line": 133,
+                                  "column": 13
+                                },
+                                "end": {
+                                  "line": 135,
+                                  "column": 4
+                                }
+                              },
+                              "branches": [
+                                {
+                                  "sourceInfo": {
+                                    "start": {
+                                      "line": 133,
+                                      "column": 16
+                                    },
+                                    "end": {
+                                      "line": 135,
+                                      "column": 4
+                                    }
+                                  },
+                                  "condition": "not alive[m]",
+                                  "block": {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 134,
+                                        "column": 17
+                                      },
+                                      "end": {
+                                        "line": 135,
+                                        "column": 4
+                                      }
+                                    },
+                                    "stmts": [
+                                      {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 134,
+                                            "column": 17
+                                          },
+                                          "end": {
+                                            "line": 135,
+                                            "column": 4
+                                          }
+                                        },
+                                        "returnStmt": {
+                                          "sourceInfo": {
+                                            "start": {
+                                              "line": 134,
+                                              "column": 17
+                                            },
+                                            "end": {
+                                              "line": 134,
+                                              "column": 28
+                                            }
+                                          },
+                                          "pyExpr": "False",
+                                          "expr": {
+                                            "sourceInfo": {
+                                              "start": {
+                                                "line": 134,
+                                                "column": 24
+                                              },
+                                              "end": {
+                                                "line": 134,
+                                                "column": 28
+                                              }
+                                            },
+                                            "pyExpr": "False"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "conditionExpr": {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 133,
+                                        "column": 16
+                                      },
+                                      "end": {
+                                        "line": 133,
+                                        "column": 27
+                                      }
+                                    },
+                                    "pyExpr": "not alive[m]"
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      },
+                      "iterExpr": {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 132,
+                            "column": 18
+                          },
+                          "end": {
+                            "line": 132,
+                            "column": 28
+                          }
+                        },
+                        "pyExpr": "runners[db]"
+                      }
+                    }
+                  }
+                ]
+              },
+              "iterExpr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 131,
+                    "column": 15
+                  },
+                  "end": {
+                    "line": 131,
+                    "column": 17
+                  }
+                },
+                "pyExpr": "DBS"
+              }
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 135,
+                "column": 5
+              },
+              "end": {
+                "line": 139
+              }
+            },
+            "returnStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 135,
+                  "column": 5
+                },
+                "end": {
+                  "line": 135,
+                  "column": 15
+                }
+              },
+              "pyExpr": "True",
+              "expr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 135,
+                    "column": 12
+                  },
+                  "end": {
+                    "line": 135,
+                    "column": 15
+                  }
+                },
+                "pyExpr": "True"
+              }
+            }
+          }
+        ]
+      },
+      "pyCode": "def OnlyAliveNodesRun():\n    for db in DBS:\n        for m in runners[db]:\n            if not alive[m]:\n                return False\n    return True\n\n# The design's stated worst case \u2014 a transient double-run \u2014 really is\n# reachable in the model.\n"
+    },
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 139,
+          "column": 1
+        },
+        "end": {
+          "line": 145
+        }
+      },
+      "name": "DoubleRunReachable",
+      "temporalOperators": [
+        "exists"
+      ],
+      "block": {
+        "sourceInfo": {
+          "start": {
+            "line": 140,
+            "column": 5
+          },
+          "end": {
+            "line": 145
+          }
+        },
+        "flow": "FLOW_ATOMIC",
+        "stmts": [
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 140,
+                "column": 5
+              },
+              "end": {
+                "line": 145
+              }
+            },
+            "returnStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 140,
+                  "column": 5
+                },
+                "end": {
+                  "line": 140,
+                  "column": 62
+                }
+              },
+              "pyExpr": "len([db for db in DBS if len(runners[db]) > 1]) > 0",
+              "expr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 140,
+                    "column": 12
+                  },
+                  "end": {
+                    "line": 140,
+                    "column": 62
+                  }
+                },
+                "pyExpr": "len([db for db in DBS if len(runners[db]) > 1]) > 0"
+              }
+            }
+          }
+        ]
+      },
+      "pyCode": "def DoubleRunReachable():\n    return len([db for db in DBS if len(runners[db]) > 1]) > 0\n\n# Convergence and no fence livelock: once churn stops, every database\n# is run by exactly the top-ranked alive node, nothing is fenced, and\n# it stays that way.\n"
+    },
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 145,
+          "column": 1
+        },
+        "end": {
+          "line": 162
+        }
+      },
+      "name": "Converged",
+      "temporalOperators": [
+        "eventually",
+        "always"
+      ],
+      "block": {
+        "sourceInfo": {
+          "start": {
+            "line": 146,
+            "column": 5
+          },
+          "end": {
+            "line": 162
+          }
+        },
+        "flow": "FLOW_ATOMIC",
+        "stmts": [
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 146,
+                "column": 5
+              },
+              "end": {
+                "line": 161,
+                "column": 4
+              }
+            },
+            "forStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 146,
+                  "column": 5
+                },
+                "end": {
+                  "line": 161,
+                  "column": 4
+                }
+              },
+              "loopVars": [
+                "db"
+              ],
+              "pyExpr": "DBS",
+              "block": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 147,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 161,
+                    "column": 4
+                  }
+                },
+                "stmts": [
+                  {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 147,
+                        "column": 9
+                      },
+                      "end": {
+                        "line": 148,
+                        "column": 8
+                      }
+                    },
+                    "pyStmt": {
+                      "sourceInfo": {
+                        "start": {
+                          "line": 147,
+                          "column": 9
+                        },
+                        "end": {
+                          "line": 147,
+                          "column": 21
+                        }
+                      },
+                      "code": "expected = \"\""
+                    }
+                  },
+                  {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 148,
+                        "column": 9
+                      },
+                      "end": {
+                        "line": 151,
+                        "column": 8
+                      }
+                    },
+                    "forStmt": {
+                      "sourceInfo": {
+                        "start": {
+                          "line": 148,
+                          "column": 9
+                        },
+                        "end": {
+                          "line": 151,
+                          "column": 8
+                        }
+                      },
+                      "loopVars": [
+                        "r"
+                      ],
+                      "pyExpr": "RANK[db]",
+                      "block": {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 149,
+                            "column": 13
+                          },
+                          "end": {
+                            "line": 151,
+                            "column": 8
+                          }
+                        },
+                        "stmts": [
+                          {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 149,
+                                "column": 13
+                              },
+                              "end": {
+                                "line": 151,
+                                "column": 8
+                              }
+                            },
+                            "ifStmt": {
+                              "sourceInfo": {
+                                "start": {
+                                  "line": 149,
+                                  "column": 13
+                                },
+                                "end": {
+                                  "line": 151,
+                                  "column": 8
+                                }
+                              },
+                              "branches": [
+                                {
+                                  "sourceInfo": {
+                                    "start": {
+                                      "line": 149,
+                                      "column": 16
+                                    },
+                                    "end": {
+                                      "line": 151,
+                                      "column": 8
+                                    }
+                                  },
+                                  "condition": "expected == \"\" and alive[r]",
+                                  "block": {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 150,
+                                        "column": 17
+                                      },
+                                      "end": {
+                                        "line": 151,
+                                        "column": 8
+                                      }
+                                    },
+                                    "stmts": [
+                                      {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 150,
+                                            "column": 17
+                                          },
+                                          "end": {
+                                            "line": 151,
+                                            "column": 8
+                                          }
+                                        },
+                                        "pyStmt": {
+                                          "sourceInfo": {
+                                            "start": {
+                                              "line": 150,
+                                              "column": 17
+                                            },
+                                            "end": {
+                                              "line": 150,
+                                              "column": 28
+                                            }
+                                          },
+                                          "code": "expected = r"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "conditionExpr": {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 149,
+                                        "column": 16
+                                      },
+                                      "end": {
+                                        "line": 149,
+                                        "column": 42
+                                      }
+                                    },
+                                    "pyExpr": "expected == \"\" and alive[r]"
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      },
+                      "iterExpr": {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 148,
+                            "column": 18
+                          },
+                          "end": {
+                            "line": 148,
+                            "column": 25
+                          }
+                        },
+                        "pyExpr": "RANK[db]"
+                      }
+                    }
+                  },
+                  {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 151,
+                        "column": 9
+                      },
+                      "end": {
+                        "line": 159,
+                        "column": 8
+                      }
+                    },
+                    "ifStmt": {
+                      "sourceInfo": {
+                        "start": {
+                          "line": 151,
+                          "column": 9
+                        },
+                        "end": {
+                          "line": 159,
+                          "column": 8
+                        }
+                      },
+                      "branches": [
+                        {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 151,
+                              "column": 12
+                            },
+                            "end": {
+                              "line": 154,
+                              "column": 8
+                            }
+                          },
+                          "condition": "expected == \"\"",
+                          "block": {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 152,
+                                "column": 13
+                              },
+                              "end": {
+                                "line": 154,
+                                "column": 8
+                              }
+                            },
+                            "stmts": [
+                              {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 152,
+                                    "column": 13
+                                  },
+                                  "end": {
+                                    "line": 154,
+                                    "column": 8
+                                  }
+                                },
+                                "ifStmt": {
+                                  "sourceInfo": {
+                                    "start": {
+                                      "line": 152,
+                                      "column": 13
+                                    },
+                                    "end": {
+                                      "line": 154,
+                                      "column": 8
+                                    }
+                                  },
+                                  "branches": [
+                                    {
+                                      "sourceInfo": {
+                                        "start": {
+                                          "line": 152,
+                                          "column": 16
+                                        },
+                                        "end": {
+                                          "line": 154,
+                                          "column": 8
+                                        }
+                                      },
+                                      "condition": "len(runners[db]) != 0",
+                                      "block": {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 153,
+                                            "column": 17
+                                          },
+                                          "end": {
+                                            "line": 154,
+                                            "column": 8
+                                          }
+                                        },
+                                        "stmts": [
+                                          {
+                                            "sourceInfo": {
+                                              "start": {
+                                                "line": 153,
+                                                "column": 17
+                                              },
+                                              "end": {
+                                                "line": 154,
+                                                "column": 8
+                                              }
+                                            },
+                                            "returnStmt": {
+                                              "sourceInfo": {
+                                                "start": {
+                                                  "line": 153,
+                                                  "column": 17
+                                                },
+                                                "end": {
+                                                  "line": 153,
+                                                  "column": 28
+                                                }
+                                              },
+                                              "pyExpr": "False",
+                                              "expr": {
+                                                "sourceInfo": {
+                                                  "start": {
+                                                    "line": 153,
+                                                    "column": 24
+                                                  },
+                                                  "end": {
+                                                    "line": 153,
+                                                    "column": 28
+                                                  }
+                                                },
+                                                "pyExpr": "False"
+                                              }
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      "conditionExpr": {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 152,
+                                            "column": 16
+                                          },
+                                          "end": {
+                                            "line": 152,
+                                            "column": 36
+                                          }
+                                        },
+                                        "pyExpr": "len(runners[db]) != 0"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          },
+                          "conditionExpr": {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 151,
+                                "column": 12
+                              },
+                              "end": {
+                                "line": 151,
+                                "column": 25
+                              }
+                            },
+                            "pyExpr": "expected == \"\""
+                          }
+                        },
+                        {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 154,
+                              "column": 9
+                            },
+                            "end": {
+                              "line": 159,
+                              "column": 8
+                            }
+                          },
+                          "condition": "True",
+                          "block": {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 155,
+                                "column": 13
+                              },
+                              "end": {
+                                "line": 159,
+                                "column": 8
+                              }
+                            },
+                            "stmts": [
+                              {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 155,
+                                    "column": 13
+                                  },
+                                  "end": {
+                                    "line": 157,
+                                    "column": 12
+                                  }
+                                },
+                                "ifStmt": {
+                                  "sourceInfo": {
+                                    "start": {
+                                      "line": 155,
+                                      "column": 13
+                                    },
+                                    "end": {
+                                      "line": 157,
+                                      "column": 12
+                                    }
+                                  },
+                                  "branches": [
+                                    {
+                                      "sourceInfo": {
+                                        "start": {
+                                          "line": 155,
+                                          "column": 16
+                                        },
+                                        "end": {
+                                          "line": 157,
+                                          "column": 12
+                                        }
+                                      },
+                                      "condition": "runners[db] != [expected]",
+                                      "block": {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 156,
+                                            "column": 17
+                                          },
+                                          "end": {
+                                            "line": 157,
+                                            "column": 12
+                                          }
+                                        },
+                                        "stmts": [
+                                          {
+                                            "sourceInfo": {
+                                              "start": {
+                                                "line": 156,
+                                                "column": 17
+                                              },
+                                              "end": {
+                                                "line": 157,
+                                                "column": 12
+                                              }
+                                            },
+                                            "returnStmt": {
+                                              "sourceInfo": {
+                                                "start": {
+                                                  "line": 156,
+                                                  "column": 17
+                                                },
+                                                "end": {
+                                                  "line": 156,
+                                                  "column": 28
+                                                }
+                                              },
+                                              "pyExpr": "False",
+                                              "expr": {
+                                                "sourceInfo": {
+                                                  "start": {
+                                                    "line": 156,
+                                                    "column": 24
+                                                  },
+                                                  "end": {
+                                                    "line": 156,
+                                                    "column": 28
+                                                  }
+                                                },
+                                                "pyExpr": "False"
+                                              }
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      "conditionExpr": {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 155,
+                                            "column": 16
+                                          },
+                                          "end": {
+                                            "line": 155,
+                                            "column": 40
+                                          }
+                                        },
+                                        "pyExpr": "runners[db] != [expected]"
+                                      }
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 157,
+                                    "column": 13
+                                  },
+                                  "end": {
+                                    "line": 159,
+                                    "column": 8
+                                  }
+                                },
+                                "ifStmt": {
+                                  "sourceInfo": {
+                                    "start": {
+                                      "line": 157,
+                                      "column": 13
+                                    },
+                                    "end": {
+                                      "line": 159,
+                                      "column": 8
+                                    }
+                                  },
+                                  "branches": [
+                                    {
+                                      "sourceInfo": {
+                                        "start": {
+                                          "line": 157,
+                                          "column": 16
+                                        },
+                                        "end": {
+                                          "line": 159,
+                                          "column": 8
+                                        }
+                                      },
+                                      "condition": "holder[db] != expected",
+                                      "block": {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 158,
+                                            "column": 17
+                                          },
+                                          "end": {
+                                            "line": 159,
+                                            "column": 8
+                                          }
+                                        },
+                                        "stmts": [
+                                          {
+                                            "sourceInfo": {
+                                              "start": {
+                                                "line": 158,
+                                                "column": 17
+                                              },
+                                              "end": {
+                                                "line": 159,
+                                                "column": 8
+                                              }
+                                            },
+                                            "returnStmt": {
+                                              "sourceInfo": {
+                                                "start": {
+                                                  "line": 158,
+                                                  "column": 17
+                                                },
+                                                "end": {
+                                                  "line": 158,
+                                                  "column": 28
+                                                }
+                                              },
+                                              "pyExpr": "False",
+                                              "expr": {
+                                                "sourceInfo": {
+                                                  "start": {
+                                                    "line": 158,
+                                                    "column": 24
+                                                  },
+                                                  "end": {
+                                                    "line": 158,
+                                                    "column": 28
+                                                  }
+                                                },
+                                                "pyExpr": "False"
+                                              }
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      "conditionExpr": {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 157,
+                                            "column": 16
+                                          },
+                                          "end": {
+                                            "line": 157,
+                                            "column": 37
+                                          }
+                                        },
+                                        "pyExpr": "holder[db] != expected"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          },
+                          "conditionExpr": {
+                            "pyExpr": "True"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 159,
+                        "column": 9
+                      },
+                      "end": {
+                        "line": 161,
+                        "column": 4
+                      }
+                    },
+                    "ifStmt": {
+                      "sourceInfo": {
+                        "start": {
+                          "line": 159,
+                          "column": 9
+                        },
+                        "end": {
+                          "line": 161,
+                          "column": 4
+                        }
+                      },
+                      "branches": [
+                        {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 159,
+                              "column": 12
+                            },
+                            "end": {
+                              "line": 161,
+                              "column": 4
+                            }
+                          },
+                          "condition": "len(fenced[db]) != 0",
+                          "block": {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 160,
+                                "column": 13
+                              },
+                              "end": {
+                                "line": 161,
+                                "column": 4
+                              }
+                            },
+                            "stmts": [
+                              {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 160,
+                                    "column": 13
+                                  },
+                                  "end": {
+                                    "line": 161,
+                                    "column": 4
+                                  }
+                                },
+                                "returnStmt": {
+                                  "sourceInfo": {
+                                    "start": {
+                                      "line": 160,
+                                      "column": 13
+                                    },
+                                    "end": {
+                                      "line": 160,
+                                      "column": 24
+                                    }
+                                  },
+                                  "pyExpr": "False",
+                                  "expr": {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 160,
+                                        "column": 20
+                                      },
+                                      "end": {
+                                        "line": 160,
+                                        "column": 24
+                                      }
+                                    },
+                                    "pyExpr": "False"
+                                  }
+                                }
+                              }
+                            ]
+                          },
+                          "conditionExpr": {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 159,
+                                "column": 12
+                              },
+                              "end": {
+                                "line": 159,
+                                "column": 31
+                              }
+                            },
+                            "pyExpr": "len(fenced[db]) != 0"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              "iterExpr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 146,
+                    "column": 15
+                  },
+                  "end": {
+                    "line": 146,
+                    "column": 17
+                  }
+                },
+                "pyExpr": "DBS"
+              }
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 161,
+                "column": 5
+              },
+              "end": {
+                "line": 162
+              }
+            },
+            "returnStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 161,
+                  "column": 5
+                },
+                "end": {
+                  "line": 161,
+                  "column": 15
+                }
+              },
+              "pyExpr": "True",
+              "expr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 161,
+                    "column": 12
+                  },
+                  "end": {
+                    "line": 161,
+                    "column": 15
+                  }
+                },
+                "pyExpr": "True"
+              }
+            }
+          }
+        ]
+      },
+      "pyCode": "def Converged():\n    for db in DBS:\n        expected = \"\"\n        for r in RANK[db]:\n            if expected == \"\" and alive[r]:\n                expected = r\n        if expected == \"\":\n            if len(runners[db]) != 0:\n                return False\n        else:\n            if runners[db] != [expected]:\n                return False\n            if holder[db] != expected:\n                return False\n        if len(fenced[db]) != 0:\n            return False\n    return True\n"
+    }
+  ],
+  "actions": [
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 108,
+          "column": 1
+        },
+        "end": {
+          "line": 123
+        }
+      },
+      "name": "Init",
+      "flow": "FLOW_ATOMIC",
+      "fairness": {
+        "level": "FAIRNESS_LEVEL_STRONG"
+      },
+      "block": {
+        "sourceInfo": {
+          "start": {
+            "line": 109,
+            "column": 5
+          },
+          "end": {
+            "line": 123
+          }
+        },
+        "flow": "FLOW_ATOMIC",
+        "stmts": [
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 109,
+                "column": 5
+              },
+              "end": {
+                "line": 110,
+                "column": 4
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 109,
+                  "column": 5
+                },
+                "end": {
+                  "line": 109,
+                  "column": 20
+                }
+              },
+              "code": "crashes_left = 1"
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 110,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 4
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 110,
+                  "column": 5
+                },
+                "end": {
+                  "line": 110,
+                  "column": 21
+                }
+              },
+              "code": "restarts_left = 1"
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 111,
+                "column": 5
+              },
+              "end": {
+                "line": 112,
+                "column": 4
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 111,
+                  "column": 5
+                },
+                "end": {
+                  "line": 111,
+                  "column": 21
+                }
+              },
+              "code": "suspects_left = 2"
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 112,
+                "column": 5
+              },
+              "end": {
+                "line": 113,
+                "column": 4
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 112,
+                  "column": 5
+                },
+                "end": {
+                  "line": 112,
+                  "column": 48
+                }
+              },
+              "code": "alive = {\"n1\": True, \"n2\": True, \"n3\": True}"
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 113,
+                "column": 5
+              },
+              "end": {
+                "line": 114,
+                "column": 4
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 113,
+                  "column": 5
+                },
+                "end": {
+                  "line": 113,
+                  "column": 48
+                }
+              },
+              "code": "fresh = {\"n1\": True, \"n2\": True, \"n3\": True}"
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 114,
+                "column": 5
+              },
+              "end": {
+                "line": 115,
+                "column": 4
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 114,
+                  "column": 5
+                },
+                "end": {
+                  "line": 114,
+                  "column": 36
+                }
+              },
+              "code": "runners = {\"db1\": [], \"db2\": []}"
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 115,
+                "column": 5
+              },
+              "end": {
+                "line": 116,
+                "column": 4
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 115,
+                  "column": 5
+                },
+                "end": {
+                  "line": 115,
+                  "column": 35
+                }
+              },
+              "code": "fenced = {\"db1\": [], \"db2\": []}"
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 116,
+                "column": 5
+              },
+              "end": {
+                "line": 117,
+                "column": 4
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 116,
+                  "column": 5
+                },
+                "end": {
+                  "line": 116,
+                  "column": 39
+                }
+              },
+              "code": "holder = {\"db1\": None, \"db2\": None}"
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 117,
+                "column": 5
+              },
+              "end": {
+                "line": 118,
+                "column": 4
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 117,
+                  "column": 5
+                },
+                "end": {
+                  "line": 117,
+                  "column": 14
+                }
+              },
+              "code": "nodes = []"
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 118,
+                "column": 5
+              },
+              "end": {
+                "line": 123
+              }
+            },
+            "forStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 118,
+                  "column": 5
+                },
+                "end": {
+                  "line": 123
+                }
+              },
+              "loopVars": [
+                "nid"
+              ],
+              "pyExpr": "NODES",
+              "block": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 119,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 123
+                  }
+                },
+                "stmts": [
+                  {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 119,
+                        "column": 9
+                      },
+                      "end": {
+                        "line": 123
+                      }
+                    },
+                    "callStmt": {
+                      "sourceInfo": {
+                        "start": {
+                          "line": 119,
+                          "column": 9
+                        },
+                        "end": {
+                          "line": 119,
+                          "column": 35
+                        }
+                      },
+                      "name": "append",
+                      "args": [
+                        {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 119,
+                              "column": 22
+                            },
+                            "end": {
+                              "line": 119,
+                              "column": 34
+                            }
+                          },
+                          "pyExpr": "Node(nid=nid)",
+                          "expr": {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 119,
+                                "column": 22
+                              },
+                              "end": {
+                                "line": 119,
+                                "column": 34
+                              }
+                            },
+                            "pyExpr": "Node(nid=nid)"
+                          }
+                        }
+                      ],
+                      "receiver": "nodes"
+                    }
+                  }
+                ]
+              },
+              "iterExpr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 118,
+                    "column": 16
+                  },
+                  "end": {
+                    "line": 118,
+                    "column": 20
+                  }
+                },
+                "pyExpr": "NODES"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 95,
+          "column": 1
+        },
+        "end": {
+          "line": 102
+        }
+      },
+      "name": "ExpireCrashed",
+      "flow": "FLOW_ATOMIC",
+      "fairness": {
+        "sourceInfo": {
+          "start": {
+            "line": 95,
+            "column": 8
+          },
+          "end": {
+            "line": 95,
+            "column": 11
+          }
+        },
+        "level": "FAIRNESS_LEVEL_WEAK"
+      },
+      "block": {
+        "sourceInfo": {
+          "start": {
+            "line": 96,
+            "column": 5
+          },
+          "end": {
+            "line": 102
+          }
+        },
+        "flow": "FLOW_ATOMIC",
+        "stmts": [
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 96,
+                "column": 5
+              },
+              "end": {
+                "line": 97,
+                "column": 4
+              }
+            },
+            "anyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 96,
+                  "column": 5
+                },
+                "end": {
+                  "line": 96,
+                  "column": 63
+                }
+              },
+              "loopVars": [
+                "n"
+              ],
+              "pyExpr": "[x for x in NODES if (not alive[x]) and fresh[x]]",
+              "iterExpr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 96,
+                    "column": 15
+                  },
+                  "end": {
+                    "line": 96,
+                    "column": 63
+                  }
+                },
+                "pyExpr": "[x for x in NODES if (not alive[x]) and fresh[x]]"
+              }
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 97,
+                "column": 5
+              },
+              "end": {
+                "line": 102
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 97,
+                  "column": 5
+                },
+                "end": {
+                  "line": 97,
+                  "column": 20
+                }
+              },
+              "code": "fresh[n] = False"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 102,
+          "column": 1
+        },
+        "end": {
+          "line": 108
+        }
+      },
+      "name": "Suspect",
+      "flow": "FLOW_ATOMIC",
+      "fairness": {
+        "level": "FAIRNESS_LEVEL_UNFAIR"
+      },
+      "block": {
+        "sourceInfo": {
+          "start": {
+            "line": 103,
+            "column": 5
+          },
+          "end": {
+            "line": 108
+          }
+        },
+        "flow": "FLOW_ATOMIC",
+        "stmts": [
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 103,
+                "column": 5
+              },
+              "end": {
+                "line": 104,
+                "column": 4
+              }
+            },
+            "requireStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 103,
+                  "column": 5
+                },
+                "end": {
+                  "line": 103,
+                  "column": 29
+                }
+              },
+              "condition": "suspects_left > 0",
+              "conditionExpr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 103,
+                    "column": 13
+                  },
+                  "end": {
+                    "line": 103,
+                    "column": 29
+                  }
+                },
+                "pyExpr": "suspects_left > 0"
+              }
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 104,
+                "column": 5
+              },
+              "end": {
+                "line": 105,
+                "column": 4
+              }
+            },
+            "anyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 104,
+                  "column": 5
+                },
+                "end": {
+                  "line": 104,
+                  "column": 57
+                }
+              },
+              "loopVars": [
+                "n"
+              ],
+              "pyExpr": "[x for x in NODES if alive[x] and fresh[x]]",
+              "iterExpr": {
+                "sourceInfo": {
+                  "start": {
+                    "line": 104,
+                    "column": 15
+                  },
+                  "end": {
+                    "line": 104,
+                    "column": 57
+                  }
+                },
+                "pyExpr": "[x for x in NODES if alive[x] and fresh[x]]"
+              }
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 105,
+                "column": 5
+              },
+              "end": {
+                "line": 106,
+                "column": 4
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 105,
+                  "column": 5
+                },
+                "end": {
+                  "line": 105,
+                  "column": 37
+                }
+              },
+              "code": "suspects_left = suspects_left - 1"
+            }
+          },
+          {
+            "sourceInfo": {
+              "start": {
+                "line": 106,
+                "column": 5
+              },
+              "end": {
+                "line": 108
+              }
+            },
+            "pyStmt": {
+              "sourceInfo": {
+                "start": {
+                  "line": 106,
+                  "column": 5
+                },
+                "end": {
+                  "line": 106,
+                  "column": 20
+                }
+              },
+              "code": "fresh[n] = False"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "stmts": [
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 27,
+          "column": 1
+        },
+        "end": {
+          "line": 28
+        }
+      },
+      "pyStmt": {
+        "sourceInfo": {
+          "start": {
+            "line": 27,
+            "column": 1
+          },
+          "end": {
+            "line": 27,
+            "column": 26
+          }
+        },
+        "code": "NODES = [\"n1\", \"n2\", \"n3\"]"
+      }
+    },
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 28,
+          "column": 1
+        },
+        "end": {
+          "line": 32
+        }
+      },
+      "pyStmt": {
+        "sourceInfo": {
+          "start": {
+            "line": 28,
+            "column": 1
+          },
+          "end": {
+            "line": 28,
+            "column": 20
+          }
+        },
+        "code": "DBS = [\"db1\", \"db2\"]"
+      }
+    },
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 32,
+          "column": 1
+        },
+        "end": {
+          "line": 34
+        }
+      },
+      "pyStmt": {
+        "sourceInfo": {
+          "start": {
+            "line": 32,
+            "column": 1
+          },
+          "end": {
+            "line": 32,
+            "column": 61
+          }
+        },
+        "code": "RANK = {\"db1\": [\"n1\", \"n2\", \"n3\"], \"db2\": [\"n2\", \"n3\", \"n1\"]}"
+      }
+    }
+  ],
+  "roles": [
+    {
+      "sourceInfo": {
+        "start": {
+          "line": 34,
+          "column": 1
+        },
+        "end": {
+          "line": 95
+        }
+      },
+      "name": "Node",
+      "actions": [
+        {
+          "sourceInfo": {
+            "start": {
+              "line": 36,
+              "column": 5
+            },
+            "end": {
+              "line": 43,
+              "column": 4
+            }
+          },
+          "name": "Beat",
+          "flow": "FLOW_ATOMIC",
+          "fairness": {
+            "sourceInfo": {
+              "start": {
+                "line": 36,
+                "column": 12
+              },
+              "end": {
+                "line": 36,
+                "column": 15
+              }
+            },
+            "level": "FAIRNESS_LEVEL_WEAK"
+          },
+          "block": {
+            "sourceInfo": {
+              "start": {
+                "line": 37,
+                "column": 9
+              },
+              "end": {
+                "line": 43,
+                "column": 4
+              }
+            },
+            "flow": "FLOW_ATOMIC",
+            "stmts": [
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 37,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 38,
+                    "column": 8
+                  }
+                },
+                "requireStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 37,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 37,
+                      "column": 31
+                    }
+                  },
+                  "condition": "alive[self.nid]",
+                  "conditionExpr": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 37,
+                        "column": 17
+                      },
+                      "end": {
+                        "line": 37,
+                        "column": 31
+                      }
+                    },
+                    "pyExpr": "alive[self.nid]"
+                  }
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 38,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 43,
+                    "column": 4
+                  }
+                },
+                "pyStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 38,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 38,
+                      "column": 30
+                    }
+                  },
+                  "code": "fresh[self.nid] = True"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "sourceInfo": {
+            "start": {
+              "line": 43,
+              "column": 5
+            },
+            "end": {
+              "line": 61,
+              "column": 4
+            }
+          },
+          "name": "Recompute",
+          "flow": "FLOW_ATOMIC",
+          "fairness": {
+            "sourceInfo": {
+              "start": {
+                "line": 43,
+                "column": 12
+              },
+              "end": {
+                "line": 43,
+                "column": 15
+              }
+            },
+            "level": "FAIRNESS_LEVEL_WEAK"
+          },
+          "block": {
+            "sourceInfo": {
+              "start": {
+                "line": 44,
+                "column": 9
+              },
+              "end": {
+                "line": 61,
+                "column": 4
+              }
+            },
+            "flow": "FLOW_ATOMIC",
+            "stmts": [
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 44,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 45,
+                    "column": 8
+                  }
+                },
+                "requireStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 44,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 44,
+                      "column": 31
+                    }
+                  },
+                  "condition": "alive[self.nid]",
+                  "conditionExpr": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 44,
+                        "column": 17
+                      },
+                      "end": {
+                        "line": 44,
+                        "column": 31
+                      }
+                    },
+                    "pyExpr": "alive[self.nid]"
+                  }
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 45,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 61,
+                    "column": 4
+                  }
+                },
+                "forStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 45,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 61,
+                      "column": 4
+                    }
+                  },
+                  "loopVars": [
+                    "db"
+                  ],
+                  "pyExpr": "DBS",
+                  "block": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 46,
+                        "column": 13
+                      },
+                      "end": {
+                        "line": 61,
+                        "column": 4
+                      }
+                    },
+                    "stmts": [
+                      {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 46,
+                            "column": 13
+                          },
+                          "end": {
+                            "line": 47,
+                            "column": 12
+                          }
+                        },
+                        "pyStmt": {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 46,
+                              "column": 13
+                            },
+                            "end": {
+                              "line": 46,
+                              "column": 22
+                            }
+                          },
+                          "code": "owner = \"\""
+                        }
+                      },
+                      {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 47,
+                            "column": 13
+                          },
+                          "end": {
+                            "line": 50,
+                            "column": 12
+                          }
+                        },
+                        "forStmt": {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 47,
+                              "column": 13
+                            },
+                            "end": {
+                              "line": 50,
+                              "column": 12
+                            }
+                          },
+                          "loopVars": [
+                            "r"
+                          ],
+                          "pyExpr": "RANK[db]",
+                          "block": {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 48,
+                                "column": 17
+                              },
+                              "end": {
+                                "line": 50,
+                                "column": 12
+                              }
+                            },
+                            "stmts": [
+                              {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 48,
+                                    "column": 17
+                                  },
+                                  "end": {
+                                    "line": 50,
+                                    "column": 12
+                                  }
+                                },
+                                "ifStmt": {
+                                  "sourceInfo": {
+                                    "start": {
+                                      "line": 48,
+                                      "column": 17
+                                    },
+                                    "end": {
+                                      "line": 50,
+                                      "column": 12
+                                    }
+                                  },
+                                  "branches": [
+                                    {
+                                      "sourceInfo": {
+                                        "start": {
+                                          "line": 48,
+                                          "column": 20
+                                        },
+                                        "end": {
+                                          "line": 50,
+                                          "column": 12
+                                        }
+                                      },
+                                      "condition": "owner == \"\" and (fresh[r] or r == self.nid)",
+                                      "block": {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 49,
+                                            "column": 21
+                                          },
+                                          "end": {
+                                            "line": 50,
+                                            "column": 12
+                                          }
+                                        },
+                                        "stmts": [
+                                          {
+                                            "sourceInfo": {
+                                              "start": {
+                                                "line": 49,
+                                                "column": 21
+                                              },
+                                              "end": {
+                                                "line": 50,
+                                                "column": 12
+                                              }
+                                            },
+                                            "pyStmt": {
+                                              "sourceInfo": {
+                                                "start": {
+                                                  "line": 49,
+                                                  "column": 21
+                                                },
+                                                "end": {
+                                                  "line": 49,
+                                                  "column": 29
+                                                }
+                                              },
+                                              "code": "owner = r"
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      "conditionExpr": {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 48,
+                                            "column": 20
+                                          },
+                                          "end": {
+                                            "line": 48,
+                                            "column": 62
+                                          }
+                                        },
+                                        "pyExpr": "owner == \"\" and (fresh[r] or r == self.nid)"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          },
+                          "iterExpr": {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 47,
+                                "column": 22
+                              },
+                              "end": {
+                                "line": 47,
+                                "column": 29
+                              }
+                            },
+                            "pyExpr": "RANK[db]"
+                          }
+                        }
+                      },
+                      {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 50,
+                            "column": 13
+                          },
+                          "end": {
+                            "line": 61,
+                            "column": 4
+                          }
+                        },
+                        "ifStmt": {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 50,
+                              "column": 13
+                            },
+                            "end": {
+                              "line": 61,
+                              "column": 4
+                            }
+                          },
+                          "branches": [
+                            {
+                              "sourceInfo": {
+                                "start": {
+                                  "line": 50,
+                                  "column": 16
+                                },
+                                "end": {
+                                  "line": 56,
+                                  "column": 12
+                                }
+                              },
+                              "condition": "owner == self.nid and (self.nid not in runners[db])",
+                              "block": {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 51,
+                                    "column": 17
+                                  },
+                                  "end": {
+                                    "line": 56,
+                                    "column": 12
+                                  }
+                                },
+                                "stmts": [
+                                  {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 51,
+                                        "column": 17
+                                      },
+                                      "end": {
+                                        "line": 54,
+                                        "column": 16
+                                      }
+                                    },
+                                    "forStmt": {
+                                      "sourceInfo": {
+                                        "start": {
+                                          "line": 51,
+                                          "column": 17
+                                        },
+                                        "end": {
+                                          "line": 54,
+                                          "column": 16
+                                        }
+                                      },
+                                      "loopVars": [
+                                        "m"
+                                      ],
+                                      "pyExpr": "runners[db]",
+                                      "block": {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 52,
+                                            "column": 21
+                                          },
+                                          "end": {
+                                            "line": 54,
+                                            "column": 16
+                                          }
+                                        },
+                                        "stmts": [
+                                          {
+                                            "sourceInfo": {
+                                              "start": {
+                                                "line": 52,
+                                                "column": 21
+                                              },
+                                              "end": {
+                                                "line": 54,
+                                                "column": 16
+                                              }
+                                            },
+                                            "ifStmt": {
+                                              "sourceInfo": {
+                                                "start": {
+                                                  "line": 52,
+                                                  "column": 21
+                                                },
+                                                "end": {
+                                                  "line": 54,
+                                                  "column": 16
+                                                }
+                                              },
+                                              "branches": [
+                                                {
+                                                  "sourceInfo": {
+                                                    "start": {
+                                                      "line": 52,
+                                                      "column": 24
+                                                    },
+                                                    "end": {
+                                                      "line": 54,
+                                                      "column": 16
+                                                    }
+                                                  },
+                                                  "condition": "m not in fenced[db]",
+                                                  "block": {
+                                                    "sourceInfo": {
+                                                      "start": {
+                                                        "line": 53,
+                                                        "column": 25
+                                                      },
+                                                      "end": {
+                                                        "line": 54,
+                                                        "column": 16
+                                                      }
+                                                    },
+                                                    "stmts": [
+                                                      {
+                                                        "sourceInfo": {
+                                                          "start": {
+                                                            "line": 53,
+                                                            "column": 25
+                                                          },
+                                                          "end": {
+                                                            "line": 54,
+                                                            "column": 16
+                                                          }
+                                                        },
+                                                        "pyStmt": {
+                                                          "sourceInfo": {
+                                                            "start": {
+                                                              "line": 53,
+                                                              "column": 25
+                                                            },
+                                                            "end": {
+                                                              "line": 53,
+                                                              "column": 53
+                                                            }
+                                                          },
+                                                          "code": "fenced[db] = fenced[db] + [m]"
+                                                        }
+                                                      }
+                                                    ]
+                                                  },
+                                                  "conditionExpr": {
+                                                    "sourceInfo": {
+                                                      "start": {
+                                                        "line": 52,
+                                                        "column": 24
+                                                      },
+                                                      "end": {
+                                                        "line": 52,
+                                                        "column": 42
+                                                      }
+                                                    },
+                                                    "pyExpr": "m not in fenced[db]"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      "iterExpr": {
+                                        "sourceInfo": {
+                                          "start": {
+                                            "line": 51,
+                                            "column": 26
+                                          },
+                                          "end": {
+                                            "line": 51,
+                                            "column": 36
+                                          }
+                                        },
+                                        "pyExpr": "runners[db]"
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 54,
+                                        "column": 17
+                                      },
+                                      "end": {
+                                        "line": 55,
+                                        "column": 16
+                                      }
+                                    },
+                                    "pyStmt": {
+                                      "sourceInfo": {
+                                        "start": {
+                                          "line": 54,
+                                          "column": 17
+                                        },
+                                        "end": {
+                                          "line": 54,
+                                          "column": 54
+                                        }
+                                      },
+                                      "code": "runners[db] = runners[db] + [self.nid]"
+                                    }
+                                  },
+                                  {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 55,
+                                        "column": 17
+                                      },
+                                      "end": {
+                                        "line": 56,
+                                        "column": 12
+                                      }
+                                    },
+                                    "pyStmt": {
+                                      "sourceInfo": {
+                                        "start": {
+                                          "line": 55,
+                                          "column": 17
+                                        },
+                                        "end": {
+                                          "line": 55,
+                                          "column": 37
+                                        }
+                                      },
+                                      "code": "holder[db] = self.nid"
+                                    }
+                                  }
+                                ]
+                              },
+                              "conditionExpr": {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 50,
+                                    "column": 16
+                                  },
+                                  "end": {
+                                    "line": 50,
+                                    "column": 66
+                                  }
+                                },
+                                "pyExpr": "owner == self.nid and (self.nid not in runners[db])"
+                              }
+                            },
+                            {
+                              "sourceInfo": {
+                                "start": {
+                                  "line": 56,
+                                  "column": 13
+                                },
+                                "end": {
+                                  "line": 61,
+                                  "column": 4
+                                }
+                              },
+                              "condition": "owner != self.nid and (self.nid in runners[db]) and (self.nid not in fenced[db])",
+                              "block": {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 57,
+                                    "column": 17
+                                  },
+                                  "end": {
+                                    "line": 61,
+                                    "column": 4
+                                  }
+                                },
+                                "stmts": [
+                                  {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 57,
+                                        "column": 17
+                                      },
+                                      "end": {
+                                        "line": 61,
+                                        "column": 4
+                                      }
+                                    },
+                                    "pyStmt": {
+                                      "sourceInfo": {
+                                        "start": {
+                                          "line": 57,
+                                          "column": 17
+                                        },
+                                        "end": {
+                                          "line": 57,
+                                          "column": 71
+                                        }
+                                      },
+                                      "code": "runners[db] = [m for m in runners[db] if m != self.nid]"
+                                    }
+                                  }
+                                ]
+                              },
+                              "conditionExpr": {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 56,
+                                    "column": 18
+                                  },
+                                  "end": {
+                                    "line": 56,
+                                    "column": 97
+                                  }
+                                },
+                                "pyExpr": "owner != self.nid and (self.nid in runners[db]) and (self.nid not in fenced[db])"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "iterExpr": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 45,
+                        "column": 19
+                      },
+                      "end": {
+                        "line": 45,
+                        "column": 21
+                      }
+                    },
+                    "pyExpr": "DBS"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "sourceInfo": {
+            "start": {
+              "line": 61,
+              "column": 5
+            },
+            "end": {
+              "line": 81,
+              "column": 4
+            }
+          },
+          "name": "HandleFence",
+          "flow": "FLOW_ATOMIC",
+          "fairness": {
+            "sourceInfo": {
+              "start": {
+                "line": 61,
+                "column": 12
+              },
+              "end": {
+                "line": 61,
+                "column": 15
+              }
+            },
+            "level": "FAIRNESS_LEVEL_WEAK"
+          },
+          "block": {
+            "sourceInfo": {
+              "start": {
+                "line": 62,
+                "column": 9
+              },
+              "end": {
+                "line": 81,
+                "column": 4
+              }
+            },
+            "flow": "FLOW_ATOMIC",
+            "stmts": [
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 62,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 63,
+                    "column": 8
+                  }
+                },
+                "requireStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 62,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 62,
+                      "column": 31
+                    }
+                  },
+                  "condition": "alive[self.nid]",
+                  "conditionExpr": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 62,
+                        "column": 17
+                      },
+                      "end": {
+                        "line": 62,
+                        "column": 31
+                      }
+                    },
+                    "pyExpr": "alive[self.nid]"
+                  }
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 63,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 64,
+                    "column": 8
+                  }
+                },
+                "anyStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 63,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 63,
+                      "column": 60
+                    }
+                  },
+                  "loopVars": [
+                    "db"
+                  ],
+                  "pyExpr": "[d for d in DBS if self.nid in fenced[d]]",
+                  "iterExpr": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 63,
+                        "column": 20
+                      },
+                      "end": {
+                        "line": 63,
+                        "column": 60
+                      }
+                    },
+                    "pyExpr": "[d for d in DBS if self.nid in fenced[d]]"
+                  }
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 64,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 65,
+                    "column": 8
+                  }
+                },
+                "pyStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 64,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 64,
+                      "column": 61
+                    }
+                  },
+                  "code": "fenced[db] = [m for m in fenced[db] if m != self.nid]"
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 65,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 66,
+                    "column": 8
+                  }
+                },
+                "pyStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 65,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 65,
+                      "column": 18
+                    }
+                  },
+                  "code": "owner = \"\""
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 66,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 69,
+                    "column": 8
+                  }
+                },
+                "forStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 66,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 69,
+                      "column": 8
+                    }
+                  },
+                  "loopVars": [
+                    "r"
+                  ],
+                  "pyExpr": "RANK[db]",
+                  "block": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 67,
+                        "column": 13
+                      },
+                      "end": {
+                        "line": 69,
+                        "column": 8
+                      }
+                    },
+                    "stmts": [
+                      {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 67,
+                            "column": 13
+                          },
+                          "end": {
+                            "line": 69,
+                            "column": 8
+                          }
+                        },
+                        "ifStmt": {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 67,
+                              "column": 13
+                            },
+                            "end": {
+                              "line": 69,
+                              "column": 8
+                            }
+                          },
+                          "branches": [
+                            {
+                              "sourceInfo": {
+                                "start": {
+                                  "line": 67,
+                                  "column": 16
+                                },
+                                "end": {
+                                  "line": 69,
+                                  "column": 8
+                                }
+                              },
+                              "condition": "owner == \"\" and (fresh[r] or r == self.nid)",
+                              "block": {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 68,
+                                    "column": 17
+                                  },
+                                  "end": {
+                                    "line": 69,
+                                    "column": 8
+                                  }
+                                },
+                                "stmts": [
+                                  {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 68,
+                                        "column": 17
+                                      },
+                                      "end": {
+                                        "line": 69,
+                                        "column": 8
+                                      }
+                                    },
+                                    "pyStmt": {
+                                      "sourceInfo": {
+                                        "start": {
+                                          "line": 68,
+                                          "column": 17
+                                        },
+                                        "end": {
+                                          "line": 68,
+                                          "column": 25
+                                        }
+                                      },
+                                      "code": "owner = r"
+                                    }
+                                  }
+                                ]
+                              },
+                              "conditionExpr": {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 67,
+                                    "column": 16
+                                  },
+                                  "end": {
+                                    "line": 67,
+                                    "column": 58
+                                  }
+                                },
+                                "pyExpr": "owner == \"\" and (fresh[r] or r == self.nid)"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "iterExpr": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 66,
+                        "column": 18
+                      },
+                      "end": {
+                        "line": 66,
+                        "column": 25
+                      }
+                    },
+                    "pyExpr": "RANK[db]"
+                  }
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 69,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 81,
+                    "column": 4
+                  }
+                },
+                "ifStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 69,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 81,
+                      "column": 4
+                    }
+                  },
+                  "branches": [
+                    {
+                      "sourceInfo": {
+                        "start": {
+                          "line": 69,
+                          "column": 12
+                        },
+                        "end": {
+                          "line": 74,
+                          "column": 8
+                        }
+                      },
+                      "condition": "owner == self.nid",
+                      "block": {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 70,
+                            "column": 13
+                          },
+                          "end": {
+                            "line": 74,
+                            "column": 8
+                          }
+                        },
+                        "stmts": [
+                          {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 70,
+                                "column": 13
+                              },
+                              "end": {
+                                "line": 73,
+                                "column": 12
+                              }
+                            },
+                            "forStmt": {
+                              "sourceInfo": {
+                                "start": {
+                                  "line": 70,
+                                  "column": 13
+                                },
+                                "end": {
+                                  "line": 73,
+                                  "column": 12
+                                }
+                              },
+                              "loopVars": [
+                                "m"
+                              ],
+                              "pyExpr": "runners[db]",
+                              "block": {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 71,
+                                    "column": 17
+                                  },
+                                  "end": {
+                                    "line": 73,
+                                    "column": 12
+                                  }
+                                },
+                                "stmts": [
+                                  {
+                                    "sourceInfo": {
+                                      "start": {
+                                        "line": 71,
+                                        "column": 17
+                                      },
+                                      "end": {
+                                        "line": 73,
+                                        "column": 12
+                                      }
+                                    },
+                                    "ifStmt": {
+                                      "sourceInfo": {
+                                        "start": {
+                                          "line": 71,
+                                          "column": 17
+                                        },
+                                        "end": {
+                                          "line": 73,
+                                          "column": 12
+                                        }
+                                      },
+                                      "branches": [
+                                        {
+                                          "sourceInfo": {
+                                            "start": {
+                                              "line": 71,
+                                              "column": 20
+                                            },
+                                            "end": {
+                                              "line": 73,
+                                              "column": 12
+                                            }
+                                          },
+                                          "condition": "m != self.nid and (m not in fenced[db])",
+                                          "block": {
+                                            "sourceInfo": {
+                                              "start": {
+                                                "line": 72,
+                                                "column": 21
+                                              },
+                                              "end": {
+                                                "line": 73,
+                                                "column": 12
+                                              }
+                                            },
+                                            "stmts": [
+                                              {
+                                                "sourceInfo": {
+                                                  "start": {
+                                                    "line": 72,
+                                                    "column": 21
+                                                  },
+                                                  "end": {
+                                                    "line": 73,
+                                                    "column": 12
+                                                  }
+                                                },
+                                                "pyStmt": {
+                                                  "sourceInfo": {
+                                                    "start": {
+                                                      "line": 72,
+                                                      "column": 21
+                                                    },
+                                                    "end": {
+                                                      "line": 72,
+                                                      "column": 49
+                                                    }
+                                                  },
+                                                  "code": "fenced[db] = fenced[db] + [m]"
+                                                }
+                                              }
+                                            ]
+                                          },
+                                          "conditionExpr": {
+                                            "sourceInfo": {
+                                              "start": {
+                                                "line": 71,
+                                                "column": 20
+                                              },
+                                              "end": {
+                                                "line": 71,
+                                                "column": 58
+                                              }
+                                            },
+                                            "pyExpr": "m != self.nid and (m not in fenced[db])"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              },
+                              "iterExpr": {
+                                "sourceInfo": {
+                                  "start": {
+                                    "line": 70,
+                                    "column": 22
+                                  },
+                                  "end": {
+                                    "line": 70,
+                                    "column": 32
+                                  }
+                                },
+                                "pyExpr": "runners[db]"
+                              }
+                            }
+                          },
+                          {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 73,
+                                "column": 13
+                              },
+                              "end": {
+                                "line": 74,
+                                "column": 8
+                              }
+                            },
+                            "pyStmt": {
+                              "sourceInfo": {
+                                "start": {
+                                  "line": 73,
+                                  "column": 13
+                                },
+                                "end": {
+                                  "line": 73,
+                                  "column": 33
+                                }
+                              },
+                              "code": "holder[db] = self.nid"
+                            }
+                          }
+                        ]
+                      },
+                      "conditionExpr": {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 69,
+                            "column": 12
+                          },
+                          "end": {
+                            "line": 69,
+                            "column": 28
+                          }
+                        },
+                        "pyExpr": "owner == self.nid"
+                      }
+                    },
+                    {
+                      "sourceInfo": {
+                        "start": {
+                          "line": 74,
+                          "column": 9
+                        },
+                        "end": {
+                          "line": 81,
+                          "column": 4
+                        }
+                      },
+                      "condition": "True",
+                      "block": {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 75,
+                            "column": 13
+                          },
+                          "end": {
+                            "line": 81,
+                            "column": 4
+                          }
+                        },
+                        "stmts": [
+                          {
+                            "sourceInfo": {
+                              "start": {
+                                "line": 75,
+                                "column": 13
+                              },
+                              "end": {
+                                "line": 81,
+                                "column": 4
+                              }
+                            },
+                            "pyStmt": {
+                              "sourceInfo": {
+                                "start": {
+                                  "line": 75,
+                                  "column": 13
+                                },
+                                "end": {
+                                  "line": 75,
+                                  "column": 67
+                                }
+                              },
+                              "code": "runners[db] = [m for m in runners[db] if m != self.nid]"
+                            }
+                          }
+                        ]
+                      },
+                      "conditionExpr": {
+                        "pyExpr": "True"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "sourceInfo": {
+            "start": {
+              "line": 81,
+              "column": 5
+            },
+            "end": {
+              "line": 89,
+              "column": 4
+            }
+          },
+          "name": "Crash",
+          "flow": "FLOW_ATOMIC",
+          "fairness": {
+            "level": "FAIRNESS_LEVEL_UNFAIR"
+          },
+          "block": {
+            "sourceInfo": {
+              "start": {
+                "line": 82,
+                "column": 9
+              },
+              "end": {
+                "line": 89,
+                "column": 4
+              }
+            },
+            "flow": "FLOW_ATOMIC",
+            "stmts": [
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 82,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 83,
+                    "column": 8
+                  }
+                },
+                "requireStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 82,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 82,
+                      "column": 52
+                    }
+                  },
+                  "condition": "alive[self.nid] and crashes_left > 0",
+                  "conditionExpr": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 82,
+                        "column": 17
+                      },
+                      "end": {
+                        "line": 82,
+                        "column": 52
+                      }
+                    },
+                    "pyExpr": "alive[self.nid] and crashes_left > 0"
+                  }
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 83,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 84,
+                    "column": 8
+                  }
+                },
+                "pyStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 83,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 83,
+                      "column": 39
+                    }
+                  },
+                  "code": "crashes_left = crashes_left - 1"
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 84,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 85,
+                    "column": 8
+                  }
+                },
+                "pyStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 84,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 84,
+                      "column": 31
+                    }
+                  },
+                  "code": "alive[self.nid] = False"
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 85,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 89,
+                    "column": 4
+                  }
+                },
+                "forStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 85,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 89,
+                      "column": 4
+                    }
+                  },
+                  "loopVars": [
+                    "db"
+                  ],
+                  "pyExpr": "DBS",
+                  "block": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 86,
+                        "column": 13
+                      },
+                      "end": {
+                        "line": 89,
+                        "column": 4
+                      }
+                    },
+                    "stmts": [
+                      {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 86,
+                            "column": 13
+                          },
+                          "end": {
+                            "line": 87,
+                            "column": 12
+                          }
+                        },
+                        "pyStmt": {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 86,
+                              "column": 13
+                            },
+                            "end": {
+                              "line": 86,
+                              "column": 67
+                            }
+                          },
+                          "code": "runners[db] = [m for m in runners[db] if m != self.nid]"
+                        }
+                      },
+                      {
+                        "sourceInfo": {
+                          "start": {
+                            "line": 87,
+                            "column": 13
+                          },
+                          "end": {
+                            "line": 89,
+                            "column": 4
+                          }
+                        },
+                        "pyStmt": {
+                          "sourceInfo": {
+                            "start": {
+                              "line": 87,
+                              "column": 13
+                            },
+                            "end": {
+                              "line": 87,
+                              "column": 65
+                            }
+                          },
+                          "code": "fenced[db] = [m for m in fenced[db] if m != self.nid]"
+                        }
+                      }
+                    ]
+                  },
+                  "iterExpr": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 85,
+                        "column": 19
+                      },
+                      "end": {
+                        "line": 85,
+                        "column": 21
+                      }
+                    },
+                    "pyExpr": "DBS"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "sourceInfo": {
+            "start": {
+              "line": 89,
+              "column": 5
+            },
+            "end": {
+              "line": 95
+            }
+          },
+          "name": "Restart",
+          "flow": "FLOW_ATOMIC",
+          "fairness": {
+            "level": "FAIRNESS_LEVEL_UNFAIR"
+          },
+          "block": {
+            "sourceInfo": {
+              "start": {
+                "line": 90,
+                "column": 9
+              },
+              "end": {
+                "line": 95
+              }
+            },
+            "flow": "FLOW_ATOMIC",
+            "stmts": [
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 90,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 91,
+                    "column": 8
+                  }
+                },
+                "requireStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 90,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 90,
+                      "column": 59
+                    }
+                  },
+                  "condition": "(not alive[self.nid]) and restarts_left > 0",
+                  "conditionExpr": {
+                    "sourceInfo": {
+                      "start": {
+                        "line": 90,
+                        "column": 17
+                      },
+                      "end": {
+                        "line": 90,
+                        "column": 59
+                      }
+                    },
+                    "pyExpr": "(not alive[self.nid]) and restarts_left > 0"
+                  }
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 91,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 92,
+                    "column": 8
+                  }
+                },
+                "pyStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 91,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 91,
+                      "column": 41
+                    }
+                  },
+                  "code": "restarts_left = restarts_left - 1"
+                }
+              },
+              {
+                "sourceInfo": {
+                  "start": {
+                    "line": 92,
+                    "column": 9
+                  },
+                  "end": {
+                    "line": 95
+                  }
+                },
+                "pyStmt": {
+                  "sourceInfo": {
+                    "start": {
+                      "line": 92,
+                      "column": 9
+                    },
+                    "end": {
+                      "line": 92,
+                      "column": 30
+                    }
+                  },
+                  "code": "alive[self.nid] = True"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "frontMatter": {
+    "yaml": "# sleet's coordination protocol (DESIGN.md, Assignment and failover):\n# nodes heartbeat to shared storage; each reader judges liveness from\n# heartbeat freshness (counting itself live axiomatically); ownership\n# of each database is the top of a frozen ranking over the reader's\n# live view; coordinators fence predecessors on acquisition (the\n# compactor_epoch abstraction: `holder` is the current epoch owner,\n# and a newly acquired holder fences whoever else is running).\n#\n# Checked claims:\n# - CurrentHolderNeverFenced: fencing is ordered \u2014 the newest acquirer\n#   is never itself fenced.\n# - DoubleRunReachable: the design's stated worst case (a transient\n#   double-run) is actually explored, not vacuously absent.\n# - Converged (eventually always): after churn stops, every database\n#   is run by exactly the top-ranked alive node, with no fenced tasks\n#   left \u2014 convergence and the absence of fence livelock in one\n#   property (a livelock would flap runners/fenced forever and violate\n#   eventually-always).\noptions:\n  max_actions: 30\n  max_concurrent_actions: 1\ndeadlock_detection: false\nliveness: strict\n"
+  }
+}

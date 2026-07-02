@@ -1,0 +1,161 @@
+---
+# sleet's coordination protocol (DESIGN.md, Assignment and failover):
+# nodes heartbeat to shared storage; each reader judges liveness from
+# heartbeat freshness (counting itself live axiomatically); ownership
+# of each database is the top of a frozen ranking over the reader's
+# live view; coordinators fence predecessors on acquisition (the
+# compactor_epoch abstraction: `holder` is the current epoch owner,
+# and a newly acquired holder fences whoever else is running).
+#
+# Checked claims:
+# - CurrentHolderNeverFenced: fencing is ordered — the newest acquirer
+#   is never itself fenced.
+# - DoubleRunReachable: the design's stated worst case (a transient
+#   double-run) is actually explored, not vacuously absent.
+# - Converged (eventually always): after churn stops, every database
+#   is run by exactly the top-ranked alive node, with no fenced tasks
+#   left — convergence and the absence of fence livelock in one
+#   property (a livelock would flap runners/fenced forever and violate
+#   eventually-always).
+options:
+  max_actions: 30
+  max_concurrent_actions: 1
+deadlock_detection: false
+liveness: strict
+---
+
+NODES = ["n1", "n2", "n3"]
+DBS = ["db1", "db2"]
+# The frozen rendezvous ranking, per database. The hash itself is
+# irrelevant to the protocol; what matters is that every node computes
+# the same order.
+RANK = {"db1": ["n1", "n2", "n3"], "db2": ["n2", "n3", "n1"]}
+
+role Node:
+    # Refresh this node's heartbeat.
+    atomic fair action Beat:
+        require alive[self.nid]
+        fresh[self.nid] = True
+
+    # One reconcile tick: read the live view, acquire pairs this node
+    # ranks first for, stand down from pairs it no longer owns.
+    # Acquiring fences every other current runner (epoch bump).
+    atomic fair action Recompute:
+        require alive[self.nid]
+        for db in DBS:
+            owner = ""
+            for r in RANK[db]:
+                if owner == "" and (fresh[r] or r == self.nid):
+                    owner = r
+            if owner == self.nid and (self.nid not in runners[db]):
+                for m in runners[db]:
+                    if m not in fenced[db]:
+                        fenced[db] = fenced[db] + [m]
+                runners[db] = runners[db] + [self.nid]
+                holder[db] = self.nid
+            elif owner != self.nid and (self.nid in runners[db]) and (self.nid not in fenced[db]):
+                runners[db] = [m for m in runners[db] if m != self.nid]
+
+    # The fenced-coordinator rule: refresh the view; rerun only if
+    # still the owner (re-fencing the rival), otherwise stand down.
+    atomic fair action HandleFence:
+        require alive[self.nid]
+        db = oneof [d for d in DBS if self.nid in fenced[d]]
+        fenced[db] = [m for m in fenced[db] if m != self.nid]
+        owner = ""
+        for r in RANK[db]:
+            if owner == "" and (fresh[r] or r == self.nid):
+                owner = r
+        if owner == self.nid:
+            for m in runners[db]:
+                if m != self.nid and (m not in fenced[db]):
+                    fenced[db] = fenced[db] + [m]
+            holder[db] = self.nid
+        else:
+            runners[db] = [m for m in runners[db] if m != self.nid]
+
+    # Unclean death: tasks vanish, the heartbeat lingers until expiry.
+    # Budgeted in state, not by exploration caps: a graph cycle can
+    # never contain a budget-decrementing edge, so liveness runs see
+    # only finitely many faults.
+    atomic action Crash:
+        require alive[self.nid] and crashes_left > 0
+        crashes_left = crashes_left - 1
+        alive[self.nid] = False
+        for db in DBS:
+            runners[db] = [m for m in runners[db] if m != self.nid]
+            fenced[db] = [m for m in fenced[db] if m != self.nid]
+
+    atomic action Restart:
+        require (not alive[self.nid]) and restarts_left > 0
+        restarts_left = restarts_left - 1
+        alive[self.nid] = True
+
+# A crashed node's heartbeat eventually reads as stale to everyone.
+atomic fair action ExpireCrashed:
+    n = oneof [x for x in NODES if (not alive[x]) and fresh[x]]
+    fresh[n] = False
+
+# Transient false suspicion: a live node's heartbeat reads as stale
+# (slow PUT, reader clock skew). Bounded, per the design's assumption
+# that timing faults are transient.
+atomic action Suspect:
+    require suspects_left > 0
+    n = oneof [x for x in NODES if alive[x] and fresh[x]]
+    suspects_left = suspects_left - 1
+    fresh[n] = False
+
+action Init:
+    crashes_left = 1
+    restarts_left = 1
+    suspects_left = 2
+    alive = {"n1": True, "n2": True, "n3": True}
+    fresh = {"n1": True, "n2": True, "n3": True}
+    runners = {"db1": [], "db2": []}
+    fenced = {"db1": [], "db2": []}
+    holder = {"db1": None, "db2": None}
+    nodes = []
+    for nid in NODES:
+        nodes.append(Node(nid=nid))
+
+# Fencing is ordered: the current holder (newest acquirer) is never
+# itself in the fenced set.
+always assertion CurrentHolderNeverFenced:
+    for db in DBS:
+        if holder[db] != None and (holder[db] in fenced[db]):
+            return False
+    return True
+
+# Only nodes that are actually alive ever run anything.
+always assertion OnlyAliveNodesRun:
+    for db in DBS:
+        for m in runners[db]:
+            if not alive[m]:
+                return False
+    return True
+
+# The design's stated worst case — a transient double-run — really is
+# reachable in the model.
+exists assertion DoubleRunReachable:
+    return len([db for db in DBS if len(runners[db]) > 1]) > 0
+
+# Convergence and no fence livelock: once churn stops, every database
+# is run by exactly the top-ranked alive node, nothing is fenced, and
+# it stays that way.
+eventually always assertion Converged:
+    for db in DBS:
+        expected = ""
+        for r in RANK[db]:
+            if expected == "" and alive[r]:
+                expected = r
+        if expected == "":
+            if len(runners[db]) != 0:
+                return False
+        else:
+            if runners[db] != [expected]:
+                return False
+            if holder[db] != expected:
+                return False
+        if len(fenced[db]) != 0:
+            return False
+    return True
