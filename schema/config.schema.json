@@ -23,12 +23,27 @@
   "$defs": {
     "CompressionCodec": {
       "description": "SST compression codec.",
-      "type": "string",
-      "enum": [
-        "snappy",
-        "zlib",
-        "lz4",
-        "zstd"
+      "oneOf": [
+        {
+          "description": "Snappy.",
+          "type": "string",
+          "const": "snappy"
+        },
+        {
+          "description": "Zlib (deflate).",
+          "type": "string",
+          "const": "zlib"
+        },
+        {
+          "description": "LZ4.",
+          "type": "string",
+          "const": "lz4"
+        },
+        {
+          "description": "Zstandard.",
+          "type": "string",
+          "const": "zstd"
+        }
       ]
     },
     "CoordinatorOverrides": {

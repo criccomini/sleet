@@ -22,7 +22,9 @@ pub fn schema_json() -> String {
 #[serde(untagged)]
 #[schemars(title = "sleet response")]
 pub enum Response {
+    /// `sleet status`.
     Status(StatusResponse),
+    /// `sleet register`.
     Register(RegisterResponse),
 }
 
@@ -48,6 +50,7 @@ pub struct StatusResponse {
 /// One fleet member.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct NodeStatus {
+    /// The node's id, from its heartbeat object name.
     pub node_id: String,
 
     /// Whether the heartbeat is younger than `heartbeat_timeout`.
@@ -73,7 +76,10 @@ pub struct NodeStatus {
 /// One registered database and its service placement.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct DatabaseStatus {
+    /// The database's canonical URL.
     pub url: String,
+
+    /// Placement of each configured service.
     pub services: Vec<ServicePlacement>,
 
     /// Compaction queue depth from `.compactions`; present only with
@@ -97,7 +103,10 @@ pub struct QueueStatus {
 /// offers the service.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct ServicePlacement {
+    /// The placed service.
     pub service: Service,
+
+    /// The owning nodes, best-ranked first.
     pub nodes: Vec<String>,
 }
 

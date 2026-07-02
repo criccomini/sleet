@@ -75,6 +75,7 @@
           "minimum": 0
         },
         "service": {
+          "description": "The offered service these counts cover.",
           "$ref": "#/$defs/Service"
         }
       },

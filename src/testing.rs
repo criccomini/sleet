@@ -30,15 +30,18 @@ use crate::root::Clock;
 pub struct TestClock(Mutex<DateTime<Utc>>);
 
 impl TestClock {
+    /// A clock reading `start`.
     pub fn new(start: DateTime<Utc>) -> Arc<Self> {
         Arc::new(Self(Mutex::new(start)))
     }
 
+    /// Advance virtual time by `by`.
     pub fn advance(&self, by: std::time::Duration) {
         let mut now = self.0.lock().expect("clock lock");
         *now += chrono::Duration::from_std(by).expect("duration fits");
     }
 
+    /// Set virtual time to `to`.
     pub fn set(&self, to: DateTime<Utc>) {
         *self.0.lock().expect("clock lock") = to;
     }
@@ -53,10 +56,15 @@ impl Clock for TestClock {
 /// Coarse operation classes for counting and fault injection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
+    /// GET, including ranged reads.
     Get,
+    /// PUT, including multipart uploads.
     Put,
+    /// LIST, in all its variants.
     List,
+    /// DELETE.
     Delete,
+    /// Server-side copy.
     Copy,
 }
 
@@ -71,6 +79,7 @@ pub struct Counters {
 }
 
 impl Counters {
+    /// Calls of `op` so far, including failed ones.
     pub fn count(&self, op: Op) -> u64 {
         self.cell(op).load(Ordering::SeqCst)
     }
@@ -111,6 +120,7 @@ pub struct TestStore {
 }
 
 impl TestStore {
+    /// Decorate an existing store.
     pub fn new(inner: Arc<dyn ObjectStore>) -> Arc<Self> {
         Arc::new(Self {
             inner,
@@ -137,6 +147,7 @@ impl TestStore {
         })
     }
 
+    /// The per-operation call counters.
     pub fn counters(&self) -> &Counters {
         &self.counters
     }

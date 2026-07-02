@@ -3,10 +3,16 @@
 //! compaction coordination, and compaction execution) outside the
 //! writer process. See DESIGN.md for the design.
 //!
-//! This crate currently defines the formats and CLI surface: the fleet
-//! config (`config`), the heartbeat wire format (`heartbeat`), and the
-//! subcommand responses (`response`, rendered by `render`). Each format
-//! module generates a JSON Schema checked in under `schema/`.
+//! `daemon` is the long-running node loop: it heartbeats, polls the
+//! registry (`registry`) under a fleet root (`root`), computes
+//! placement (`placement`), and runs the per-database services
+//! (`services`). `ops` implements the one-shot operator subcommands.
+//! The wire formats are the fleet config (`config`), the heartbeat
+//! body (`heartbeat`), and the subcommand responses (`response`,
+//! rendered by `render`); each format module generates a JSON Schema
+//! checked in under `schema/`.
+
+#![warn(missing_docs)]
 
 pub mod config;
 pub mod daemon;

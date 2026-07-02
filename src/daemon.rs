@@ -46,8 +46,10 @@ pub struct NodeOptions {
 /// A daemon that could not start.
 #[derive(Debug, thiserror::Error)]
 pub enum DaemonError {
+    /// The node id fails [`heartbeat::validate_node_id`].
     #[error("invalid node id: {0}")]
     NodeId(String),
+    /// The fleet root could not be opened.
     #[error(transparent)]
     Root(#[from] crate::root::OpenError),
 }

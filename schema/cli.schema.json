@@ -4,9 +4,11 @@
   "description": "A response from any subcommand run with `--format json`, one variant\nper command. Exists to generate the single response schema: each\ncommand's response is a named definition under `$defs`, so consumers\nvalidate against e.g. `#/$defs/StatusResponse`.",
   "anyOf": [
     {
+      "description": "`sleet status`.",
       "$ref": "#/$defs/StatusResponse"
     },
     {
+      "description": "`sleet register`.",
       "$ref": "#/$defs/RegisterResponse"
     }
   ],
@@ -27,12 +29,14 @@
           ]
         },
         "services": {
+          "description": "Placement of each configured service.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ServicePlacement"
           }
         },
         "url": {
+          "description": "The database's canonical URL.",
           "type": "string"
         }
       },
@@ -59,6 +63,7 @@
           "type": "boolean"
         },
         "node_id": {
+          "description": "The node's id, from its heartbeat object name.",
           "type": "string"
         },
         "services": {
@@ -161,12 +166,14 @@
       "type": "object",
       "properties": {
         "nodes": {
+          "description": "The owning nodes, best-ranked first.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "service": {
+          "description": "The placed service.",
           "$ref": "#/$defs/Service"
         }
       },

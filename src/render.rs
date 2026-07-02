@@ -15,6 +15,7 @@ use crate::response::{RegisterResponse, StatusResponse};
 
 /// Human-readable rendering of a response.
 pub trait Render {
+    /// Write the response as text to `w`.
     fn render(&self, w: &mut dyn Write) -> io::Result<()>;
 }
 
@@ -25,6 +26,7 @@ pub struct Table {
 }
 
 impl Table {
+    /// An empty table with these column headers.
     pub fn new(headers: &'static [&'static str]) -> Self {
         Self {
             headers,
@@ -32,11 +34,13 @@ impl Table {
         }
     }
 
+    /// Append a row; `cells` must match the header count.
     pub fn row(&mut self, cells: Vec<String>) {
         debug_assert_eq!(cells.len(), self.headers.len());
         self.rows.push(cells);
     }
 
+    /// Write the table, columns padded to their widest cell.
     pub fn write(&self, w: &mut dyn Write) -> io::Result<()> {
         let mut widths: Vec<usize> = self.headers.iter().map(|h| h.len()).collect();
         for row in &self.rows {
