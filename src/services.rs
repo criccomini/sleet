@@ -29,18 +29,24 @@ use crate::registry;
 /// from `compactions_poll_interval` up to this ceiling.
 const IDLE_POLL_MAX: Duration = Duration::from_secs(300);
 
-/// While the worker runs, sleet checks the queue every six poll
-/// intervals (30s at the default 5s poll) and stops the worker after
-/// two consecutive empty checks.
-const IDLE_CHECKS: u32 = 6;
+/// While the worker runs, sleet checks the queue every this many poll
+/// intervals (30s at the default 5s poll).
+const IDLE_CHECK_EVERY_POLLS: u32 = 6;
+
+/// Stop a running worker after this many consecutive empty queue
+/// checks.
+const DRAIN_EMPTY_CHECKS: u32 = 2;
 
 /// A service task failure.
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
-    #[error("invalid database URL: {0}")]
+    /// The database URL was rejected.
+    #[error(transparent)]
     Url(#[from] registry::UrlError),
+    /// The database's object store could not be opened.
     #[error("failed to open database store: {0}")]
     Store(#[from] object_store::Error),
+    /// The underlying SlateDB service failed.
     #[error(transparent)]
     SlateDb(#[from] slatedb::Error),
 }
@@ -61,7 +67,9 @@ impl ServiceError {
 
 /// One managed database: its store and `slatedb::Admin`.
 pub struct DatabaseHandle {
+    /// The database URL the handle was opened with.
     pub url: String,
+    /// The SlateDB admin API over the database's store.
     pub admin: Admin,
 }
 
@@ -69,7 +77,7 @@ impl DatabaseHandle {
     /// Open a database by canonical URL. Credentials come from the
     /// environment, per `object_store`.
     pub fn open(url: &str) -> Result<Self, ServiceError> {
-        let canonical = registry::canonicalize_url(url)?;
+        let canonical = registry::canonicalize_database_url(url)?;
         let parsed = url::Url::parse(&canonical).expect("canonical URL reparses");
         let (store, path) = object_store::parse_url(&parsed)?;
         Ok(Self::from_parts(url, store.into(), path))
@@ -149,7 +157,7 @@ pub async fn run_workers(
 }
 
 /// Run the SlateDB worker until the parent is cancelled or the queue
-/// has drained (two consecutive empty checks).
+/// has drained (`DRAIN_EMPTY_CHECKS` consecutive empty checks).
 async fn run_worker_until_drained(
     db: &DatabaseHandle,
     resolved: &ResolvedWorkers,
@@ -157,7 +165,7 @@ async fn run_worker_until_drained(
 ) -> Result<(), ServiceError> {
     let worker_token = token.child_token();
     let options = worker_options(resolved);
-    let check_every = resolved.compactions_poll_interval * IDLE_CHECKS;
+    let check_every = resolved.compactions_poll_interval * IDLE_CHECK_EVERY_POLLS;
     let run = db
         .admin
         .run_compaction_worker_with_options(worker_token.clone(), options);
@@ -170,7 +178,7 @@ async fn run_worker_until_drained(
                 match queue_depth(&db.admin).await {
                     Ok(depth) if depth.claimable == 0 && depth.running == 0 => {
                         empty_checks += 1;
-                        if empty_checks >= 2 {
+                        if empty_checks >= DRAIN_EMPTY_CHECKS {
                             worker_token.cancel();
                         }
                     }

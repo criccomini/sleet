@@ -32,6 +32,7 @@ use crate::{heartbeat, registry};
 /// `LastModified` (object-store clock) against the reader's clock; this
 /// seam lets tests and simulations control the reader's side.
 pub trait Clock: Send + Sync {
+    /// The reader's current time.
     fn now(&self) -> chrono::DateTime<Utc>;
 }
 
@@ -48,8 +49,10 @@ impl Clock for SystemClock {
 /// A fleet root that could not be opened.
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
+    /// The root URL was rejected.
     #[error("invalid fleet root: {0}")]
     Url(#[from] registry::UrlError),
+    /// The URL parsed but no object store could be built for it.
     #[error("failed to open fleet root store: {0}")]
     Store(#[from] object_store::Error),
 }
@@ -89,10 +92,12 @@ impl FleetRoot {
         self
     }
 
+    /// The object store the fleet tree lives in.
     pub fn store(&self) -> &Arc<dyn ObjectStore> {
         &self.store
     }
 
+    /// The canonical fleet root URL.
     pub fn url(&self) -> &str {
         &self.url
     }
@@ -163,17 +168,24 @@ impl FleetRoot {
 /// One heartbeat object under `nodes/`.
 #[derive(Clone, Debug)]
 pub struct HeartbeatEntry {
+    /// The node id, from the object name.
     pub node_id: String,
+    /// The services the node offers, from the object name.
     pub services: Vec<Service>,
+    /// The heartbeat's age: the reader's clock minus `LastModified`.
     pub age: Duration,
+    /// The heartbeat object's path.
     pub location: StorePath,
 }
 
 /// One live node, deduplicated to the youngest heartbeat per node id.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeView {
+    /// The node id.
     pub node_id: String,
+    /// The services the node offers.
     pub services: Vec<Service>,
+    /// The age of the node's youngest heartbeat.
     pub age: Duration,
 }
 
@@ -206,6 +218,7 @@ pub fn node_view(entries: &[HeartbeatEntry], heartbeat_timeout: Duration) -> Vec
 /// `config_poll`: the policy and the registry.
 #[derive(Clone, Debug, Default)]
 pub struct FleetState {
+    /// The fleet policy from `sleet.toml`.
     pub config: SleetConfig,
     /// Registered databases by canonical URL.
     pub databases: BTreeMap<String, DatabaseConfig>,
@@ -315,7 +328,7 @@ impl ConfigPoller {
                 warnings.push(format!("ignoring non-registry object {}", meta.location));
                 continue;
             };
-            match registry::canonicalize_url(&decoded) {
+            match registry::canonicalize_database_url(&decoded) {
                 Ok(canonical) => {
                     if canonical != decoded {
                         warnings.push(format!(

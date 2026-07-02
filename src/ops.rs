@@ -8,19 +8,21 @@ use object_store::{ObjectStoreExt, PutMode, PutOptions, PutPayload};
 
 use crate::config::Service;
 use crate::heartbeat::Heartbeat;
+use crate::placement;
 use crate::registry;
 use crate::response::{
     DatabaseStatus, NodeStatus, QueueStatus, RegisterResponse, ServicePlacement, StatusResponse,
 };
 use crate::root::{ConfigPoller, FleetRoot, HeartbeatEntry, node_view};
 use crate::services::{self, DatabaseHandle};
-use crate::{heartbeat, placement};
 
 /// A one-shot subcommand failure.
 #[derive(Debug, thiserror::Error)]
 pub enum OpsError {
+    /// A database URL was rejected.
     #[error(transparent)]
     Url(#[from] registry::UrlError),
+    /// An object-store read or write failed.
     #[error("object store error: {0}")]
     Store(#[from] object_store::Error),
 }
@@ -28,7 +30,7 @@ pub enum OpsError {
 /// Register a database: canonicalize its URL and create-only PUT its
 /// registry file, so registering never overwrites operator edits.
 pub async fn register(root: &FleetRoot, url: &str) -> Result<RegisterResponse, OpsError> {
-    let canonical = registry::canonicalize_url(url)?;
+    let canonical = registry::canonicalize_database_url(url)?;
     let path = root.database_path(&canonical);
     let file = format!("dbs/{}", registry::file_name(&canonical));
     let options = PutOptions::from(PutMode::Create);
@@ -164,14 +166,11 @@ async fn queue_status(url: &str) -> Result<QueueStatus, String> {
     })
 }
 
-// Re-exported for `run` startup logging symmetry; keeps heartbeat the
-// single source of the name format.
-pub use heartbeat::validate_node_id;
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::Service;
+    use crate::heartbeat;
     use crate::testing::{TestClock, TestStore};
     use chrono::Utc;
     use object_store::ObjectStoreExt;

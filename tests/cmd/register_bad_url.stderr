@@ -1,1 +1,1 @@
-error: invalid database URL "not a url": relative URL without a base
+error: invalid URL "not a url": relative URL without a base

@@ -24,25 +24,38 @@ const ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
 /// for the fleet root prefix and `dbs/`.
 const MAX_FILE_NAME: usize = 900;
 
-/// A database URL that cannot be registered.
+/// A URL that cannot be canonicalized, or a database URL that cannot
+/// be registered.
 #[derive(Debug, thiserror::Error)]
 pub enum UrlError {
-    #[error("invalid database URL {url:?}: {source}")]
+    /// The URL does not parse.
+    #[error("invalid URL {url:?}: {source}")]
     Invalid {
+        /// The URL as given.
         url: String,
+        /// The parse failure.
         source: url::ParseError,
     },
+    /// The URL's scheme is not an object-store scheme.
     #[error("unsupported URL scheme {scheme:?} (expected one of {})", URL_SCHEMES.join(", "))]
-    UnsupportedScheme { scheme: String },
+    UnsupportedScheme {
+        /// The rejected scheme.
+        scheme: String,
+    },
+    /// The database URL's registry file name exceeds the length cap.
     #[error(
         "database URL too long: its registry file name is {len} bytes \
          (max {MAX_FILE_NAME}; object-store keys cap at 1024)"
     )]
-    TooLong { len: usize },
+    TooLong {
+        /// The encoded file name's length in bytes.
+        len: usize,
+    },
 }
 
-/// Canonicalize a database URL: lowercase scheme and host, drop trailing
-/// slashes. This keeps each database to a single spelling.
+/// Canonicalize an object-store URL: lowercase scheme and host, drop
+/// trailing slashes. This keeps each location to a single spelling.
+/// Fleet roots and database URLs both go through this.
 pub fn canonicalize_url(url: &str) -> Result<String, UrlError> {
     let mut parsed = url::Url::parse(url).map_err(|source| UrlError::Invalid {
         url: url.into(),
@@ -66,7 +79,14 @@ pub fn canonicalize_url(url: &str) -> Result<String, UrlError> {
                 source,
             })?;
     }
-    let canonical = parsed.as_str().trim_end_matches('/').to_string();
+    Ok(parsed.as_str().trim_end_matches('/').to_string())
+}
+
+/// Canonicalize a database URL and check that it fits a registry file
+/// name. Database paths use this; the length cap does not apply to
+/// fleet roots, which never become registry names.
+pub fn canonicalize_database_url(url: &str) -> Result<String, UrlError> {
+    let canonical = canonicalize_url(url)?;
     let len = file_name(&canonical).len();
     if len > MAX_FILE_NAME {
         return Err(UrlError::TooLong { len });
@@ -129,17 +149,19 @@ mod tests {
     }
 
     #[test]
-    fn oversized_urls_are_rejected() {
+    fn oversized_database_urls_are_rejected() {
         let long = format!("s3://bucket/{}", "x".repeat(1000));
         assert!(matches!(
-            canonicalize_url(&long),
+            canonicalize_database_url(&long),
             Err(UrlError::TooLong { .. })
         ));
         // Percent-encoding expansion counts: 300 spaces encode 3x.
         let expansive = format!("s3://bucket/{}", "µ".repeat(400));
         assert!(matches!(
-            canonicalize_url(&expansive),
+            canonicalize_database_url(&expansive),
             Err(UrlError::TooLong { .. })
         ));
+        // The cap is a registry concern; plain canonicalization has none.
+        assert!(canonicalize_url(&long).is_ok());
     }
 }
