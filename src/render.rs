@@ -1,6 +1,6 @@
 //! Text rendering for subcommand responses: the human-readable half of
-//! the CLI. `--format json` bypasses this layer entirely, so every
-//! response type carries data only and presentation lives here.
+//! the CLI. `--format json` bypasses this layer entirely, so response
+//! types hold only data; presentation lives here.
 //!
 //! Layout convention: borderless left-aligned tables with uppercase
 //! headers, columns padded to their widest cell, two-space gutters, no

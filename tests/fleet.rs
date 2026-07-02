@@ -303,7 +303,7 @@ async fn gc_deletes_superseded_ssts() {
     // SlateDB's commit protocol checkpoints the pre-commit manifest for
     // 15 minutes, pinning the superseded L0s, and GC honors the pin.
     // Release it so deletion is observable within the test; in
-    // production GC simply lags a compaction by that checkpoint.
+    // production GC just lags a compaction by that checkpoint.
     {
         let db = DatabaseHandle::open(&db_url).unwrap();
         for checkpoint in db.admin.list_checkpoints(None).await.unwrap() {

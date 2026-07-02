@@ -36,9 +36,9 @@ when the two drift.
 - A fleet lives under one object-store URL, the fleet root: `sleet.toml`
   (policy: defaults, timing), `dbs/` (registry; one file per database,
   empty = defaults, `services = []` = disabled), `nodes/` (heartbeats;
-  liveness and offered services ride the object name, versions and stats
-  ride the body). Nodes are stateless; the only node-local config is
-  flags.
+  liveness and offered services come from the object name, versions and
+  stats from the body). Nodes are stateless; the only node-local config
+  is flags.
 - Databases are registered manually, with `sleet register <url>` or by
   writing `dbs/<db>.toml` directly; auto-discovery is future work. Each
   `(database, service)` is placed by a frozen rendezvous ranking of the

@@ -1,9 +1,9 @@
 # sleet: a SlateDB fleet manager
 
-`sleet` operates fleets of [SlateDB](https://slatedb.io) databases. It runs
-their background services (garbage collection, compaction coordination, and
-compaction execution) outside the writer process, for deployments that
-choose to run them separately.
+`sleet` operates fleets of [SlateDB](https://slatedb.io) databases: it
+runs their background services (garbage collection, compaction
+coordination, and compaction execution) for deployments that move that
+work out of the writer process.
 
 ## Goals
 
@@ -72,15 +72,15 @@ optional `services` list and `gc`/`compactor-coordinator`/
 `compaction-workers.count` sets how many nodes run workers for a
 database. The config types are defined by the serde structs in
 `src/config.rs`; the JSON Schema generated from them is checked in at
-`schema/config.schema.json` (drift-checked by a test). Loading enforces
-what the schema cannot: `heartbeat_interval < heartbeat_timeout` and
-bounds on the resolved settings.
+`schema/config.schema.json` (drift-checked by a test). A few rules the
+schema can't express are checked at load time: `heartbeat_interval <
+heartbeat_timeout`, and bounds on the resolved settings.
 
 Nodes re-read `sleet.toml` and LIST `dbs/` every `config_poll`; on a
-failed read a node keeps the last good config. The listing carries each
-entry's size and ETag, so empty registry files (the common case) are
-never fetched, and override files are fetched only when their ETag
-changes.
+failed read a node keeps the last good config. The listing already
+includes each entry's size and ETag, so a node never fetches an empty
+registry file (the common case) and only re-fetches an override file
+when its ETag changes.
 
 ### Databases
 
@@ -109,42 +109,42 @@ Each node PUTs a heartbeat at `nodes/<node_id>.<services>.json` every
 `heartbeat_interval`, where `<services>` is the offered services' letters
 (`c` = compactor-coordinator, `g` = gc, `w` = compaction-workers) sorted
 ascending, e.g. `sleet-1.cgw.json`; node ids must not contain `.`.
-Everything assignment needs is in the listing: names carry roles and
-`LastModified` carries liveness, so one LIST of `nodes/` per tick is the
-only read, and heartbeat bodies are never fetched for placement.
-The body carries the node's `sleet` and `slatedb` versions and summary
+Assignment never looks inside a heartbeat: the name says which services
+a node offers and `LastModified` says whether it is alive, so one LIST
+of `nodes/` per tick is the only read placement makes.
+The body holds the node's `sleet` and `slatedb` versions and summary
 service states for `sleet status`; it is defined by the structs in
 `src/heartbeat.rs` (`schema/heartbeat.schema.json`). Readers ignore
 unknown fields so mixed-version fleets coexist, and `version` bumps only
 on incompatible change.
 
 A node is **live** iff its heartbeat's `LastModified` (object-store clock)
-is younger than `heartbeat_timeout` by the reader's clock; skew shifts
-failover timing but not safety. A node always counts itself live, even
-when its own heartbeat reads as stale: a node cannot reliably judge its
-own death, and peers that believe it dead take over in parallel, so the
-worst case is a double-run, whereas excluding itself would leave its
-share unowned. A node that changes its offered services restarts under a
-new heartbeat name and deletes its old one at startup; if both are
-briefly visible, the youngest name per `node_id` wins. To the hash, a
-role change is a departure from one service's candidate pool and an
-arrival in another's, and converges like any other membership change. On
-clean shutdown a node deletes its heartbeat, handing its assignments off
-immediately. Any node deletes heartbeats older than 10x
-`heartbeat_timeout`.
+is younger than `heartbeat_timeout` by the reader's clock; clock skew
+changes when failover happens, not whether it is safe. A node always
+counts itself live, even when its own heartbeat reads as stale: it has
+no reliable way to know it is dead, and peers that think so take over in
+parallel anyway, so counting itself in risks at most a double-run, while
+counting itself out would leave its share unowned. A node that changes
+its offered services restarts under a new heartbeat name and deletes its
+old one at startup; if both are briefly visible, the youngest name per
+`node_id` wins. A role change just removes the node from one service's
+candidate pool and adds it to another's, and converges like any other
+membership change. On clean shutdown a node deletes its heartbeat,
+handing its assignments off immediately. Any node deletes heartbeats
+older than 10x `heartbeat_timeout`.
 
 ### Assignment and failover
 
 Ownership is decided by rendezvous hashing. For a given `(database,
-service)`, every live node whose heartbeat offers that service gets a
-score, the hash of the pair combined with the node's id, and the ranking
-assigns owners: `gc` and `compactor-coordinator` run on the top-ranked
+service)`, every live node whose heartbeat offers that service is scored
+by hashing the pair together with its node id, and the ranking assigns
+owners: `gc` and `compactor-coordinator` run on the top-ranked
 node, and `compaction-workers` runs on the top `count` nodes (`count`
 distinct pollers per database, or every offering node if there are
 fewer). Removing a node moves only the pairs it owned; adding one moves
 only the pairs it now wins. Every node recomputes ownership each
-heartbeat tick from the same shared inputs, the `dbs/` registry and the
-live set, and runs exactly the pairs it owns. No assignment state is
+heartbeat tick from the same shared inputs (the `dbs/` registry and the
+live set) and runs exactly the pairs it owns. No assignment state is
 stored. The hash and its key encoding are frozen, like a wire format, so
 mixed-version fleets compute identical placements.
 
@@ -152,15 +152,14 @@ All views derive from the shared tree, so they converge within one
 `config_poll` (registry) plus one `heartbeat_interval` (liveness). Until
 they do, a pair may briefly run on two nodes, which is safe, or on none,
 which delays it by at most one poll. A dead node's pairs redistribute
-within ~`heartbeat_timeout`; a joining node takes only the pairs it now
-wins.
+within ~`heartbeat_timeout`.
 
 Assignment is an efficiency mechanism only: every failure mode (stale
 reads, clock skew, partitions) at worst double-runs a service, and
-SlateDB's fencing and CAS claims make that safe. The hash places only
-lightweight polling loops; the expensive work, compaction execution, is
-pulled through `.compactions` job claims and bounded by node capacity
-caps.
+SlateDB's fencing and CAS claims make that safe. The hash also places
+only lightweight polling loops; the expensive part, executing
+compactions, is pulled through `.compactions` job claims and bounded by
+node capacity caps.
 
 Nodes must be able to reach every registered database for the services
 they offer; placement does not consider reachability.
@@ -169,21 +168,21 @@ they offer; placement does not consider reachability.
 
 A running coordinator can be fenced by `compactor_epoch` at any time: it
 means another node started a coordinator for the same database, so the
-two disagree about ownership. `sleet` treats fencing as a sign of view
-skew rather than an ordinary failure. Instead of restarting blindly, the
-fenced task refreshes its inputs (re-reads `nodes/` and the database's
-registry entry) and recomputes ownership:
+two disagree about ownership. `sleet` treats fencing as view skew, not
+an ordinary failure. Rather than restart right away, the fenced task
+re-reads `nodes/` and the database's registry entry and recomputes
+ownership:
 
 - Still the owner: restart the coordinator after one
   `heartbeat_interval`. Restarting bumps `compactor_epoch` and fences
-  the rival, which follows this same rule, refreshes, computes that it
-  lost, and stands down.
+  the other node, which follows this same rule, sees that it lost, and
+  stands down.
 - No longer the owner: stop; the pair has moved.
 
-The wait gives the rival time to refresh and stand down before the
-re-fence lands. Mutual fencing lasts only as long as views diverge,
-bounded by one `config_poll` plus one `heartbeat_interval`, and costs
-nothing more than a brief compaction stall.
+The wait gives the other node time to refresh and stand down before the
+re-fence. Mutual fencing can only last as long as the views disagree, at
+most one `config_poll` plus one `heartbeat_interval`, and its cost is a
+brief compaction stall.
 
 ### Process model
 
@@ -222,8 +221,8 @@ entries into `.compactions`, reclaims jobs whose worker heartbeat exceeds
 to the manifest.
 
 Safety: `compactor_epoch` fencing means a newly started coordinator fences
-any prior one; duplicate coordinators self-resolve with at most a brief
-stall.
+any prior one; duplicate coordinators sort themselves out with at most a
+brief stall.
 
 ### 3. Compaction workers
 
@@ -232,13 +231,14 @@ each database for which the node ranks in the top `count` workers.
 Workers are stateless: they poll `.compactions` for `Scheduled` jobs,
 claim them by CAS, execute (with subcompaction parallelism per
 RFC-0028), heartbeat, and write back `Compacted`. Per-database poll
-intervals back off exponentially while a database is idle, so
-mostly-idle fleets cost little.
+intervals back off exponentially while a database is idle, which keeps
+a mostly-idle fleet cheap.
 
-The ranking bounds who polls; job claims arbitrate execution, so overlap
-from reassignment at worst loses a claim race. Per-database parallelism
-spans nodes: a database with `count = 8` has eight distinct nodes
-competing for its jobs, or every worker node if the pool is smaller.
+The ranking only bounds who polls; job claims decide who executes, so
+overlap from reassignment at worst loses a claim race. Per-database
+parallelism spans nodes: a database with `count = 8` has eight distinct
+nodes competing for its jobs, or every worker node if the pool is
+smaller.
 
 ## Scaling
 
@@ -256,7 +256,7 @@ first thing to replace with an inventory feed (open question 1).
 Steady-state traffic against the databases themselves scales with how many
 are managed: GC and coordinators poll each one on their configured
 intervals, and worker polling backs off while a database is idle. Long
-poll floors are what make a million mostly-idle databases affordable.
+poll floors keep a million mostly-idle databases affordable.
 
 ## Observability
 
