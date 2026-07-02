@@ -6,8 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `sleet` is a fleet manager for [SlateDB](https://slatedb.io) databases.
 `DESIGN.md` is the design source of truth; read it before making changes
-and keep it consistent when the design evolves. `TESTS.md` is the test
-plan; check items off as coverage lands. The fleet config format
+and keep it consistent when the design evolves. The fleet config format
 (`sleet.toml` and `dbs/<db>.toml`) is defined by the serde structs in
 `src/config.rs`, which generate `schema/config.schema.json`; a test fails
 when the two drift.
