@@ -11,8 +11,9 @@ choose to run them separately.
   databases from a small pool of `sleet` nodes. Per-database fleet state is
   one registry file, coordination traffic is independent of database count,
   and idle databases cost only backed-off polling.
-- Discover databases automatically under a bucket/prefix — no per-database
-  registration.
+- Register databases explicitly — with the CLI or by writing
+  `dbs/<db>.toml` — or let optional discovery scan bucket prefixes and
+  register what it finds.
 - No dependencies beyond object storage. Mutual exclusion comes from
   SlateDB's primitives — manifest CAS, epoch fencing, and `.compactions`
   claims (RFC-0001, RFC-0013, RFC-0025). `sleet` stores no assignment state:
@@ -92,8 +93,8 @@ config.
 
 `dbs/<db>.toml` registers a database. `<db>` is the percent-encoded
 database URL, so the filename alone identifies the database and an empty
-file is valid. Files are created by discovery or by operators; contents are
-overrides only:
+file is valid. Files are created by operators — directly or with `sleet
+register <url>` — or by discovery; contents are overrides only:
 
 - absent file — unmanaged (undiscovered).
 - empty file — managed with defaults.
@@ -111,6 +112,9 @@ owner: built-in defaults → `[defaults]` → longest matching `[[discover]]`
 root → `dbs/<db>.toml`. Unset fields fall through to the previous layer.
 
 ### Discovery
+
+Discovery is optional: a fleet with no `[[discover]]` entries manages only
+explicitly registered databases.
 
 Each node walks every discovery root every `rescan` using delimited LISTs.
 A prefix is a database iff `<prefix>/manifest/` contains a `.manifest`
@@ -228,8 +232,9 @@ nodes competing for its jobs.
 ## Crate layout
 
 A single `sleet` crate with one binary: `sleet run <root>` is the
-long-running daemon; `status` is a one-shot. Config types (`sleet.toml`,
-`dbs/*.toml`) live in `src/spec.rs` (`schema/config.schema.json`). The
+long-running daemon; `status` and `register` are one-shots. Config types
+(`sleet.toml`, `dbs/*.toml`) live in `src/spec.rs`
+(`schema/config.schema.json`). The
 heartbeat body lives in `src/heartbeat.rs` (`schema/heartbeat.schema.json`).
 One-shot subcommands take `--format json`; response types in
 `src/response.rs` generate `schema/cli.schema.json` (one `$defs` entry per
