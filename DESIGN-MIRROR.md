@@ -152,9 +152,14 @@ name at the target and mount the newest, reopening to advance. Read
 freshness is the refresh cadence plus mirror lag. Nothing at the
 target deletes what a mounted snapshot references (§6, §7), so a
 reader holds it consistently for the serving checkpoint's lifetime.
-Unlike the per-pass pin (§4),
-serving checkpoints stand between passes; `refresh` sets the manifest
-write cadence that costs the source.
+Unlike the per-pass pin (§4), serving checkpoints stand between
+passes, `lifetime / refresh` of them at a time. Each rotation is a
+source manifest change, so `refresh`, not `poll`, sets the pass
+cadence: one source manifest write and one pinless target commit
+(§4) per refresh, pruned like any other manifest (§7). A rotated
+checkpoint that arrives after its lifetime is never mountable, so
+`serve` on a periodic target is rejected at load unless `lifetime`
+exceeds `interval`.
 
 ## 6. Modes
 
@@ -305,14 +310,18 @@ poll = "10s"                    # continuous: pass and tail cadence
 [mirror.targets.dr]
 disabled = true                 # opt out of the fleet-wide target
 
+[mirror.targets.replica]        # read replica in another region
+url = "s3://eu-replica/db1"
+mode = "continuous"
+
+[mirror.targets.replica.serve]  # serving checkpoint rotation (§5)
+refresh = "1m"
+lifetime = "1h"
+
 [mirror.targets.backup]         # add an explicit second target
 url = "gs://backups/db1"
 mode = "periodic"
 interval = "24h"
-
-[mirror.targets.backup.serve]   # optional serving checkpoint (§5)
-refresh = "1m"
-lifetime = "1h"
 
 [mirror.targets.backup.retention]   # restore-point retention (§7)
 keep = "30d"
