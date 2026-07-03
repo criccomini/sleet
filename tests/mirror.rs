@@ -871,3 +871,406 @@ async fn faulted_passes_converge_after_healing() {
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_no_live_pins(&source, "dr").await;
 }
+
+/// The continuous mode loop end to end: passes and the WAL tail keep
+/// the destination converged while the loop runs, and cancellation
+/// stops it cleanly.
+#[tokio::test(flavor = "multi_thread")]
+async fn continuous_mode_tracks_the_source() {
+    use tokio_util::sync::CancellationToken;
+    let source_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
+    let dest_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
+    let source = handle(source_store.clone(), "memory:///src", "src");
+    seed(&source, 2).await;
+
+    let target = mirror::AppliedTarget {
+        name: "dr".into(),
+        destination: "memory:///dst".into(),
+        settings: ResolvedMirrorTarget {
+            poll: Duration::from_millis(100),
+            ..target_settings()
+        },
+    };
+    let token = CancellationToken::new();
+    let task = tokio::spawn({
+        let source = handle(source_store.clone(), "memory:///src", "src");
+        let dest = handle(dest_store.clone(), "memory:///dst", "dst");
+        let target = target.clone();
+        let token = token.clone();
+        async move {
+            let jobs = Arc::new(tokio::sync::Semaphore::new(1));
+            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
+        }
+    });
+
+    let dest = handle(dest_store.clone(), "memory:///dst", "dst");
+    poll_until("initial convergence", || async {
+        let src = source.admin.read_manifest(None).await.ok()??;
+        let dst = dest.admin.read_manifest(None).await.ok().flatten()?;
+        (src.id() == dst.id()).then_some(())
+    })
+    .await;
+
+    // More writes at the source: the loop catches up on its own.
+    seed(&source, 1).await;
+    poll_until("incremental convergence", || async {
+        let src = source.admin.read_manifest(None).await.ok()??;
+        let dst = dest.admin.read_manifest(None).await.ok().flatten()?;
+        (src.id() == dst.id()).then_some(())
+    })
+    .await;
+    assert_mirrored(&source, &dest).await;
+
+    token.cancel();
+    task.await.unwrap().unwrap();
+    assert_no_live_pins(&source, "dr").await;
+}
+
+/// The periodic mode loop: a pass runs when the target's latest
+/// manifest is older than the interval, and each committed manifest is
+/// a point-in-time cut.
+#[tokio::test(flavor = "multi_thread")]
+async fn periodic_mode_cuts_on_the_interval() {
+    use sleet::config::MirrorMode;
+    use tokio_util::sync::CancellationToken;
+    let source_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
+    let dest_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
+    let source = handle(source_store.clone(), "memory:///src", "src");
+    seed(&source, 2).await;
+
+    let target = mirror::AppliedTarget {
+        name: "backup".into(),
+        destination: "memory:///bak".into(),
+        settings: ResolvedMirrorTarget {
+            mode: MirrorMode::Periodic,
+            interval: Duration::from_secs(1),
+            ..target_settings()
+        },
+    };
+    let token = CancellationToken::new();
+    let task = tokio::spawn({
+        let source = handle(source_store.clone(), "memory:///src", "src");
+        let dest = handle(dest_store.clone(), "memory:///bak", "bak");
+        let target = target.clone();
+        let token = token.clone();
+        async move {
+            let jobs = Arc::new(tokio::sync::Semaphore::new(1));
+            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
+        }
+    });
+
+    let dest = handle(dest_store.clone(), "memory:///bak", "bak");
+    poll_until("first periodic cut", || async {
+        dest.admin
+            .read_manifest(None)
+            .await
+            .ok()
+            .flatten()
+            .map(|_| ())
+    })
+    .await;
+    token.cancel();
+    task.await.unwrap().unwrap();
+
+    // The cut is a valid point: its closure verifies.
+    let outcome = mirror::verify(&source, &dest, None).await.unwrap();
+    assert!(outcome.ok(), "{:?}", outcome.points);
+}
+
+/// §8: the rclone copier drives `rclone copy --files-from` for the
+/// data directories and never touches manifest/. A stub rclone binary
+/// stands in for the real one and copies between the file:// roots.
+#[tokio::test(flavor = "multi_thread")]
+async fn rclone_copier_moves_data_objects() {
+    use sleet::config::CopierKind;
+    let dir = tempfile::tempdir().unwrap();
+    let src_dir = dir.path().join("src");
+    let dst_dir = dir.path().join("dst");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::create_dir_all(&dst_dir).unwrap();
+
+    // A stub rclone: copy <src>/<name> to <dst>/<name> for each line
+    // of --files-from, and refuse to ever see manifest/ in the list.
+    let stub = dir.path().join("rclone");
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\n\
+         # args: copy --files-from LIST SRC DST\n\
+         list=\"$3\"; src=\"$4\"; dst=\"$5\"\n\
+         while IFS= read -r name; do\n\
+           [ -z \"$name\" ] && continue\n\
+           case \"$name\" in manifest/*) echo \"rclone must never touch manifest/\" >&2; exit 1;; esac\n\
+           mkdir -p \"$dst/$(dirname \"$name\")\"\n\
+           cp \"$src/$name\" \"$dst/$name\" || exit 1\n\
+         done < \"$list\"\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let source = DatabaseHandle::open(&format!("file://{}", src_dir.display())).unwrap();
+    let dest = DatabaseHandle::open(&format!("file://{}", dst_dir.display())).unwrap();
+    seed(&source, 2).await;
+
+    let settings = ResolvedMirrorTarget {
+        copier: CopierKind::Rclone,
+        ..target_settings()
+    };
+    let outcome = mirror::sync_pass(
+        &source,
+        &dest,
+        "dr",
+        &settings,
+        Some(stub.to_str().unwrap()),
+    )
+    .await
+    .unwrap();
+    assert!(outcome.committed);
+    mirror::sync_pass(
+        &source,
+        &dest,
+        "dr",
+        &settings,
+        Some(stub.to_str().unwrap()),
+    )
+    .await
+    .unwrap();
+    assert_mirrored(&source, &dest).await;
+    let verified = mirror::verify(&source, &dest, None).await.unwrap();
+    assert!(verified.ok(), "{:?}", verified.points);
+}
+
+/// The whole stack over a file:// fleet root: a daemon node owns the
+/// (database, mirror, target) assignment, its heartbeat carries the
+/// mirror summary, the destination converges, and the ops one-shots
+/// (status --mirrors, verify, sync) agree.
+#[tokio::test(flavor = "multi_thread")]
+async fn daemon_mirrors_a_registered_database() {
+    use sleet::daemon::{self, NodeOptions};
+    use sleet::root::FleetRoot;
+    use sleet::{ops, registry};
+    use tokio_util::sync::CancellationToken;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("fleet")).unwrap();
+    std::fs::create_dir_all(dir.path().join("dst")).unwrap();
+    let fleet_url = format!("file://{}/fleet", dir.path().display());
+    let dest_url = format!("file://{}/dst", dir.path().display());
+
+    // A real source database.
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    let db_url = format!("file://{}", src_dir.display());
+    let source = DatabaseHandle::open(&db_url).unwrap();
+    seed(&source, 2).await;
+
+    let root = FleetRoot::open(&fleet_url).unwrap();
+    root.store()
+        .put(
+            &root.config_path(),
+            "[node]\nheartbeat_interval = \"500ms\"\nheartbeat_timeout = \"2s\"\nconfig_poll = \"1s\"\n"
+                .into(),
+        )
+        .await
+        .unwrap();
+    ops::register(&root, &db_url).await.unwrap();
+    root.store()
+        .put(
+            &root.database_path(&registry::canonicalize_url(&db_url).unwrap()),
+            format!(
+                "[mirror.targets.dr]\nurl = \"{dest_url}\"\nmode = \"continuous\"\npoll = \"250ms\"\n"
+            )
+            .into(),
+        )
+        .await
+        .unwrap();
+
+    let shutdown = CancellationToken::new();
+    let node = tokio::spawn(daemon::run(
+        root.clone(),
+        NodeOptions {
+            node_id: "n1".into(),
+            ..NodeOptions::default()
+        },
+        shutdown.clone(),
+    ));
+
+    // Placement: the mirror target lands on the only node.
+    let status = poll_until("mirror placement visible", || async {
+        let status = ops::status(&root, false, true).await.unwrap();
+        (!status.mirrors.is_empty()).then_some(status)
+    })
+    .await;
+    assert_eq!(status.mirrors[0].target, "dr");
+    assert_eq!(status.mirrors[0].destination, dest_url);
+
+    // The daemon's task converges the destination.
+    let dest = DatabaseHandle::open(&dest_url).unwrap();
+    poll_until("destination converges", || async {
+        let status = ops::status(&root, false, true).await.unwrap();
+        (status.mirrors[0].manifests_behind == Some(0)).then_some(())
+    })
+    .await;
+    assert_mirrored(&source, &dest).await;
+
+    // The heartbeat body carries the mirror task summary; poll past
+    // the first tick, which is written before tasks reconcile.
+    let path = root.node_path(&sleet::heartbeat::object_name(
+        "n1",
+        &sleet::config::Service::ALL,
+    ));
+    poll_until("mirror summary in the heartbeat", || async {
+        let body = root.store().get(&path).await.ok()?.bytes().await.ok()?;
+        let heartbeat: sleet::heartbeat::Heartbeat = serde_json::from_slice(&body).ok()?;
+        let mirror_summary = heartbeat
+            .services
+            .iter()
+            .find(|s| s.service == sleet::config::Service::Mirror)?;
+        (mirror_summary.running == 1).then_some(())
+    })
+    .await;
+
+    // Verify agrees, through the ops layer.
+    let verify = ops::mirror_verify(&root, &db_url, "dr").await.unwrap();
+    assert!(verify.ok, "{:?}", verify.points);
+
+    // One-shot sync on a caught-up pair is a clean no-op.
+    shutdown.cancel();
+    node.await.unwrap().unwrap();
+    let sync = ops::mirror_sync(&root, &db_url, "dr", None).await.unwrap();
+    assert!(sync.head > 0);
+
+    // Unknown targets and unregistered databases fail loudly.
+    let err = ops::mirror_sync(&root, &db_url, "nope", None)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ops::OpsError::NoSuchTarget { .. }));
+    let err = ops::mirror_verify(&root, "file:///not/registered", "dr")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ops::OpsError::NotRegistered { .. }));
+}
+
+/// §10: status --mirrors flags destination collisions and databases
+/// with mirror enabled but no applicable target; prefixes emits the
+/// per-database filter lists without touching either store.
+#[tokio::test(flavor = "multi_thread")]
+async fn status_flags_collisions_and_prefixes_emit_filters() {
+    use sleet::response::PrefixFormat;
+    use sleet::root::FleetRoot;
+    use sleet::{ops, registry};
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("fleet")).unwrap();
+    let fleet_url = format!("file://{}/fleet", dir.path().display());
+    let root = FleetRoot::open(&fleet_url).unwrap();
+
+    // A fleet-wide EXACT target: every database maps to the same
+    // destination, which is exactly the collision status must flag.
+    root.store()
+        .put(
+            &root.config_path(),
+            "[database.mirror.targets.dr]\nurl = \"s3://dr-bucket/one-destination\"\n".into(),
+        )
+        .await
+        .unwrap();
+    ops::register(&root, "s3://data/db1").await.unwrap();
+    ops::register(&root, "s3://data/db2").await.unwrap();
+    // A database opted out: mirror enabled, no applicable target.
+    root.store()
+        .put(
+            &root.database_path(&registry::canonicalize_url("s3://data/db3").unwrap()),
+            "[mirror.targets.dr]\ndisabled = true\n".into(),
+        )
+        .await
+        .unwrap();
+
+    let status = ops::status(&root, false, true).await.unwrap();
+    assert!(
+        status
+            .warnings
+            .iter()
+            .any(|w| w.contains("mirror destinations collide")),
+        "{:?}",
+        status.warnings
+    );
+    assert!(
+        status
+            .warnings
+            .iter()
+            .any(|w| w.contains("db3") && w.contains("no applicable target")),
+        "{:?}",
+        status.warnings
+    );
+    // Lag reads fail cleanly for unreachable s3 stores: the error
+    // rides in the per-target field, not the whole status.
+    assert_eq!(status.mirrors.len(), 2);
+
+    // Prefixes never opens a store: pure config computation.
+    let prefixes = ops::mirror_prefixes(&root, "s3://data/db1", "dr", PrefixFormat::S3)
+        .await
+        .unwrap();
+    assert_eq!(prefixes.source_bucket, "data");
+    assert_eq!(prefixes.destination_bucket, "dr-bucket");
+    assert_eq!(
+        prefixes.prefixes,
+        vec!["db1/wal/".to_string(), "db1/compacted/".to_string()]
+    );
+    assert_eq!(
+        prefixes.destination_prefixes,
+        vec![
+            "one-destination/wal/".to_string(),
+            "one-destination/compacted/".to_string()
+        ]
+    );
+    let rules = prefixes.configuration["Rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 2);
+    assert_eq!(rules[0]["Filter"]["Prefix"], "db1/wal/");
+    assert_eq!(
+        rules[0]["DeleteMarkerReplication"]["Status"], "Disabled",
+        "propagated deletes could remove referenced objects"
+    );
+
+    let sts = ops::mirror_prefixes(&root, "s3://data/db1", "dr", PrefixFormat::Sts)
+        .await
+        .unwrap();
+    assert_eq!(
+        sts.configuration["transferSpec"]["objectConditions"]["includePrefixes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let azure = ops::mirror_prefixes(&root, "s3://data/db1", "dr", PrefixFormat::Azure)
+        .await
+        .unwrap();
+    assert_eq!(
+        azure.configuration["rules"][0]["filters"]["prefixMatch"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+/// Poll an async condition every 100ms for up to 60s.
+async fn poll_until<T, F, Fut>(what: &str, mut check: F) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Option<T>>,
+{
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        if let Some(value) = check().await {
+            return value;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for: {what}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
