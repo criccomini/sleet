@@ -114,10 +114,12 @@ pub async fn prune_at(
     let mut kept: BTreeSet<u64> = BTreeSet::new();
     let mut decoded: BTreeMap<u64, slatedb::VersionedManifest> = BTreeMap::new();
     for &id in &restore_points {
+        // A restore point is kept whether or not it decodes: deleting
+        // an unreadable latest manifest would destroy the watermark.
+        kept.insert(id);
         let Some(manifest) = read_target_manifest(dest, id, &mut decoded).await? else {
             continue;
         };
-        kept.insert(id);
         let pins: Vec<u64> = manifest
             .checkpoints()
             .iter()
@@ -134,11 +136,23 @@ pub async fn prune_at(
         }
     }
 
-    // The objects every kept manifest references.
+    // The objects every kept manifest references. An unreadable kept
+    // manifest leaves its objects unenumerated, so data-object
+    // deletion is skipped entirely rather than deleting what it might
+    // reference.
     let mut kept_objects = ManifestObjects::default();
+    let mut kept_decoded = true;
     for &id in kept.clone().iter() {
-        if let Some(manifest) = read_target_manifest(dest, id, &mut decoded).await? {
-            kept_objects.extend(&layout::manifest_objects(manifest));
+        match read_target_manifest(dest, id, &mut decoded).await? {
+            Some(manifest) => kept_objects.extend(&layout::manifest_objects(manifest)),
+            None => {
+                warn!(
+                    target = target_name,
+                    manifest = id,
+                    "kept manifest unreadable"
+                );
+                kept_decoded = false;
+            }
         }
     }
     // The WAL tail above the latest manifest is never pruned.
@@ -149,7 +163,7 @@ pub async fn prune_at(
 
     let mut report = PruneReport {
         kept_manifests: kept.len() as u64,
-        data_deletion_ran: spared.is_ok(),
+        data_deletion_ran: spared.is_ok() && kept_decoded,
         ..Default::default()
     };
 
@@ -176,6 +190,14 @@ pub async fn prune_at(
         );
         return Ok(report);
     };
+    if !kept_decoded {
+        info!(
+            target = target_name,
+            deleted_manifests = report.deleted_manifests,
+            "pruned manifests only (a kept manifest is unreadable)"
+        );
+        return Ok(report);
+    }
 
     let guarded =
         |modified: DateTime<Utc>| now - modified <= min_age || floor.is_some_and(|f| modified >= f);
