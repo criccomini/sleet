@@ -97,7 +97,8 @@ Every mode runs the same pass:
    strip, a prior pass's unpin), commit (step 5) with no pin.
 4. **Pin and copy.** Create a source checkpoint named for the target
    (`sleet-mirror:<target-name>`), lifetime `checkpoint_lifetime`,
-   refreshed at half-life while the pass runs. A checkpoint pins the
+   refreshed at half-life while the pass runs; a pass whose pin
+   lapses restarts instead of committing. A checkpoint pins the
    manifest its own creation commits, so the pass adopts that manifest
    as `L` and rediffs; nothing is copied yet, so the slip costs a few
    manifest reads. Then copy the missing objects. No manifest commits
@@ -182,7 +183,15 @@ target's `retention` table set (§9), the pruner, in either mode, keeps
 the latest manifest, every manifest younger than `keep`, and any
 manifest a live checkpoint pins, and deletes the rest: the manifests,
 then data objects unreferenced by any kept manifest and older than
-`min_age`. The WAL tail above the latest manifest is never pruned.
+`min_age`. Data-object deletion also holds back behind in-flight
+passes: the pruner reads the source's latest manifest, and while any
+live checkpoint named for the target exists, deletes only objects
+older than the oldest one's `create_time` less `min_age` (clock
+slack). Staging always follows pinning (§4), so a concurrent or stale
+pass never loses uncommitted copies; a crashed pass's pin expires and
+frees its orphans, and the half-life refresh margin means a pruner
+can see the pin gone only long after any legal commit. The WAL tail
+above the latest manifest is never pruned.
 Pruning skips RFC-0026's boundary protocol: a stale task re-creating
 a pruned manifest resurrects harmless litter, below latest and
 unreachable, that the next prune deletes; target commits carry no
@@ -221,8 +230,11 @@ manifests; the copier moves only `wal/` and `compacted/`.
   is a node flag (`--rclone`).
 - **`external`**: bucket replication configured outside sleet (S3
   CRR/SRR, GCS Storage Transfer, Azure object replication) ships the
-  data directories; the mirror task copies nothing, verifies closure
-  completeness, and commits manifests. The replication must cover only
+  data directories; the mirror task diffs the closure as usual,
+  backfills missing objects through the builtin path, and commits
+  manifests. Backfill covers what replication does not deliver:
+  objects predating the replication rule (seeding) and objects it
+  never redelivers (a prune before commit). The replication must cover only
   `wal/` and `compacted/` and must not replicate delete markers: a
   propagated delete could remove an object a committed target manifest
   still references. None of these services support
