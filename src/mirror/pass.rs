@@ -352,13 +352,25 @@ async fn commit(
         let to = object_path(dest, &layout::manifest_rel(id));
         match dest
             .store
-            .put_opts(&to, bytes.into(), PutOptions::from(PutMode::Create))
+            .put_opts(&to, bytes.clone().into(), PutOptions::from(PutMode::Create))
             .await
         {
             Ok(_) => committed += 1,
-            // A racing mirror task landed the same immutable manifest
-            // first; the history is shared, so this is success.
-            Err(object_store::Error::AlreadyExists { .. }) => {}
+            // Create-if-absent found the id taken. A racing mirror
+            // task landing the same immutable manifest is success; a
+            // different body means another writer forked the target's
+            // history, which wedges the pass loudly.
+            Err(object_store::Error::AlreadyExists { .. }) => {
+                let existing = dest.store.get(&to).await?.bytes().await?;
+                if existing != bytes {
+                    return Err(MirrorError::Diverged {
+                        destination: dest.url.clone(),
+                        target_id: id,
+                        source_id: head.id(),
+                    }
+                    .into());
+                }
+            }
             Err(e) => return Err(e.into()),
         }
     }
