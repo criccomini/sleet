@@ -8,8 +8,8 @@ apply unchanged unless stated otherwise.
 ## 1. Goals
 
 1. **Disaster recovery**: a warm standby in another region or cloud,
-   with bounded data loss (RPO ~ WAL lag) and a defined operational
-   failover (§10).
+   with bounded data loss (RPO ~ WAL lag), that fails over by being
+   opened as an ordinary database (§10).
 2. **Read replicas**: a near-realtime, always-consistent replica for
    serving reads in another region or cloud: snapshot reads by mounting
    mirrored checkpoints today (§5), tailing reads once a checkpoint-free
@@ -69,7 +69,7 @@ expired checkpoints (`garbage_collector.rs`), and a compactor would
 commit its own state. `services = ["mirror"]` is exclusive.
 
 Never copied: `compactions/` (job claims and epochs are root-local; a
-promoted target's coordinator starts fresh) and `gc/*.boundary`
+target opened live starts fresh, §10) and `gc/*.boundary`
 (target-local, maintained by reconciliation, §4). Zero-byte WAL fence
 objects are ordinary `wal/` objects and copy like any other.
 
@@ -98,9 +98,9 @@ Every mode runs the same pass:
    source. WAL ids are dense, so the tail poll is one GET of the next
    expected id, nearly free when idle. SlateDB's replay discovers WALs
    by probing the store past the manifest's recorded state
-   (`TableStore::last_seen_wal_id`), so a promoted target replays the
-   copied tail exactly like a writer recovering from a crash. Copying
-   in id order means the target never has a WAL gap.
+   (`TableStore::last_seen_wal_id`), so a target opened live replays
+   the copied tail exactly like a writer recovering from a crash.
+   Copying in id order means the target never has a WAL gap.
 7. **Unpin.** Delete the previous pass's pin checkpoint.
 
 The pass syncs `W` directly to `L`; it cannot replay intermediate
@@ -208,8 +208,9 @@ and `compacted/`.
   sleet writes nothing. The mirror task computes the newest manifest
   whose closure is complete (the **safe watermark**), reports it, and
   alarms on lag. Replicated manifests above the watermark may reference
-  objects that have not arrived; readers and promotion must use the
-  watermark. No reconciliation, no retention.
+  objects that have not arrived; readers must mount checkpoints at or
+  below the watermark, and taking the target live requires removing
+  the manifests above it (§10). No reconciliation, no retention.
 
 ## 9. Configuration and placement
 
@@ -259,29 +260,28 @@ top-ranked live node offering the service, heartbeat letter `m`.
 offering `mirror` must reach both the source and target stores;
 placement does not consider reachability.
 
-## 10. Promotion and failover
+## 10. Taking a mirror live
 
-`sleet mirror promote <root> <target>` turns a target into an ordinary
-database: it runs a final pass when the source is reachable, rewrites
-the registry file to drop `[mirror]` and set normal services (fleet
-defaults unless `--services` is given), and reports the manifest and
-WAL id the target ends at. The first writer to open the target bumps
-`writer_epoch` and replays the WAL tail; a coordinator started by sleet
-bumps `compactor_epoch` and builds fresh compaction state.
+A target is a valid database at every instant (§3), so going live
+needs no conversion step: delete the registration to stop the mirror,
+then open the target. The first writer bumps `writer_epoch` and
+replays the copied WAL tail; a coordinator bumps `compactor_epoch` and
+builds fresh compaction state. For migration, quiescing the source
+writers and letting `status --mirrors` show zero lag first bounds the
+switch to the final WAL delta; for DR failover the target is simply
+opened at its watermark, and data loss is the mirror lag at failure.
 
-Epochs fence within one root only. Promotion cannot stop writers on
-the source, and a writer still running there keeps diverging from the
-promoted target. Sequencing writer shutdown is the operator's step.
+Epochs fence within one root only. Nothing on the target side can
+stop writers on the source, and a writer still running there keeps
+diverging from the stopped mirror; sequencing writer shutdown around
+the switch is outside sleet (§2).
 
-- **Failover (DR)**: source unreachable, so the final pass is skipped
-  and the target promotes at its watermark. Data loss is the mirror lag
-  at failure.
-- **Migration**: quiesce source writers, let the final pass drain the
-  WAL delta, promote, point clients at the target, delete the source
-  registration. Downtime is the delta copy.
-- **`external-full`**: promotion requires the external replication
-  stopped. It promotes at the safe watermark and deletes replicated
-  manifests above it, since their closures never arrived.
+An `external-full` target needs one manual step first: `Db::open`
+reads the latest manifest, so replicated manifests above the safe
+watermark (§8) must be deleted, with the external replication stopped,
+before a writer opens it.
+
+A `promote` command automating this is future work (§12.5).
 
 ## 11. Observability and verification
 
@@ -328,6 +328,14 @@ compaction protocol.
 Clone sources (copy the parent's referenced SSTs to matching relative
 paths, or inline them) and databases with a separate WAL object store
 (mirror both stores).
+
+### 12.5 Promotion
+
+`sleet mirror promote <root> <target>`: run a final pass while the
+source is reachable, rewrite the registry file to drop `[mirror]` and
+set normal services, delete `external-full` manifests above the safe
+watermark, and report the manifest and WAL id the target ends at.
+Until then, taking a mirror live is the manual sequence in §10.
 
 ## Open questions
 
