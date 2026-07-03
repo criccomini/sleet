@@ -55,8 +55,9 @@ the same relative names under the target root and commits manifests as
 the atomic step. Two invariants define a valid target:
 
 1. **Completeness**: the target's latest manifest always has its full
-   closure present. The closure is the manifest's own data objects (L0
-   and sorted-run SSTs under `compacted/`, WAL SSTs above
+   closure present. The closure is the manifest's own data objects
+   (the L0 and sorted-run SSTs of every tree, the root and each
+   RFC-0024 segment, under `compacted/`, and WAL SSTs above
    `replay_after_wal_id`) plus, for each live checkpoint in its list,
    the pinned manifest and that manifest's data objects. One level
    only, matching what GC preserves at the source: a pinned manifest's
