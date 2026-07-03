@@ -11,9 +11,8 @@ apply unchanged unless stated otherwise.
    with bounded data loss (RPO ~ WAL lag), that fails over by being
    opened as an ordinary database (§3).
 2. **Read replicas**: a near-realtime, always-consistent replica for
-   serving reads in another region or cloud: snapshot reads by mounting
-   mirrored checkpoints today (§5), tailing reads once a checkpoint-free
-   reader mode lands upstream (§11.2).
+   serving reads in another region or cloud, read by tailing the
+   target's manifest sequence (§5, §11.2).
 3. **Backups**: point-in-time, incremental, verifiable snapshots with
    retention independent of the source (§7).
 4. **Migration**: move a database between buckets, regions, or clouds
@@ -94,8 +93,8 @@ Every mode runs the same pass:
    and `compacted/` at the target and diff. An object exists at the
    target iff it is done: names are unique and content is immutable,
    so the check is exact and re-copies are harmless. If nothing is
-   missing (a checkpoint-only change: a serving rotation, an expiry
-   strip, a prior pass's unpin), commit (step 5) with no pin.
+   missing (a checkpoint-only change: an operator checkpoint, an
+   expiry strip, a prior pass's unpin), commit (step 5) with no pin.
 4. **Pin and copy.** Create a source checkpoint named for the target
    (`sleet-mirror:<target-name>`), lifetime `checkpoint_lifetime`,
    refreshed at half-life while the pass runs; a pass whose pin
@@ -138,28 +137,25 @@ race a deletion between listing and opening).
 
 ## 5. Reading a mirror
 
-Replica readers mount the target with `DbReader` and an explicit
-checkpoint id. Opening without one is not allowed against a target:
-`DbReader` would CAS its own checkpoint into the target manifest,
-violating single-writer.
+Replica readers open the target with `DbReader` in checkpoint-free
+mode, the upstream contribution this design depends on (§11.2): the
+reader polls the target's latest manifest and follows the sequence
+the mirror commits, tolerating the id gaps that are normal there
+(§3). Read freshness is the reader's poll cadence plus mirror lag.
+0.14.1's `DbReader` offers only explicit checkpoints or a
+self-managed one it CASes into the manifest, and the latter violates
+single-writer (§3), so until §11.2 lands readers can mount only
+explicit checkpoints.
 
-The checkpoints readers mount are created at the source and arrive in
-every copied manifest. With a target's `serve` table set (§9), the
-mirror rotates a **serving checkpoint** at the source: each `refresh`,
-it creates a new checkpoint at the source's latest manifest with the
-configured `lifetime`; old ones expire. Readers list checkpoints by
-name at the target and mount the newest, reopening to advance. Read
-freshness is the refresh cadence plus mirror lag. Nothing at the
-target deletes what a mounted snapshot references (§6, §7), so a
-reader holds it consistently for the serving checkpoint's lifetime.
-Unlike the per-pass pin (§4), serving checkpoints stand between
-passes, `lifetime / refresh` of them at a time. Each rotation is a
-source manifest change, so `refresh`, not `poll`, sets the pass
-cadence: one source manifest write and one pinless target commit
-(§4) per refresh, pruned like any other manifest (§7). A rotated
-checkpoint that arrives after its lifetime is never mountable, so
-`serve` on a periodic target is rejected at load unless `lifetime`
-exceeds `interval`.
+Retention sets the read grace. Prune is the only deleter at a target
+(§7) and keeps every restore point for `keep`, so a tailing reader
+has at least `keep` on any manifest it follows; unset retention
+deletes nothing. `keep` must exceed the longest scan a replica runs.
+
+For a long-lived consistent snapshot, create a named checkpoint at
+the source: it arrives in the next copied manifest, mounts at the
+target by id (`DbReader` with an explicit checkpoint is read-only),
+and prune keeps its closure while it lives (§7).
 
 ## 6. Modes
 
@@ -310,13 +306,9 @@ poll = "10s"                    # continuous: pass and tail cadence
 [mirror.targets.dr]
 disabled = true                 # opt out of the fleet-wide target
 
-[mirror.targets.replica]        # read replica in another region
+[mirror.targets.replica]        # read replica; readers tail it (§5)
 url = "s3://eu-replica/db1"
 mode = "continuous"
-
-[mirror.targets.replica.serve]  # serving checkpoint rotation (§5)
-refresh = "1m"
-lifetime = "1h"
 
 [mirror.targets.backup]         # add an explicit second target
 url = "gs://backups/db1"
@@ -333,9 +325,9 @@ database mirrors iff its resolved services include `mirror` and at
 least one enabled target applies; zero targets is a no-op, not an
 error. Removing or disabling a target stops that mirror and leaves
 the destination valid at its watermark. The target name is an
-identity: it keys placement and names the source checkpoints (§4,
-§5), so renaming one moves its placement and abandons its checkpoints
-to expiry.
+identity: it keys placement and names the source pin (§4), so
+renaming one moves its placement and abandons its checkpoints to
+expiry.
 
 Placement extends the pair to a triple: each enabled `(database,
 mirror, target)` goes to the top-ranked live node offering the
@@ -357,8 +349,8 @@ the heartbeat body like other services.
 Every commit already proves closure completeness by existence checks.
 `sleet mirror verify <root> <db> <target>` re-checks on demand: existence
 and size for every restore point's closure, and with `--deep`, a
-`DbReader` scan at a checkpoint that re-reads every block through its
-checksum. Sizes rather than ETags: multipart ETags do not survive
+checkpoint-free `DbReader` scan (§5) that re-reads every block
+through its checksum. Sizes rather than ETags: multipart ETags do not survive
 cross-store copies.
 
 ## 11. Future work
@@ -372,12 +364,16 @@ checkpoints, retention checkpoints, stock GC. The target becomes a
 first-class database while data objects stay byte-copied. Needs a
 public manifest write API upstream.
 
-### 11.2 Tailing reads
+### 11.2 Checkpoint-free reader (SlateDB contribution)
 
-A checkpoint-free reader mode upstream would let replicas tail the
-target's manifest sequence instead of reopening at rotated
-checkpoints. The mirror already maintains a live manifest sequence at
-the target, so this slots in without protocol changes.
+Reading a mirror (§5) depends on a `DbReader` mode to contribute
+upstream: open at the latest manifest with no checkpoint, poll for
+new manifests, write nothing. 0.14.1's reader offers only explicit
+checkpoints or a self-managed one committed to the manifest, and the
+latter violates single-writer (§3). The mirror already maintains a
+live manifest sequence at the target, so the mode slots in without
+protocol changes; replaying the WAL tail past the manifest would
+sharpen freshness from manifest cadence to WAL lag.
 
 ### 11.3 Logical mirroring
 
