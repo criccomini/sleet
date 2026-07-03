@@ -71,12 +71,7 @@ the atomic step. Two invariants define a valid target:
 Completeness makes the target a valid SlateDB database at every
 instant: the latest manifest and every checkpoint-pinned manifest open.
 Single-writer holds because any other manifest committer would fork the
-target's history away from the source's. This is why a target is never
-a registered database: sleet would run services against it, and
-SlateDB's GC CASes manifests to strip expired checkpoints
-(`garbage_collector.rs`), while a compactor would commit its own
-state. Validation keeps targets and registered databases disjoint
-(§9).
+target's history away from the source's.
 
 Never copied: `compactions/` (job claims and epochs are root-local; a
 coordinator later started against the target builds fresh state) and
@@ -125,7 +120,7 @@ the source, so objects exclusive to unpinned intermediates may already
 be deleted. Skipping is safe because manifest id gaps are already
 normal.
 
-Ascending commit order is load-bearing. A checkpoint pins the manifest
+Ascending commit order is critical. A checkpoint pins the manifest
 that was latest at its creation, so an entry's `manifest_id` never
 exceeds the id of the manifest carrying it, and ascending order lands
 every referenced manifest before its referencer. Each transiently
@@ -133,14 +128,7 @@ latest manifest during a commit is therefore complete; the only
 entries in it that can dangle are checkpoints that died before `L`,
 and those resolve nowhere at the source either (readers reach
 checkpoints only through the latest manifest's list, and can already
-race a deletion between listing and opening). Descending order would
-invert this: the latest manifest's live entries would be unresolvable,
-a state the source can never be in. The same creation-order fact keeps
-the window safe for reconciliation: a checkpoint in `L` pinning a
-manifest below a transient latest `M` predates `M` and so is in `M`'s
-list too, meaning a duplicate task reconciling mid-commit never
-deletes a manifest `L` needs; freshly copied data objects sit inside
-`min_age`.
+race a deletion between listing and opening).
 
 **Reconciliation** (continuous mode) propagates the source's deletions.
 The active set at the target is the latest manifest's closure (§3),
