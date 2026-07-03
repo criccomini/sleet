@@ -168,6 +168,15 @@ pub async fn status(
                 sources.join(" and ")
             ));
         }
+        // A destination can never itself be a registered database
+        // (DESIGN-MIRROR §2): sleet services at the destination would
+        // violate the mirror's single-writer invariant.
+        if state.databases.contains_key(&destination) {
+            warnings.push(format!(
+                "mirror destination {destination} is itself a registered database; \
+                 its services will fork the mirror's history"
+            ));
+        }
     }
     for service in unoffered {
         warnings.push(format!("no live node offers {}", service.as_str()));

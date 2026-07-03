@@ -92,6 +92,21 @@ fn generate() {
         }
     }
     std::fs::write(dir.join("placement-scores.tsv"), scores).unwrap();
+    // The frozen (database, mirror, target) triple hash:
+    // `canonical-url <tab> target <tab> node <tab> hex`.
+    let mut scores = String::new();
+    for url in SAMPLE_URLS {
+        let canonical = registry::canonicalize_url(url).unwrap();
+        for target in ["dr", "backup"] {
+            for node in ["sleet-1", "sleet-2"] {
+                scores.push_str(&format!(
+                    "{canonical}\t{target}\t{node}\t{:016x}\n",
+                    placement::score_target(&canonical, target, node)
+                ));
+            }
+        }
+    }
+    std::fs::write(dir.join("mirror-target-scores.tsv"), scores).unwrap();
 }
 
 fn service_by_name(name: &str) -> Service {
@@ -145,6 +160,20 @@ fn corpus_of_every_release_still_parses() {
                 want,
                 "{dir:?}: the frozen hash changed for {url} {service} {node}"
             );
+        }
+
+        // Releases cut before mirroring have no triple scores.
+        if let Ok(lines) = std::fs::read_to_string(dir.join("mirror-target-scores.tsv")) {
+            for line in lines.lines() {
+                let fields: Vec<&str> = line.split('\t').collect();
+                let (url, target, node, hex) = (fields[0], fields[1], fields[2], fields[3]);
+                let want = u64::from_str_radix(hex, 16).unwrap();
+                assert_eq!(
+                    placement::score_target(url, target, node),
+                    want,
+                    "{dir:?}: the frozen triple hash changed for {url} {target} {node}"
+                );
+            }
         }
     }
     assert!(versions >= 1, "corpus must hold at least one release");

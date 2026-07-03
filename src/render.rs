@@ -323,4 +323,53 @@ warning: no live node offers compactor-coordinator
 ";
         assert_eq!(String::from_utf8(out).unwrap(), expected);
     }
+
+    /// The mirrors table renders lag columns with dashes for unknowns
+    /// and surfaces per-target read errors after the table.
+    #[test]
+    fn mirror_status_renders_stably() {
+        use crate::response::MirrorStatus;
+        let response = StatusResponse {
+            nodes: vec![],
+            databases: vec![],
+            mirrors: vec![
+                MirrorStatus {
+                    database: "s3://b/db".into(),
+                    target: "dr".into(),
+                    destination: "s3://dr/db".into(),
+                    source_manifest_id: Some(12),
+                    target_manifest_id: Some(10),
+                    manifests_behind: Some(2),
+                    wal_behind: Some(7),
+                    seconds_behind: Some(31),
+                    error: None,
+                },
+                MirrorStatus {
+                    database: "s3://b/db".into(),
+                    target: "backup".into(),
+                    destination: "gs://backups/db".into(),
+                    source_manifest_id: None,
+                    target_manifest_id: None,
+                    manifests_behind: None,
+                    wal_behind: None,
+                    seconds_behind: None,
+                    error: Some("bucket unreachable".into()),
+                },
+            ],
+            warnings: vec![],
+        };
+        let mut out = Vec::new();
+        response.render(&mut out).unwrap();
+        let expected = "\
+NODE  LIVE  HEARTBEAT  SERVICES  SLEET  SLATEDB
+
+DATABASE  SERVICE  NODES
+
+DATABASE   TARGET  DESTINATION      MANIFESTS  WAL  SECONDS
+s3://b/db  dr      s3://dr/db       2          7    31
+s3://b/db  backup  gs://backups/db  -          -    -
+error: s3://b/db target backup: bucket unreachable
+";
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
+    }
 }

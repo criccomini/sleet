@@ -1188,12 +1188,26 @@ async fn status_flags_collisions_and_prefixes_emit_filters() {
         .await
         .unwrap();
 
+    // And the worst case: the shared destination itself registered as
+    // a database (a mirror chain), which sleet must call out.
+    ops::register(&root, "s3://dr-bucket/one-destination")
+        .await
+        .unwrap();
+
     let status = ops::status(&root, false, true).await.unwrap();
     assert!(
         status
             .warnings
             .iter()
             .any(|w| w.contains("mirror destinations collide")),
+        "{:?}",
+        status.warnings
+    );
+    assert!(
+        status
+            .warnings
+            .iter()
+            .any(|w| w.contains("is itself a registered database")),
         "{:?}",
         status.warnings
     );
