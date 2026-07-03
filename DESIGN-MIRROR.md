@@ -282,24 +282,6 @@ identity: it keys placement and names the source checkpoints (§4,
 §5), so renaming one moves its placement and abandons its checkpoints
 to expiry.
 
-Destinations are never registry entries; sleet runs no services
-against them (§3). Validation enforces this at three points:
-
-- At load: every target sets `url`; a `sleet.toml` target also sets
-  `source_prefix`, since a bare `url` is one root for every database;
-  `interval` and `retention` require `mode = "periodic"`; the
-  `external` copier cannot be fleet-wide (§8).
-- Across the registry (`register` refuses, `status` flags): no
-  destination may be a registered database, which is also what makes
-  mirror chains inexpressible (§2), and no two databases may resolve
-  the same or nested destinations, which cross-target overlaps can
-  produce.
-- At a target's first pass: the source manifest must have empty
-  `external_dbs` and no separate WAL object store. The destination
-  root is assumed empty or a prior mirror of the same source,
-  unverified: re-pointing a target at a foreign root is undetected
-  operator error.
-
 Placement extends the pair to a triple: each enabled `(database,
 mirror, target)` goes to the top-ranked live node offering the
 service (heartbeat letter `m`) under the frozen rendezvous hash.
