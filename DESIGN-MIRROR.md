@@ -75,7 +75,7 @@ target's history away from the source's.
 
 Never copied: `compactions/` (job claims and epochs are root-local; a
 coordinator later started against the target builds fresh state) and
-`gc/*.boundary` (target-local, maintained by reconciliation, §4).
+`gc/*.boundary` (target-local, advanced by retention pruning, §7).
 Zero-byte WAL fence objects are ordinary `wal/` objects and copy like
 any other.
 
@@ -130,15 +130,6 @@ and those resolve nowhere at the source either (readers reach
 checkpoints only through the latest manifest's list, and can already
 race a deletion between listing and opening).
 
-**Reconciliation** (continuous mode) propagates the source's deletions.
-The active set at the target is the latest manifest's closure (§3),
-the same rule SlateDB's GC applies, run read-only against manifests.
-Data objects outside the active set and older than `min_age` are
-deleted. Manifests
-that are neither latest nor pinned are deleted after advancing
-`gc/manifest.boundary` past them, which closes the race with a stale
-mirror task re-committing a deleted id.
-
 Safety follows sleet's core invariant: correctness never depends on
 scheduling. Copies are idempotent, the commit is create-if-absent, and
 a duplicate or stale mirror task at worst loses a create race or
@@ -162,19 +153,21 @@ mirror rotates a **serving checkpoint** at the source: each `refresh`,
 it creates a new checkpoint at the source's latest manifest with the
 configured `lifetime`; old ones expire. Readers list checkpoints by
 name at the target and mount the newest, reopening to advance. Read
-freshness is the refresh cadence plus mirror lag. Reconciliation
-honors unexpired checkpoints, so a reader holds a consistent snapshot
-for the serving checkpoint's lifetime. Unlike the per-pass pin (§4),
+freshness is the refresh cadence plus mirror lag. Nothing at the
+target deletes what a mounted snapshot references (§6, §7), so a
+reader holds it consistently for the serving checkpoint's lifetime.
+Unlike the per-pass pin (§4),
 serving checkpoints stand between passes; `refresh` sets the manifest
 write cadence that costs the source.
 
 ## 6. Modes
 
 - **`continuous`**: the pass plus the WAL tail, on a `poll` cadence
-  with idle backoff, plus reconciliation. The target tracks the source,
-  deletions included. RPO is one poll plus tail copy time.
-- **`periodic`**: one pass every `interval`, no WAL tail, no
-  reconciliation; retention pruning instead (§7). Each committed
+  with idle backoff. RPO is one poll plus tail copy time. Nothing is
+  deleted at the target: superseded objects accumulate until the
+  target is opened live and its own GC reclaims them.
+- **`periodic`**: one pass every `interval`, no WAL tail; retention
+  pruning instead (§7). Each committed
   manifest is a point-in-time cut. Scheduling is stateless: a pass runs
   when the target's latest manifest's `LastModified` is older than
   `interval`.
@@ -191,8 +184,9 @@ mostly-idle databases stay cheap under fleet-wide targets (§9).
 ## 7. Backups and retention
 
 A periodic target's committed manifests are its restore points. With
-a target's `retention` table set (§9), the pruner keeps the latest plus
-every manifest younger than `keep`, and deletes the rest: first advance
+a target's `retention` table set (§9), the pruner keeps the latest
+manifest, every manifest younger than `keep`, and any manifest a live
+checkpoint pins, and deletes the rest: first advance
 the boundary past the pruned manifest ids (RFC-0026), then delete the
 manifests, then delete data objects unreferenced by any kept manifest
 and older than `min_age`. Unset retention keeps everything.
@@ -221,8 +215,9 @@ and `compacted/`.
   CRR/SRR, GCS Storage Transfer, Azure object replication) ships the
   data directories; the mirror task copies nothing, verifies closure
   completeness, and commits manifests. The replication must cover only
-  `wal/` and `compacted/` and must not replicate delete markers;
-  reconciliation owns deletions. None of these services support
+  `wal/` and `compacted/` and must not replicate delete markers: a
+  propagated delete could remove an object a committed target manifest
+  still references. None of these services support
   regex or glob filters, only anchored key prefixes: S3 rules are
   include-only (two rules per database, 1,000 rules per bucket
   configuration), GCS Storage Transfer has anchored
@@ -235,7 +230,7 @@ and `compacted/`.
   whose closure is complete (the **safe watermark**), reports it, and
   alarms on lag. Replicated manifests above the watermark may reference
   objects that have not arrived; readers must mount checkpoints at or
-  below the watermark. No reconciliation, no retention.
+  below the watermark. No retention.
 
 ## 9. Configuration and placement
 
@@ -271,7 +266,7 @@ mode = "continuous"             # continuous | periodic
 copier = "builtin"              # builtin | rclone | external | external-full
 poll = "10s"                    # continuous: pass and tail cadence
 # interval = "24h"              # periodic: cadence between passes
-# min_age = "300s"              # reconcile/prune deletion age floor
+# min_age = "300s"              # periodic: prune deletion age floor
 # checkpoint_lifetime = "15m"   # source pin checkpoint TTL
 # copy_parallelism = 8          # builtin: concurrent object copies
 ```
