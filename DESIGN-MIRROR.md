@@ -27,10 +27,12 @@ apply unchanged unless stated otherwise.
   source writers at failover is outside sleet.
 - No logical transformation: v1 copies bytes. Filtering, format
   changes, and re-compaction at the target are out (§11.3).
+- No mirror chains: a destination can never itself be a registered
+  database (§9), so mirroring a mirror is not expressible.
 - The fleet root (`sleet.toml`, `dbs/`, `nodes/`) is not mirrored;
   mirroring is per database.
 - Databases that are clones (`external_dbs` set) or that use a separate
-  WAL object store are rejected at registration (§11.4).
+  WAL object store cannot be mirror sources (§11.4).
 
 ## 3. Model
 
@@ -46,10 +48,11 @@ Mirroring builds on three properties of SlateDB's layout:
 - Gaps in the manifest id sequence are normal: manifest GC deletes old
   unpinned versions below the latest.
 
-A **mirror target** is a registered database whose config names a
-source (§9). The mirror service copies the source's immutable objects
-to the same relative names under the target root and commits manifests
-as the atomic step. Two invariants define a valid target:
+Each registered database may name **mirror targets** (§9): destination
+roots the mirror service copies to. A target is a URL, never a
+registry entry. The mirror copies the source's immutable objects to
+the same relative names under the target root and commits manifests as
+the atomic step. Two invariants define a valid target:
 
 1. **Completeness**: every manifest present at the target has its full
    closure present. The closure of a manifest is every object it
@@ -63,16 +66,18 @@ as the atomic step. Two invariants define a valid target:
 Completeness makes the target a valid SlateDB database at every
 instant: the latest manifest and every checkpoint-pinned manifest open.
 Single-writer holds because any other manifest committer would fork the
-target's history away from the source's. This is why no other sleet
-service may run against a target: SlateDB's GC CASes manifests to strip
-expired checkpoints (`garbage_collector.rs`), and a compactor would
-commit its own state. `services = ["mirror"]` is exclusive.
+target's history away from the source's. This is why a target is never
+a registered database: sleet would run services against it, and
+SlateDB's GC CASes manifests to strip expired checkpoints
+(`garbage_collector.rs`), while a compactor would commit its own
+state. Validation keeps targets and registered databases disjoint
+(§9).
 
 Never copied: `compactions/` (job claims and epochs are root-local; a
 coordinator later started against the target builds fresh state) and
-`gc/*.boundary`
-(target-local, maintained by reconciliation, §4). Zero-byte WAL fence
-objects are ordinary `wal/` objects and copy like any other.
+`gc/*.boundary` (target-local, maintained by reconciliation, §4).
+Zero-byte WAL fence objects are ordinary `wal/` objects and copy like
+any other.
 
 ## 4. The sync pass
 
@@ -80,12 +85,11 @@ Every mode runs the same pass:
 
 1. **Watermark.** LIST `manifest/` at the target; the highest id `W` is
    the last committed state. No other state is stored anywhere.
-2. **Read.** Read the source's latest manifest `L`. If `L = W`, skip to
-   step 6.
+2. **Read.** Read the source's latest manifest `L`. If `L = W` there is
+   nothing to commit; continuous mode keeps tailing (step 7).
 3. **Pin.** Create a source checkpoint at `L` named for the target
-   (`sleet-mirror:<target-key>`), lifetime `checkpoint_lifetime`,
-   refreshed at half-life while the pass runs. The previous pass's pin
-   stays until step 7.
+   (`sleet-mirror:<target-name>`), lifetime `checkpoint_lifetime`,
+   refreshed at half-life while the pass runs.
 4. **Copy.** Enumerate the closure of `L`. LIST `wal/` and `compacted/`
    at the target, diff, and copy the missing objects. An object exists
    at the target iff it is done: names are unique and content is
@@ -94,15 +98,19 @@ Every mode runs the same pass:
    last, each with create-if-absent. After each successful create,
    re-read the target's `gc/manifest.boundary` and treat an id at or
    below it as a failed write (RFC-0026, same as any manifest writer).
-6. **Tail** (continuous mode). Copy WAL SSTs above `L`'s
-   `next_wal_sst_id` in ascending id order as they appear at the
+6. **Unpin.** Delete the pin. Between passes nothing needs pinning: the
+   diff base is the target itself, and checkpoint creation, refresh,
+   and deletion are each a manifest CAS at the source, so a caught-up
+   mirror holds no standing checkpoints and an idle database sees no
+   manifest churn from being mirrored.
+7. **Tail** (continuous mode, runs between passes). Copy WAL SSTs above
+   `L`'s `next_wal_sst_id` in ascending id order as they appear at the
    source. WAL ids are dense, so the tail poll is one GET of the next
    expected id, nearly free when idle. SlateDB's replay discovers WALs
    by probing the store past the manifest's recorded state
    (`TableStore::last_seen_wal_id`), so a writer opening the target
    later replays the copied tail exactly like one recovering from a
    crash. Copying in id order means the target never has a WAL gap.
-7. **Unpin.** Delete the previous pass's pin checkpoint.
 
 The pass syncs `W` directly to `L`; it cannot replay intermediate
 manifests. Only `L` and checkpoint-pinned manifests are protected at
@@ -124,10 +132,10 @@ scheduling. Copies are idempotent, the commit is create-if-absent, and
 a duplicate or stale mirror task at worst loses a create race or
 re-copies bytes; two tasks at different watermarks converge on the same
 target. A crashed pass leaves extra data objects and no committed
-manifest; the next pass resumes from the watermark. If the mirror is
-down long enough for its pin to expire, source GC reclaims and the next
-pass re-baselines from the current latest; objects already copied
-remain valid because they are immutable.
+manifest; the next pass resumes from the watermark. If a pass stalls
+past its pin's lifetime, source GC may reclaim and the copy sees
+missing objects; the pass restarts against a fresh latest, and objects
+already copied remain valid because they are immutable.
 
 ## 5. Reading a mirror
 
@@ -137,14 +145,16 @@ checkpoint id. Opening without one is not allowed against a target:
 violating single-writer.
 
 The checkpoints readers mount are created at the source and arrive in
-every copied manifest. With `[mirror.serve]` set, the mirror rotates a
-**serving checkpoint** at the source: each `refresh`, it creates a new
-checkpoint at the source's latest manifest with the configured
-`lifetime`; old ones expire. Readers list checkpoints by name at the
-target and mount the newest, reopening to advance. Read freshness is
-the refresh cadence plus mirror lag. Reconciliation honors unexpired
-checkpoints, so a reader holds a consistent snapshot for the serving
-checkpoint's lifetime.
+every copied manifest. With a target's `serve` table set (§9), the
+mirror rotates a **serving checkpoint** at the source: each `refresh`,
+it creates a new checkpoint at the source's latest manifest with the
+configured `lifetime`; old ones expire. Readers list checkpoints by
+name at the target and mount the newest, reopening to advance. Read
+freshness is the refresh cadence plus mirror lag. Reconciliation
+honors unexpired checkpoints, so a reader holds a consistent snapshot
+for the serving checkpoint's lifetime. Unlike the per-pass pin (§4),
+serving checkpoints stand between passes; `refresh` sets the manifest
+write cadence that costs the source.
 
 ## 6. Modes
 
@@ -156,18 +166,20 @@ checkpoint's lifetime.
   manifest is a point-in-time cut. Scheduling is stateless: a pass runs
   when the target's latest manifest's `LastModified` is older than
   `interval`.
-- One-shot: `sleet mirror sync <root> <target>` runs a single pass
-  regardless of mode.
+- One-shot: `sleet mirror sync <root> <db> <target>` runs a single
+  pass regardless of mode.
 
 Cost differs by mode. Continuous copies every compaction rewrite, so
 cross-store transfer scales with ingest times one plus the compaction
 write amplification. A periodic interval longer than the compaction
-cycle copies only surviving SSTs.
+cycle copies only surviving SSTs. Either way, a caught-up mirror costs
+one manifest read per poll and holds no checkpoints (§4), so
+mostly-idle databases stay cheap under fleet-wide targets (§9).
 
 ## 7. Backups and retention
 
 A periodic target's committed manifests are its restore points. With
-`[mirror.retention]` set, the pruner keeps the latest manifest plus
+a target's `retention` table set (§9), the pruner keeps the latest plus
 every manifest younger than `keep`, and deletes the rest: first advance
 the boundary past the pruned manifest ids (RFC-0026), then delete the
 manifests, then delete data objects unreferenced by any kept manifest
@@ -203,7 +215,8 @@ and `compacted/`.
   include-only (two rules per database, 1,000 rules per bucket
   configuration), GCS Storage Transfer has anchored
   `includePrefixes`/`excludePrefixes` (1,000 each), Azure
-  `prefixMatch` is include-only. `sleet mirror prefixes <root>
+  `prefixMatch` is include-only. The caps also rule external copiers
+  out as fleet-wide defaults (§9). `sleet mirror prefixes <root> <db>
   <target> --format s3|sts|azure` emits the per-database filter lists.
 - **`external-full`**: whole-root replication that cannot be filtered.
   sleet writes nothing. The mirror task computes the newest manifest
@@ -214,19 +227,33 @@ and `compacted/`.
 
 ## 9. Configuration and placement
 
-A mirror target is registered like any database: a `dbs/<db>.toml` file
-keyed by the percent-encoded target URL. `mirror` joins the service
-list and the `[database]` table gains a `mirror` table, so fleet-wide
-defaults for its fields live in `sleet.toml` under `[database.mirror]`
-with the usual per-field precedence: built-in defaults ->
-`[database]` -> `dbs/<db>.toml`. `source` cannot be set fleet-wide.
+Mirroring is configured on the source. Each registered database may
+define named targets under `[mirror.targets]`, and `mirror` joins the
+service list like any other service. Targets are part of the shared
+`[database]` shape, so fleet-wide defaults live in `sleet.toml` and
+per-database files override them with the usual per-field precedence
+(built-in defaults -> `[database]` -> `dbs/<db>.toml`), matched by
+target name.
+
+A fleet-wide target cannot name one destination root for every
+database, so a destination is set as either `url` (one database's
+destination) or `url_prefix` (a root under which each database's
+destination is derived by appending the registry's percent-encoding of
+the canonical source URL: under `url_prefix = "s3://dr/m/"`,
+`s3://prod/db1` mirrors to `s3://dr/m/s3%3A%2F%2Fprod%2Fdb1/`). The
+two are one field for precedence: a layer that sets either overrides
+both from the layer below, and exactly one must be set after
+resolution. Derived destinations carry the source in the path, so
+databases can never collide under one prefix and a derived root names
+its own source.
 
 ```toml
-# dbs/<percent-encoded target url>.toml
-services = ["mirror"]
+# sleet.toml: every database mirrors to the DR bucket by default
+[database]
+services = ["gc", "compactor-coordinator", "compaction-workers", "mirror"]
 
-[mirror]
-source = "s3://prod/db1"        # required
+[database.mirror.targets.dr]
+url_prefix = "s3://dr-bucket/mirrors/"
 mode = "continuous"             # continuous | periodic
 copier = "builtin"              # builtin | rclone | external | external-full
 poll = "10s"                    # continuous: pass and tail cadence
@@ -234,42 +261,68 @@ poll = "10s"                    # continuous: pass and tail cadence
 # min_age = "300s"              # reconcile/prune deletion age floor
 # checkpoint_lifetime = "15m"   # source pin checkpoint TTL
 # copy_parallelism = 8          # builtin: concurrent object copies
-
-# [mirror.serve]                # optional serving checkpoint (§5)
-# refresh = "1m"
-# lifetime = "1h"
-
-# [mirror.retention]            # periodic mode (§7)
-# keep = "30d"
 ```
 
-`sleet mirror register <root> <source> <target>` writes the file.
-Deleting it stops mirroring and leaves the target valid at its
-watermark.
+```toml
+# dbs/<percent-encoded source url>.toml: overrides for one database
+[mirror.targets.dr]
+disabled = true                 # opt out of the fleet-wide target
 
-Validation at registration and load: `services` containing `mirror`
-requires `mirror.source` and excludes every other service (§3);
-`interval` requires `mode = "periodic"`; `retention` requires
-`periodic`; the source manifest must have empty `external_dbs` and no
-separate WAL object store; the target root must be empty or hold a
-prior mirror of the same source.
+[mirror.targets.backup]         # add an explicit second target
+url = "gs://backups/db1"
+mode = "periodic"
+interval = "24h"
 
-Placement is unchanged: the pair `(target, mirror)` goes to the
-top-ranked live node offering the service, heartbeat letter `m`.
-`--max-mirror-jobs` caps concurrently syncing targets per node. Nodes
-offering `mirror` must reach both the source and target stores;
-placement does not consider reachability.
+[mirror.targets.backup.serve]   # optional serving checkpoint (§5)
+refresh = "1m"
+lifetime = "1h"
+
+[mirror.targets.backup.retention]   # periodic mode (§7)
+keep = "30d"
+```
+
+`disabled` is an ordinary overridable field: per-field fall-through
+cannot unset an inherited target, so opting a database out of a
+fleet-wide target is explicit. A database mirrors iff its resolved
+services include `mirror` and at least one enabled target resolves;
+zero targets is a no-op, not an error. Removing or disabling a target
+stops that mirror and leaves the destination valid at its watermark.
+The target name is an identity: it keys placement and names the source
+checkpoints (§4, §5), so renaming a target moves its placement and
+abandons its old checkpoints to expiry.
+
+Destinations are never registry entries and sleet runs no services
+against them (§3); validation enforces the boundary. At load: exactly
+one of `url`/`url_prefix` per target; `interval` and `retention`
+require `mode = "periodic"`; `external` and `external-full` copiers
+cannot come from the fleet-wide layer (§8). Across the registry,
+checked by `register` and flagged by `status`: no resolved destination
+may be a registered database (which also makes mirror chains
+inexpressible, §2), and no two databases may resolve the same
+destination. At a target's first pass: the source manifest must have
+empty `external_dbs` and no separate WAL object store, and the
+destination root must be empty or hold a prior mirror of the same
+source (derived roots carry the source in the path; explicit `url`
+roots are checked strictly).
+
+Placement extends the pair to a triple: each enabled `(database,
+mirror, target)` is ranked by the frozen rendezvous hash and goes to
+the top-ranked live node offering the service, heartbeat letter `m`.
+`--max-mirror-jobs` caps concurrently syncing `(database, target)`
+jobs per node. Nodes offering `mirror` must reach every source and
+destination store; placement does not consider reachability.
 
 ## 10. Observability and verification
 
-`sleet status --mirrors` reads each mirror's source and target heads
-and reports lag as manifests behind, WAL ids behind, and estimated
-seconds (source and target sequence numbers mapped through the sequence
-tracker). For `external-full` it reports the safe watermark. Mirror
+`sleet status --mirrors` reads source and destination heads per
+`(database, target)` and reports lag as manifests behind, WAL ids
+behind, and estimated seconds (source and target sequence numbers
+mapped through the sequence tracker). For `external-full` it reports
+the safe watermark. It also flags destination collisions (§9). Mirror
 task state rides in the heartbeat body like other services.
 
 Every commit already proves closure completeness by existence checks.
-`sleet mirror verify <root> <target>` re-checks on demand: existence
+`sleet mirror verify <root> <db> <target>` re-checks on demand: existence
 and size for every kept manifest's closure, and with `--deep`, a
 `DbReader` scan at a checkpoint that re-reads every block through its
 checksum. Sizes rather than ETags: multipart ETags do not survive
@@ -308,16 +361,16 @@ paths, or inline them) and databases with a separate WAL object store
 
 ### 11.5 Promotion
 
-`sleet mirror promote <root> <target>`: run a final pass while the
-source is reachable, rewrite the registry file to drop `[mirror]` and
-set normal services, delete `external-full` manifests above the safe
-watermark (`Db::open` reads the latest manifest), and report the
-manifest and WAL id the target ends at. Until then, going live is
-manual: delete the registration to stop the mirror, then open the
-target; the first writer bumps `writer_epoch` and replays the copied
-WAL tail, and a coordinator bumps `compactor_epoch` and builds fresh
-compaction state. Epochs fence within one root only, so sequencing
-source writer shutdown around the switch stays outside sleet (§2).
+`sleet mirror promote <root> <db> <target>`: run a final pass while
+the source is reachable, disable the target in the source's registry
+file, delete `external-full` manifests above the safe watermark
+(`Db::open` reads the latest manifest), and report the manifest and
+WAL id the destination ends at. Until then, going live is manual:
+disable the target to stop the mirror, then open the destination; the
+first writer bumps `writer_epoch` and replays the copied WAL tail, and
+a coordinator bumps `compactor_epoch` and builds fresh compaction
+state. Epochs fence within one root only, so sequencing source writer
+shutdown around the switch stays outside sleet (§2).
 
 ## Open questions
 
