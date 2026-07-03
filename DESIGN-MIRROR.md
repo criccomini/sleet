@@ -88,22 +88,27 @@ Every mode runs the same pass:
    the last committed state. No other state is stored anywhere.
 2. **Read.** Read the source's latest manifest `L`. If `L = W` there is
    nothing to commit; continuous mode keeps tailing (step 7).
-3. **Pin.** Create a source checkpoint at `L` named for the target
-   (`sleet-mirror:<target-name>`), lifetime `checkpoint_lifetime`,
-   refreshed at half-life while the pass runs.
-4. **Copy.** Enumerate the closure of `L` (§3): `L`'s data objects and
+3. **Diff.** Enumerate the closure of `L` (§3): `L`'s data objects and
    those of every manifest a live checkpoint in `L` pins. LIST `wal/`
-   and `compacted/` at the target, diff, and copy the missing objects.
-   An object exists at the target iff it is done: names are unique and
-   content is immutable, so the check is exact and re-copies are
-   harmless. No manifest commits until all of it is present.
+   and `compacted/` at the target and diff. An object exists at the
+   target iff it is done: names are unique and content is immutable,
+   so the check is exact and re-copies are harmless. If nothing is
+   missing (a checkpoint-only change: a serving rotation, an expiry
+   strip, a prior pass's unpin), commit (step 5) with no pin.
+4. **Pin and copy.** Create a source checkpoint named for the target
+   (`sleet-mirror:<target-name>`), lifetime `checkpoint_lifetime`,
+   refreshed at half-life while the pass runs. A checkpoint pins the
+   manifest its own creation commits, so the pass adopts that manifest
+   as `L` and rediffs; nothing is copied yet, so the slip costs a few
+   manifest reads. Then copy the missing objects. No manifest commits
+   until the whole closure is present.
 5. **Commit.** PUT the closure's manifests in ascending id order, `L`
    last, each with create-if-absent.
-6. **Unpin.** Delete the pin. Between passes nothing needs pinning: the
-   diff base is the target itself, and checkpoint creation, refresh,
-   and deletion are each a manifest CAS at the source, so a caught-up
-   mirror holds no standing checkpoints and an idle database sees no
-   manifest churn from being mirrored.
+6. **Unpin.** Delete the pin. The deletion writes one more source
+   manifest; the next pass commits it through step 3's pinless path,
+   converging `W` to the source's head. A pin stands only while data
+   objects copy, so a caught-up mirror holds no checkpoints and an
+   idle database sees no manifest churn from being mirrored.
 7. **Tail** (continuous mode, runs between passes). Copy WAL SSTs above
    `L`'s `next_wal_sst_id` in ascending id order as they appear at the
    source. WAL ids are dense, so the tail poll is one GET of the next
