@@ -91,8 +91,9 @@ Every mode runs the same pass:
 3. **Diff.** Enumerate the closure of `L` (§3): `L`'s data objects and
    those of every manifest a live checkpoint in `L` pins. LIST `wal/`
    and `compacted/` at the target and diff. An object exists at the
-   target iff it is done: names are unique and content is immutable,
-   so the check is exact and re-copies are harmless. If nothing is
+   target iff it is done: names are unique, content is immutable, and
+   prune spares everything still in the source's closure (§7), so the
+   check is exact and re-copies are harmless. If nothing is
    missing (a checkpoint-only change: an operator checkpoint, an
    expiry strip, a prior pass's unpin), commit (step 5) with no pin.
 4. **Pin and copy.** Create a source checkpoint named for the target
@@ -188,15 +189,29 @@ point, the manifests its live checkpoints pin). Support is one level,
 matching the closure (§3): support manifests are kept for their
 objects, and their own checkpoint entries may dangle. Everything else
 is deleted: the manifests, then data objects unreferenced by any kept
-manifest and older than `min_age`. Data-object deletion also holds back behind in-flight
-passes: the pruner reads the source's latest manifest, and while any
-live checkpoint named for the target exists, deletes only objects
-older than the oldest one's `create_time` less `min_age` (clock
-slack). Staging always follows pinning (§4), so a concurrent or stale
-pass never loses uncommitted copies; a crashed pass's pin expires and
-frees its orphans, and the half-life refresh margin means a pruner
-can see the pin gone only long after any legal commit. The WAL tail
-above the latest manifest is never pruned.
+manifest and older than `min_age`. Two guards hold data-object
+deletion back from in-flight passes. First, the pruner lists the
+target, then reads the source's latest manifest and spares every
+object in its closure (§3), counting checkpoint entries whether or
+not they have expired (retiring them is source GC's job); an
+unreachable source stops data-object deletion entirely. A pass's pin
+puts its adopted manifest in that closure, so a running pass's whole
+reference set is spared. Listing before reading makes the guard
+exact: any object at the target at list time that a later pass
+commits a reference to was already in the source's closure at read
+time, because objects arrive at the target only after they exist at
+the source, an object dropped from the manifest never returns, and a
+pin resolves through checkpoint entries already present at the read.
+Reusing objects found at the target, whether staged by a crashed
+pass or delivered early by an external copier (§8), is therefore
+safe. Second, while any checkpoint named for the target exists, the
+pruner deletes nothing newer than the oldest one's `create_time`
+less `min_age` (clock slack): staging follows pinning (§4), so a
+pass's fresh copies survive even when a checkpoint they support is
+deleted mid-pass and drops out of the source's closure. A crashed
+pass's pin expires and source GC strips it, freeing its orphans to
+the next prune. The WAL tail above the latest manifest is never
+pruned.
 Pruning skips RFC-0026's boundary protocol: a stale task re-creating
 a pruned manifest resurrects harmless litter, below latest and
 unreachable, that the next prune deletes; target commits carry no
@@ -249,8 +264,9 @@ manifests; the copier moves only `wal/` and `compacted/`.
   data directories; the mirror task diffs the closure as usual,
   backfills missing objects through the builtin path, and commits
   manifests. Backfill covers what replication does not deliver:
-  objects predating the replication rule (seeding) and objects it
-  never redelivers (a prune before commit). The replication must cover only
+  objects predating the replication rule (seeding). Prune never
+  deletes an object a later pass will reference (§7), so replication
+  is never asked to redeliver. The replication must cover only
   `wal/` and `compacted/` and must not replicate delete markers: a
   propagated delete could remove an object a committed target manifest
   still references. None of these services support
