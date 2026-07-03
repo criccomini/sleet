@@ -198,8 +198,10 @@ tracker, so `--at` accepts a manifest id or a timestamp.
 
 `sleet mirror restore <root> <backup-url> <dest-url> --at <point>` is a
 one-shot pass with the chosen manifest as `L`, copying its closure to
-the destination and committing it. The destination is then an ordinary
-database at that point.
+the destination and committing it. The destination must be empty;
+restore refuses anything else and never deletes, so rolling back in
+place means restoring to a fresh root and repointing clients. The
+destination is then an ordinary database at that point.
 
 ## 8. Copiers
 
