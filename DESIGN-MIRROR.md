@@ -75,7 +75,8 @@ target's history away from the source's.
 
 Never copied: `compactions/` (job claims and epochs are root-local; a
 coordinator later started against the target builds fresh state) and
-`gc/*.boundary` (target-local, advanced by retention pruning, §7).
+`gc/*.boundary` (source-local state; a target has none until it goes
+live and its own GC starts fresh).
 Zero-byte WAL fence objects are ordinary `wal/` objects and copy like
 any other.
 
@@ -97,9 +98,7 @@ Every mode runs the same pass:
    content is immutable, so the check is exact and re-copies are
    harmless. No manifest commits until all of it is present.
 5. **Commit.** PUT the closure's manifests in ascending id order, `L`
-   last, each with create-if-absent. After each successful create,
-   re-read the target's `gc/manifest.boundary` and treat an id at or
-   below it as a failed write (RFC-0026, same as any manifest writer).
+   last, each with create-if-absent.
 6. **Unpin.** Delete the pin. Between passes nothing needs pinning: the
    diff base is the target itself, and checkpoint creation, refresh,
    and deletion are each a manifest CAS at the source, so a caught-up
@@ -176,11 +175,13 @@ mostly-idle databases stay cheap under fleet-wide targets (§9).
 A target's committed manifests are its restore points. With a
 target's `retention` table set (§9), the pruner, in either mode, keeps
 the latest manifest, every manifest younger than `keep`, and any
-manifest a live checkpoint pins, and deletes the rest: first advance
-the boundary past the pruned manifest ids (RFC-0026), then delete the
-manifests, then delete data objects unreferenced by any kept manifest
-and older than `min_age`. The WAL tail above the latest manifest is
-never pruned. Unset retention keeps everything. On a continuous
+manifest a live checkpoint pins, and deletes the rest: the manifests,
+then data objects unreferenced by any kept manifest and older than
+`min_age`. The WAL tail above the latest manifest is never pruned.
+Pruning skips RFC-0026's boundary protocol: a stale task re-creating
+a pruned manifest resurrects harmless litter, below latest and
+unreachable, that the next prune deletes; target commits carry no
+writer state to lose. Unset retention keeps everything. On a continuous
 target, a short `keep` bounds growth at roughly the source's active
 set plus one `keep` window of churn.
 
