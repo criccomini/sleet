@@ -89,7 +89,13 @@ Every mode runs the same pass:
 2. **Read.** Read the source's latest manifest `L`. If `L = W` there is
    nothing to commit; continuous mode keeps tailing (step 7).
 3. **Diff.** Enumerate the closure of `L` (§3): `L`'s data objects and
-   those of every manifest a live checkpoint in `L` pins. Read `W`'s
+   those of every manifest a live checkpoint in `L` pins. A live
+   checkpoint whose pinned manifest is already gone means the
+   checkpoint was deleted after `L` was read and manifest GC caught
+   up; the pass restarts against the new head rather than commit `L`
+   with a live entry that resolves nowhere (`specs/mirror.fizz` pins
+   this: skipping the vanished manifest instead would break
+   completeness at the target). Read `W`'s
    manifest back from the target and subtract its closure, which is
    fully present (invariant 1) and kept by prune (§7), so shared
    objects need no check and no copy. The subtraction needs nothing

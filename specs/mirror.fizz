@@ -1,0 +1,453 @@
+---
+# sleet's mirror sync protocol (DESIGN-MIRROR.md, §3-§4 and §7): a
+# single mirror task runs the sync pass (watermark, diff against the
+# watermark's closure, pin checkpoint, copy, ascending commit, unpin)
+# while a source writer appends manifests, source GC deletes whatever
+# the latest manifest's live checkpoints no longer protect, the pin
+# can expire mid-pass, operator checkpoints come and go, and the
+# target pruner deletes aged restore points under the design's two
+# guards (the source-closure spare with list-before-read ordering,
+# and the pin floor for staged copies).
+#
+# Scope: manifests are abstract records (an object set plus a
+# checkpoint-entry set); objects stand for compacted and WAL SSTs
+# alike, so the WAL tail and copier variants are not distinguished.
+# One mirror task (racing tasks commit identical bytes and are
+# covered by integration tests); `keep` and `min_age` are temporal,
+# so the pruner instead nondeterministically ages out all but the
+# latest manifest plus at most one chosen survivor, which includes
+# the most aggressive retention as a special case.
+#
+# Checked claims:
+# - TargetComplete: the completeness invariant (§3): the target's
+#   latest manifest always has its full closure present, in every
+#   state, including mid-commit (this is the ascending-order claim)
+#   and mid-prune.
+# - RestorePointsOpen: prune never leaves a restore point it kept
+#   unable to build its closure (§7's support-per-restore-point rule,
+#   the day-20/40/90 scenario via operator checkpoint deletion).
+# - PassRestartExplored / PruneDeletedSomething: pin expiry restarts
+#   and prune deletions are actually explored, not vacuously absent.
+# - Converged (eventually always): after the writer, checkpoint, and
+#   expiry budgets drain, the pass converges the target to the
+#   source's head (the pin/unpin manifest churn terminates through
+#   the pinless path) and it stays there.
+options:
+  max_actions: 60
+  max_concurrent_actions: 1
+deadlock_detection: false
+liveness: strict
+---
+
+Phase = enum('IDLE', 'PIN', 'COPY', 'UNPIN')
+
+# Symmetric id domains: manifest ids are ordinal (only their order
+# matters: ascending commit, "next id" on CAS), object names ordinal
+# (compaction retires oldest-first), checkpoint ids nominal (pure
+# identity). Rank squashing merges interleavings that differ only in
+# id assignment order.
+MANIFESTS = symmetry.ordinal(name="m", limit=20)
+OBJECTS = symmetry.ordinal(name="o", limit=8)
+CPS = symmetry.nominal(name="cp", limit=6)
+
+# Fault and churn budgets, overridable with --preinit-hook. The full
+# product of every budget does not fit in memory, so the protocol is
+# checked exhaustively in two configurations that together cover the
+# interesting interactions: the default (operator checkpoint churn,
+# prune, no pin expiry; pass restarts still occur through vanished
+# support) and mirror-expiry.cfg (pin expiry, restarts, and prune
+# orphan reclaim, no operator checkpoints), plus a random simulation
+# sweep of the full product (mirror-sim.cfg):
+#
+#   fizz --experimental_processed_queue specs/mirror.fizz
+#   fizz --experimental_processed_queue \
+#     --preinit-hook-file specs/mirror-expiry.cfg specs/mirror.fizz
+#   fizz -x --max_runs 1 --seed <n> \
+#     --preinit-hook-file specs/mirror-sim.cfg specs/mirror.fizz
+WRITES = 1
+EXPIRIES = 0
+OP_CREATES = 1
+OP_DELETES = 1
+PRUNES = 1
+
+# The one-level closure (§3): the head plus every manifest a live
+# checkpoint entry in the head pins, where still present in `store`.
+atomic func closure_ids(store, head):
+    ids = [head]
+    for e in store[head].cps:
+        if e.eternal or (e.cp not in expired):
+            if e.pin != head and (e.pin in store) and (e.pin not in ids):
+                ids.append(e.pin)
+    return sorted(ids)
+
+atomic func closure_objects(store, head):
+    objs = set()
+    ids = closure_ids(store, head)
+    for i in ids:
+        for o in store[i].objects:
+            objs.add(o)
+    return objs
+
+# §4 step 3: L's closure minus what W's commit proved present. The
+# subtraction needs nothing beyond W's own manifest: W's objects,
+# plus the objects of manifests pinned by checkpoints live in both.
+atomic func diff_candidates(l):
+    cl = closure_objects(src_m, l)
+    proven = set()
+    if dst_head != None:
+        for o in dst_m[dst_head].objects:
+            proven.add(o)
+        for e in dst_m[dst_head].cps:
+            if e.eternal or (e.cp not in expired):
+                shared = [x for x in src_m[l].cps if x.cp == e.cp]
+                if len(shared) > 0 and (e.pin in src_m):
+                    for o in src_m[e.pin].objects:
+                        proven.add(o)
+    cand = set()
+    for o in cl:
+        if o not in proven:
+            cand.add(o)
+    return cand
+
+action Init:
+    m0 = MANIFESTS.fresh()
+    o0 = OBJECTS.fresh()
+    seed = set()
+    seed.add(o0)
+    src_m = {m0: struct(objects=seed, cps=set())}
+    src_objs = set()
+    src_objs.add(o0)
+    src_head = m0
+    dst_m = {}
+    dst_objs = set()
+    dst_head = None
+    expired = set()
+    phase = Phase.IDLE
+    pass_head = None
+    pass_pin = None
+    pending = set()
+    staged = set()
+    snap_taken = False
+    snap_m = set()
+    snap_o = set()
+    writes_left = WRITES
+    expiries_left = EXPIRIES
+    op_creates_left = OP_CREATES
+    op_deletes_left = OP_DELETES
+    prunes_left = PRUNES
+    violated = False
+    restarted = False
+    prune_deleted = False
+
+# The source writer: a new manifest referencing a fresh object,
+# sometimes dropping an old one (a flush, or a compaction rewrite).
+# Checkpoint entries carry forward, as in a real manifest CAS.
+atomic action WriterCommit:
+    require writes_left > 0
+    writes_left = writes_left - 1
+    base = src_m[src_head]
+    objs = set()
+    for o in base.objects:
+        objs.add(o)
+    novel = OBJECTS.fresh()
+    objs.add(novel)
+    src_objs.add(novel)
+    drop = oneof [False, True]
+    if drop:
+        # A compaction rewrite retires the oldest surviving object.
+        victim = sorted([o for o in base.objects])[0]
+        objs.discard(victim)
+    src_head = MANIFESTS.fresh()
+    src_m[src_head] = struct(objects=objs, cps=base.cps)
+
+# An operator creates a named checkpoint (§5): it pins the manifest
+# its own creation commits and never expires.
+atomic action OperatorCheckpoint:
+    require op_creates_left > 0
+    op_creates_left = op_creates_left - 1
+    base = src_m[src_head]
+    cps = set()
+    for e in base.cps:
+        cps.add(e)
+    cid = CPS.fresh()
+    newid = MANIFESTS.fresh()
+    cps.add(struct(cp=cid, pin=newid, eternal=True))
+    src_head = newid
+    src_m[src_head] = struct(objects=base.objects, cps=cps)
+
+# The operator deletes it again: newer source manifests drop the
+# entry, but older manifests already committed to the target still
+# carry it live (§7's deletion-outruns-expiry scenario).
+atomic action DeleteOperatorCheckpoint:
+    require op_deletes_left > 0
+    e = oneof [x for x in src_m[src_head].cps if x.eternal]
+    op_deletes_left = op_deletes_left - 1
+    base = src_m[src_head]
+    cps = set()
+    for x in base.cps:
+        if x.cp != e.cp:
+            cps.add(x)
+    src_head = MANIFESTS.fresh()
+    src_m[src_head] = struct(objects=base.objects, cps=cps)
+
+# A pass's pin checkpoint lapses (its lifetime ran out without a
+# refresh landing). Budgeted in state so liveness sees finitely many.
+atomic action PinExpires:
+    require expiries_left > 0
+    e = oneof [x for x in src_m[src_head].cps if (not x.eternal) and (x.cp not in expired)]
+    expiries_left = expiries_left - 1
+    expired.add(e.cp)
+
+# Source GC: one sweep deletes everything outside the latest
+# manifest's closure (GC honors only live checkpoints): objects and
+# manifests alike, as SlateDB's periodic GC passes do. min_age is
+# abstracted away, the worst case for the mirror; what remains
+# nondeterministic is when the sweep runs relative to the pass.
+atomic action GcSweep:
+    protected = closure_objects(src_m, src_head)
+    keep = closure_ids(src_m, src_head)
+    garbage_objs = [x for x in src_objs if x not in protected]
+    garbage_m = [i for i in src_m if i not in keep]
+    require len(garbage_objs) + len(garbage_m) > 0
+    for o in garbage_objs:
+        src_objs.discard(o)
+    for m in garbage_m:
+        src_m.pop(m)
+
+# §4 steps 1-3: watermark, read, diff. With no candidates everything
+# the commit references is protected without a pin: go straight to
+# the commit steps.
+atomic fair action PassRead:
+    require phase == Phase.IDLE and src_head != dst_head
+    pass_head = src_head
+    cand = diff_candidates(src_head)
+    pending = cand
+    staged = set()
+    pass_pin = None
+    if len(cand) == 0:
+        phase = Phase.COPY
+    else:
+        phase = Phase.PIN
+
+# §4 step 4: create the pin. The checkpoint pins the manifest its own
+# creation commits, so the pass adopts that manifest as L and rediffs
+# against the current source state (the source may have moved since
+# the read).
+atomic fair action PassPin:
+    require phase == Phase.PIN
+    base = src_m[src_head]
+    cps = set()
+    for e in base.cps:
+        cps.add(e)
+    cid = CPS.fresh()
+    newid = MANIFESTS.fresh()
+    cps.add(struct(cp=cid, pin=newid, eternal=False))
+    pass_pin = cid
+    src_head = newid
+    src_m[src_head] = struct(objects=base.objects, cps=cps)
+    pass_head = src_head
+    cand = diff_candidates(src_head)
+    pending = cand
+    phase = Phase.COPY
+
+# Copy one candidate. An object gone from the source means the world
+# moved past this pass (the pin lapsed and GC won): restart, deleting
+# the pin, which commits one more source manifest.
+atomic fair action PassCopy:
+    require phase == Phase.COPY and len(pending) > 0
+    o = oneof pending
+    if o in src_objs:
+        dst_objs.add(o)
+        staged.add(o)
+        pending.discard(o)
+    else:
+        base = src_m[src_head]
+        cps = set()
+        for x in base.cps:
+            if x.cp != pass_pin:
+                cps.add(x)
+        src_head = MANIFESTS.fresh()
+        src_m[src_head] = struct(objects=base.objects, cps=cps)
+        restarted = True
+        pass_pin = None
+        pending = set()
+        staged = set()
+        phase = Phase.IDLE
+
+# §4 step 5: commit the closure's manifests in ascending id order, L
+# last, one PUT per step so every transiently latest manifest is
+# checked for completeness. A pass whose pin lapsed restarts instead
+# of committing; a needed source manifest gone before its PUT (a
+# checkpoint deleted after L was read, its pinned manifest GC'd)
+# also restarts, matching the implementation's vanished-mid-diff and
+# vanished-before-commit paths.
+atomic fair action PassCommit:
+    require phase == Phase.COPY and len(pending) == 0
+    lapsed = pass_pin != None and (pass_pin in expired)
+    gone = pass_head not in src_m
+    needed = []
+    if not gone:
+        needed = [pass_head]
+        for e in src_m[pass_head].cps:
+            if e.eternal or (e.cp not in expired):
+                if e.pin != pass_head and (e.pin not in needed):
+                    needed.append(e.pin)
+                    if (e.pin not in src_m) and (e.pin not in dst_m):
+                        gone = True
+    if lapsed or gone:
+        if pass_pin != None:
+            base = src_m[src_head]
+            cps = set()
+            for x in base.cps:
+                if x.cp != pass_pin:
+                    cps.add(x)
+            src_head = MANIFESTS.fresh()
+            src_m[src_head] = struct(objects=base.objects, cps=cps)
+        restarted = True
+        pass_pin = None
+        pending = set()
+        staged = set()
+        phase = Phase.IDLE
+    else:
+        missing = sorted([i for i in needed if i not in dst_m])
+        if len(missing) == 0:
+            if pass_pin != None:
+                phase = Phase.UNPIN
+            else:
+                phase = Phase.IDLE
+        else:
+            i = missing[0]
+            dst_m[i] = src_m[i]
+            if dst_head == None or i > dst_head:
+                dst_head = i
+
+# §4 step 6: unpin. The deletion writes one more source manifest; the
+# next pass commits it through the pinless path, converging the
+# watermark to the source's head.
+atomic fair action PassUnpin:
+    require phase == Phase.UNPIN
+    base = src_m[src_head]
+    cps = set()
+    for x in base.cps:
+        if x.cp != pass_pin:
+            cps.add(x)
+    src_head = MANIFESTS.fresh()
+    src_m[src_head] = struct(objects=base.objects, cps=cps)
+    pass_pin = None
+    staged = set()
+    phase = Phase.IDLE
+
+# §7: the pruner lists the target first...
+atomic action PruneList:
+    require prunes_left > 0 and (not snap_taken) and dst_head != None
+    prunes_left = prunes_left - 1
+    snap_m = set()
+    for i in dst_m:
+        snap_m.add(i)
+    snap_o = set()
+    for o in dst_objs:
+        snap_o.add(o)
+    snap_taken = True
+
+# ... then reads the source and deletes from the snapshot: restore
+# points (the latest plus, nondeterministically, one survivor of the
+# keep window) and their live checkpoints' support stay; everything
+# else goes, except objects in the source's latest closure (counting
+# expired entries too) and, while any pin checkpoint for the target
+# exists, the pass's staged copies (the pin floor).
+atomic fair action PruneApply:
+    require snap_taken
+    spared = set()
+    for o in src_m[src_head].objects:
+        spared.add(o)
+    for e in src_m[src_head].cps:
+        if e.pin in src_m:
+            for o in src_m[e.pin].objects:
+                spared.add(o)
+    floor_active = len([e for e in src_m[src_head].cps if not e.eternal]) > 0
+    survivor = oneof ([None] + [i for i in snap_m if (i in dst_m) and i != dst_head])
+    points = set()
+    points.add(dst_head)
+    if survivor != None:
+        points.add(survivor)
+    kept = set()
+    for s in points:
+        kept.add(s)
+        for e in dst_m[s].cps:
+            if e.eternal or (e.cp not in expired):
+                if e.pin in dst_m:
+                    kept.add(e.pin)
+    kept_objs = set()
+    for k in kept:
+        for o in dst_m[k].objects:
+            kept_objs.add(o)
+    for i in snap_m:
+        if (i in dst_m) and (i not in kept):
+            dst_m.pop(i)
+            prune_deleted = True
+    for o in snap_o:
+        protected = (o in kept_objs) or (o in spared) or (floor_active and (o in staged))
+        if (o in dst_objs) and (not protected):
+            dst_objs.discard(o)
+            prune_deleted = True
+    # Prune must not undo closures the target already had: support
+    # that was present before the prune (it is exactly what `kept`
+    # holds) stays present, with its objects. Support committed with
+    # its own already-dangling entries stays dangling; restore refuses
+    # those points rather than prune conjuring their closure.
+    for s in points:
+        for o in dst_m[s].objects:
+            if o not in dst_objs:
+                violated = True
+        for e in dst_m[s].cps:
+            if e.eternal or (e.cp not in expired):
+                if e.pin != s and (e.pin in kept):
+                    if e.pin not in dst_m:
+                        violated = True
+                    else:
+                        for o in dst_m[e.pin].objects:
+                            if o not in dst_objs:
+                                violated = True
+    snap_taken = False
+    snap_m = set()
+    snap_o = set()
+
+# The completeness invariant (§3), with §4's refinement: the target's
+# latest manifest always has its full closure present. Expired
+# entries count nowhere, and entries of checkpoints already retired
+# at the source may dangle: those resolve nowhere at the source
+# either (readers reach checkpoints only through the latest list and
+# can already race a deletion between listing and opening).
+always assertion TargetComplete:
+    if dst_head == None:
+        return True
+    for o in dst_m[dst_head].objects:
+        if o not in dst_objs:
+            return False
+    src_cps = [x.cp for x in src_m[src_head].cps]
+    for e in dst_m[dst_head].cps:
+        if e.eternal or (e.cp not in expired):
+            if (e.cp in src_cps) and e.pin != dst_head:
+                if e.pin not in dst_m:
+                    return False
+                for o in dst_m[e.pin].objects:
+                    if o not in dst_objs:
+                        return False
+    return True
+
+# §7: a restore point the pruner kept can always build its closure.
+always assertion RestorePointsOpen:
+    return not violated
+
+# Non-vacuity: pin-expiry restarts and prune deletions are explored.
+exists assertion PassRestartExplored:
+    return restarted
+
+exists assertion PruneDeletedSomething:
+    return prune_deleted
+
+# Convergence: after the budgets drain, the target reaches the
+# source's head and stays there (the pin/unpin churn terminates
+# through the pinless path).
+eventually always assertion Converged:
+    return phase == Phase.IDLE and dst_head != None and dst_head == src_head

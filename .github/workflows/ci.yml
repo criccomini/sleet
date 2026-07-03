@@ -121,6 +121,42 @@ jobs:
         env:
           SLEET_MBT: 1
 
+  # Model-check the mirror sync protocol (specs/mirror.fizz) in its
+  # two exhaustive configurations (the full budget product does not
+  # fit in memory; see the spec header), then spot-check the full
+  # product with random simulation. A separate job because the
+  # exhaustive runs dominate wall-clock.
+  mirror-spec:
+    name: model-check (mirror)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install fizzbee
+        run: |
+          mkdir -p "$HOME/fizzbee"
+          curl -sSfL https://github.com/fizzbee-io/fizzbee/releases/download/v0.5.1/fizzbee-v0.5.1-linux_x86.tar.gz \
+            | tar xz --strip-components=1 -C "$HOME/fizzbee"
+      - name: Model-check the mirror spec
+        run: |
+          export PARSER_BIN="$HOME/fizzbee/parser/parser_bin"
+          export FIZZBEE_BIN="$HOME/fizzbee/fizzbee"
+          "$HOME/fizzbee/fizz" --experimental_processed_queue \
+            specs/mirror.fizz | tee /tmp/mirror-a.log
+          grep -q "PASSED" /tmp/mirror-a.log
+          "$HOME/fizzbee/fizz" --experimental_processed_queue \
+            --preinit-hook-file specs/mirror-expiry.cfg \
+            specs/mirror.fizz | tee /tmp/mirror-b.log
+          grep -q "PASSED" /tmp/mirror-b.log
+          for seed in $(seq 1 25); do
+            out=$("$HOME/fizzbee/fizz" -x --max_runs 1 --seed "$seed" \
+              --output-dir "/tmp/mirror-sim-$seed" \
+              --preinit-hook-file specs/mirror-sim.cfg specs/mirror.fizz) \
+              || { echo "simulation seed $seed crashed" >&2; exit 1; }
+            echo "$out" | grep -qE "FAILED" \
+              && { echo "simulation seed $seed failed" >&2; exit 1; }
+          done
+          echo "simulation sweep clean"
+
   # The S3 semantics test, against a MinIO service container. The
   # official minio/minio image needs a `server /data` command, which
   # service containers cannot pass; the Bitnami build starts from env

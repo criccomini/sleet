@@ -29,7 +29,13 @@ when the two drift.
 - `fizz --experimental_no_state_returns specs/coordination.fizz`
   model-checks the coordination protocol. The flag keeps action
   returns out of state hashes; without it the liveness check does not
-  finish.
+  finish. The mirror sync protocol (completeness, prune guards,
+  convergence) is `fizz --experimental_processed_queue
+  specs/mirror.fizz`, run twice: bare, and with `--preinit-hook-file
+  specs/mirror-expiry.cfg` (the full budget product does not fit in
+  memory; the spec header explains the split). Spot-check the full
+  product with `fizz -x --max_runs 1 --seed <n> --preinit-hook-file
+  specs/mirror-sim.cfg specs/mirror.fizz`.
 - Model-based testing replays the spec's action sequences against the
   real decision code: `fizz specs/coordination-mbt.fizz`, then
   `fizzbee-mbt-server --states_file specs/out/latest &`, then
