@@ -11,7 +11,10 @@
 use std::io::{self, Write};
 
 use crate::config::Service;
-use crate::response::{RegisterResponse, StatusResponse};
+use crate::response::{
+    MirrorPrefixesResponse, MirrorRestoreResponse, MirrorSyncResponse, MirrorVerifyResponse,
+    RegisterResponse, StatusResponse,
+};
 
 /// Human-readable rendering of a response.
 pub trait Render {
@@ -121,6 +124,35 @@ impl Render for StatusResponse {
         }
         services.write(w)?;
 
+        if !self.mirrors.is_empty() {
+            writeln!(w)?;
+            let mut mirrors = Table::new(&[
+                "DATABASE",
+                "TARGET",
+                "DESTINATION",
+                "MANIFESTS",
+                "WAL",
+                "SECONDS",
+            ]);
+            let behind = |v: &Option<u64>| v.map_or_else(dash, |n| n.to_string());
+            for m in &self.mirrors {
+                mirrors.row(vec![
+                    m.database.clone(),
+                    m.target.clone(),
+                    m.destination.clone(),
+                    behind(&m.manifests_behind),
+                    behind(&m.wal_behind),
+                    behind(&m.seconds_behind),
+                ]);
+            }
+            mirrors.write(w)?;
+            for m in &self.mirrors {
+                if let Some(error) = &m.error {
+                    writeln!(w, "error: {} target {}: {error}", m.database, m.target)?;
+                }
+            }
+        }
+
         if !self.warnings.is_empty() {
             writeln!(w)?;
             for warning in &self.warnings {
@@ -138,6 +170,103 @@ impl Render for RegisterResponse {
         } else {
             writeln!(w, "{} already registered at {}", self.url, self.file)
         }
+    }
+}
+
+impl Render for MirrorSyncResponse {
+    fn render(&self, w: &mut dyn Write) -> io::Result<()> {
+        if !self.committed {
+            return writeln!(
+                w,
+                "{} target {} is caught up at manifest {} ({})",
+                self.database, self.target, self.head, self.destination
+            );
+        }
+        writeln!(
+            w,
+            "synced {} target {} to manifest {} ({}): {} manifests, {} objects, {} bytes",
+            self.database,
+            self.target,
+            self.head,
+            self.destination,
+            self.manifests_committed,
+            self.objects_copied,
+            self.bytes_copied
+        )?;
+        if self.pruned_manifests > 0 || self.pruned_objects > 0 {
+            writeln!(
+                w,
+                "pruned {} manifests, {} objects",
+                self.pruned_manifests, self.pruned_objects
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl Render for MirrorVerifyResponse {
+    fn render(&self, w: &mut dyn Write) -> io::Result<()> {
+        let mut points = Table::new(&["RESTORE POINT", "OBJECTS", "OK"]);
+        for p in &self.points {
+            points.row(vec![
+                p.manifest_id.to_string(),
+                p.objects.to_string(),
+                if p.problems.is_empty() { "yes" } else { "no" }.into(),
+            ]);
+        }
+        points.write(w)?;
+        let problems: Vec<(u64, &String)> = self
+            .points
+            .iter()
+            .flat_map(|p| p.problems.iter().map(move |x| (p.manifest_id, x)))
+            .collect();
+        if !problems.is_empty() {
+            writeln!(w)?;
+            for (id, problem) in problems {
+                writeln!(w, "problem: restore point {id}: {problem}")?;
+            }
+        }
+        writeln!(w)?;
+        if self.ok {
+            writeln!(
+                w,
+                "{} target {} verifies at {}",
+                self.database, self.target, self.destination
+            )
+        } else {
+            writeln!(
+                w,
+                "{} target {} FAILS verification at {}",
+                self.database, self.target, self.destination
+            )
+        }
+    }
+}
+
+impl Render for MirrorRestoreResponse {
+    fn render(&self, w: &mut dyn Write) -> io::Result<()> {
+        writeln!(
+            w,
+            "restored {} at manifest {} into {}: {} manifests, {} objects, {} bytes",
+            self.backup,
+            self.manifest_id,
+            self.destination,
+            self.manifests_committed,
+            self.objects_copied,
+            self.bytes_copied
+        )
+    }
+}
+
+impl Render for MirrorPrefixesResponse {
+    fn render(&self, w: &mut dyn Write) -> io::Result<()> {
+        // The payload is the service-native configuration snippet;
+        // the filter lists ride inside it.
+        writeln!(
+            w,
+            "{}",
+            serde_json::to_string_pretty(&self.configuration).expect("configuration serializes")
+        )
     }
 }
 
@@ -177,6 +306,7 @@ mod tests {
                     running: 1,
                 }),
             }],
+            mirrors: vec![],
             warnings: vec!["no live node offers compactor-coordinator".into()],
         };
         let mut out = Vec::new();

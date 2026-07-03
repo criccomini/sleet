@@ -33,7 +33,7 @@ async fn register_and_status_roundtrip() {
     let again = ops::register(&root, "s3://bucket/db").await.unwrap();
     assert!(!again.created, "create-only PUT never overwrites");
 
-    let status = ops::status(&root, false).await.unwrap();
+    let status = ops::status(&root, false, false).await.unwrap();
     assert!(status.nodes.is_empty());
     assert_eq!(status.databases.len(), 1);
     assert_eq!(status.databases[0].url, "s3://bucket/db");
@@ -105,13 +105,14 @@ async fn daemon_compacts_a_real_database() {
             node_id: "n1".into(),
             services: Service::ALL.to_vec(),
             max_compaction_jobs: 2,
+            ..NodeOptions::default()
         },
         shutdown.clone(),
     ));
 
     // The node appears in status and owns every service.
     let status = poll_until("node is live in status", || async {
-        let status = ops::status(&root, false).await.unwrap();
+        let status = ops::status(&root, false, false).await.unwrap();
         status
             .nodes
             .iter()
@@ -134,13 +135,13 @@ async fn daemon_compacts_a_real_database() {
     .await;
 
     // Queue depth is readable through status --compactions.
-    let status = ops::status(&root, true).await.unwrap();
+    let status = ops::status(&root, true, false).await.unwrap();
     assert!(status.databases[0].queue.is_some());
 
     // Clean shutdown deletes the heartbeat, handing assignments off.
     shutdown.cancel();
     node.await.unwrap().unwrap();
-    let status = ops::status(&root, false).await.unwrap();
+    let status = ops::status(&root, false, false).await.unwrap();
     assert!(status.nodes.is_empty(), "{:?}", status.nodes);
 }
 
@@ -253,6 +254,7 @@ async fn gc_deletes_superseded_ssts() {
             node_id: "n1".into(),
             services: Service::ALL.to_vec(),
             max_compaction_jobs: 2,
+            ..NodeOptions::default()
         },
         shutdown.clone(),
     ));

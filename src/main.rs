@@ -36,7 +36,7 @@ enum Command {
         #[arg(
             long,
             value_delimiter = ',',
-            default_value = "gc,compactor-coordinator,compaction-workers"
+            default_value = "gc,compactor-coordinator,compaction-workers,mirror"
         )]
         services: Vec<Service>,
 
@@ -44,6 +44,17 @@ enum Command {
         /// the machine's available parallelism.
         #[arg(long)]
         max_compaction_jobs: Option<usize>,
+
+        /// Maximum (database, target) mirror jobs copying or pruning on
+        /// this node at once. Default: the machine's available
+        /// parallelism.
+        #[arg(long)]
+        max_mirror_jobs: Option<usize>,
+
+        /// Path to the rclone binary, for mirror targets with
+        /// copier = "rclone".
+        #[arg(long)]
+        rclone: Option<String>,
     },
     /// Show fleet nodes, registered databases, and service placement,
     /// derived from the fleet root.
@@ -55,6 +66,11 @@ enum Command {
         /// `.compactions` (one read per database).
         #[arg(long)]
         compactions: bool,
+
+        /// Also read each (database, target) mirror's source and
+        /// destination heads and report lag (several reads per pair).
+        #[arg(long)]
+        mirrors: bool,
 
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
@@ -71,6 +87,89 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
+    },
+    /// Mirror operations: sync, verify, restore, prefixes.
+    Mirror {
+        #[command(subcommand)]
+        command: MirrorCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum MirrorCommand {
+    /// Run a single sync pass for one (database, target), regardless
+    /// of the target's mode; prunes afterward when retention is set.
+    Sync {
+        /// Fleet root URL, e.g. s3://ops/sleet/.
+        root: String,
+
+        /// Registered database URL.
+        db: String,
+
+        /// Mirror target name.
+        target: String,
+
+        /// Path to the rclone binary, for targets with
+        /// copier = "rclone".
+        #[arg(long)]
+        rclone: Option<String>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
+    },
+    /// Re-check a destination: existence and size for every restore
+    /// point's closure. Exits nonzero when verification fails.
+    Verify {
+        /// Fleet root URL, e.g. s3://ops/sleet/.
+        root: String,
+
+        /// Registered database URL.
+        db: String,
+
+        /// Mirror target name.
+        target: String,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
+    },
+    /// Copy one restore point's closure from a backup into an empty
+    /// destination root and commit it.
+    Restore {
+        /// Fleet root URL, e.g. s3://ops/sleet/.
+        root: String,
+
+        /// Backup root URL (a mirror destination).
+        backup: String,
+
+        /// Empty destination root URL.
+        dest: String,
+
+        /// The restore point: a manifest id or an RFC 3339 timestamp.
+        /// Default: the backup's latest manifest.
+        #[arg(long)]
+        at: Option<String>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
+    },
+    /// Emit the anchored key-prefix filter lists an external
+    /// replication service needs for one (database, target).
+    Prefixes {
+        /// Fleet root URL, e.g. s3://ops/sleet/.
+        root: String,
+
+        /// Registered database URL.
+        db: String,
+
+        /// Mirror target name.
+        target: String,
+
+        /// Which service's configuration shape to emit.
+        #[arg(long, value_enum)]
+        format: sleet::response::PrefixFormat,
     },
 }
 
@@ -96,6 +195,8 @@ async fn main() -> ExitCode {
             node_id,
             services,
             max_compaction_jobs,
+            max_mirror_jobs,
+            rclone,
         } => {
             // Reject duplicates loudly, like the config path does for
             // a registry file's services list.
@@ -106,11 +207,13 @@ async fn main() -> ExitCode {
                     dup.as_str()
                 ));
             }
+            let parallelism = || std::thread::available_parallelism().map_or(4, |p| p.get());
             let options = NodeOptions {
                 node_id,
                 services,
-                max_compaction_jobs: max_compaction_jobs
-                    .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |p| p.get())),
+                max_compaction_jobs: max_compaction_jobs.unwrap_or_else(parallelism),
+                max_mirror_jobs: max_mirror_jobs.unwrap_or_else(parallelism),
+                rclone,
             };
             let root = match FleetRoot::open(&root) {
                 Ok(root) => root,
@@ -131,13 +234,14 @@ async fn main() -> ExitCode {
         Command::Status {
             root,
             compactions,
+            mirrors,
             format,
         } => {
             let root = match FleetRoot::open(&root) {
                 Ok(root) => root,
                 Err(e) => return fail(e),
             };
-            match ops::status(&root, compactions).await {
+            match ops::status(&root, compactions, mirrors).await {
                 Ok(response) => emit(&response, format),
                 Err(e) => fail(e),
             }
@@ -152,6 +256,81 @@ async fn main() -> ExitCode {
                 Err(e) => fail(e),
             }
         }
+        Command::Mirror { command } => match command {
+            MirrorCommand::Sync {
+                root,
+                db,
+                target,
+                rclone,
+                format,
+            } => {
+                let root = match FleetRoot::open(&root) {
+                    Ok(root) => root,
+                    Err(e) => return fail(e),
+                };
+                match ops::mirror_sync(&root, &db, &target, rclone.as_deref()).await {
+                    Ok(response) => emit(&response, format),
+                    Err(e) => fail(e),
+                }
+            }
+            MirrorCommand::Verify {
+                root,
+                db,
+                target,
+                format,
+            } => {
+                let root = match FleetRoot::open(&root) {
+                    Ok(root) => root,
+                    Err(e) => return fail(e),
+                };
+                match ops::mirror_verify(&root, &db, &target).await {
+                    Ok(response) => {
+                        let ok = response.ok;
+                        let code = emit(&response, format);
+                        if ok { code } else { ExitCode::FAILURE }
+                    }
+                    Err(e) => fail(e),
+                }
+            }
+            MirrorCommand::Restore {
+                root,
+                backup,
+                dest,
+                at,
+                format,
+            } => {
+                if let Err(e) = FleetRoot::open(&root) {
+                    return fail(e);
+                }
+                let at = match at
+                    .as_deref()
+                    .map(sleet::mirror::RestorePoint::parse)
+                    .transpose()
+                {
+                    Ok(at) => at.unwrap_or(sleet::mirror::RestorePoint::Latest),
+                    Err(e) => return fail(e),
+                };
+                match ops::mirror_restore(&backup, &dest, at).await {
+                    Ok(response) => emit(&response, format),
+                    Err(e) => fail(e),
+                }
+            }
+            MirrorCommand::Prefixes {
+                root,
+                db,
+                target,
+                format,
+            } => {
+                let root = match FleetRoot::open(&root) {
+                    Ok(root) => root,
+                    Err(e) => return fail(e),
+                };
+                match ops::mirror_prefixes(&root, &db, &target, format).await {
+                    Ok(response) => emit(&response, Format::Text),
+                    Err(e) => fail(e),
+                }
+            }
+        },
     }
 }
 

@@ -26,6 +26,14 @@ pub enum Response {
     Status(StatusResponse),
     /// `sleet register`.
     Register(RegisterResponse),
+    /// `sleet mirror sync`.
+    MirrorSync(MirrorSyncResponse),
+    /// `sleet mirror verify`.
+    MirrorVerify(MirrorVerifyResponse),
+    /// `sleet mirror restore`.
+    MirrorRestore(MirrorRestoreResponse),
+    /// `sleet mirror prefixes`.
+    MirrorPrefixes(MirrorPrefixesResponse),
 }
 
 /// The `sleet status` response, derived from the fleet root: node
@@ -41,10 +49,54 @@ pub struct StatusResponse {
     /// Registered databases and their service placement.
     pub databases: Vec<DatabaseStatus>,
 
+    /// Per-target mirror lag; present only with `sleet status
+    /// --mirrors`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<MirrorStatus>,
+
     /// Fleet-level problems: registry entries that alias the same
     /// database, services no live node offers, and the like.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+}
+
+/// One `(database, target)` mirror's lag, from the source and
+/// destination heads.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct MirrorStatus {
+    /// The source database's canonical URL.
+    pub database: String,
+
+    /// The target's name.
+    pub target: String,
+
+    /// The destination root the target maps this database to.
+    pub destination: String,
+
+    /// The source's latest manifest id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_manifest_id: Option<u64>,
+
+    /// The destination's latest manifest id (the watermark).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_manifest_id: Option<u64>,
+
+    /// Manifests the destination is behind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manifests_behind: Option<u64>,
+
+    /// WAL ids the destination is behind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wal_behind: Option<u64>,
+
+    /// Estimated seconds of lag: source and target sequence numbers
+    /// mapped through the source's sequence tracker.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seconds_behind: Option<u64>,
+
+    /// Why lag could not be read, if it could not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// One fleet member.
@@ -122,4 +174,146 @@ pub struct RegisterResponse {
 
     /// False if the database was already registered.
     pub created: bool,
+}
+
+/// The `sleet mirror sync` response: one pass, plus the prune that
+/// follows it when retention is set.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[schemars(title = "sleet mirror sync response")]
+pub struct MirrorSyncResponse {
+    /// The source database's canonical URL.
+    pub database: String,
+
+    /// The target's name.
+    pub target: String,
+
+    /// The destination root.
+    pub destination: String,
+
+    /// The manifest id the destination head ended at.
+    pub head: u64,
+
+    /// False when the destination was already at the source's head.
+    pub committed: bool,
+
+    /// Manifests written to the destination.
+    pub manifests_committed: u64,
+
+    /// Data objects copied.
+    pub objects_copied: u64,
+
+    /// Data bytes copied; zero for the rclone copier.
+    pub bytes_copied: u64,
+
+    /// Manifests the prune deleted; zero without retention.
+    pub pruned_manifests: u64,
+
+    /// Data objects the prune deleted; zero without retention.
+    pub pruned_objects: u64,
+}
+
+/// The `sleet mirror verify` response: existence and size for every
+/// restore point's closure.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[schemars(title = "sleet mirror verify response")]
+pub struct MirrorVerifyResponse {
+    /// The source database's canonical URL.
+    pub database: String,
+
+    /// The target's name.
+    pub target: String,
+
+    /// The destination root.
+    pub destination: String,
+
+    /// Whether every restore point verified.
+    pub ok: bool,
+
+    /// Every restore point checked, ascending by manifest id.
+    pub points: Vec<RestorePointStatus>,
+}
+
+/// One verified restore point.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct RestorePointStatus {
+    /// The restore point's manifest id.
+    pub manifest_id: u64,
+
+    /// Objects checked in its closure.
+    pub objects: u64,
+
+    /// What is missing or mismatched; empty means the point verifies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub problems: Vec<String>,
+}
+
+/// The `sleet mirror restore` response.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[schemars(title = "sleet mirror restore response")]
+pub struct MirrorRestoreResponse {
+    /// The backup root restored from.
+    pub backup: String,
+
+    /// The destination root restored into.
+    pub destination: String,
+
+    /// The restore point committed as the destination's head.
+    pub manifest_id: u64,
+
+    /// Manifests committed.
+    pub manifests_committed: u64,
+
+    /// Data objects copied.
+    pub objects_copied: u64,
+
+    /// Data bytes copied.
+    pub bytes_copied: u64,
+}
+
+/// The `sleet mirror prefixes` response: the anchored key-prefix
+/// filter lists an external replication service needs for one
+/// database's data directories.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[schemars(title = "sleet mirror prefixes response")]
+pub struct MirrorPrefixesResponse {
+    /// The source database's canonical URL.
+    pub database: String,
+
+    /// The target's name.
+    pub target: String,
+
+    /// The destination root.
+    pub destination: String,
+
+    /// Which service's configuration shape is emitted.
+    pub format: PrefixFormat,
+
+    /// The source bucket (or container).
+    pub source_bucket: String,
+
+    /// The destination bucket (or container).
+    pub destination_bucket: String,
+
+    /// Source key prefixes to replicate: the database's `wal/` and
+    /// `compacted/` directories.
+    pub prefixes: Vec<String>,
+
+    /// The same directories under the destination root.
+    pub destination_prefixes: Vec<String>,
+
+    /// A configuration snippet in the service's native shape.
+    pub configuration: serde_json::Value,
+}
+
+/// External replication services `sleet mirror prefixes` can emit
+/// filter lists for.
+#[derive(Clone, Copy, Debug, Serialize, JsonSchema, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum PrefixFormat {
+    /// S3 bucket replication rules.
+    S3,
+    /// GCS Storage Transfer Service include prefixes.
+    Sts,
+    /// Azure object replication rules.
+    Azure,
 }

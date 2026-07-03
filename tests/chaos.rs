@@ -158,7 +158,7 @@ async fn skewed_reader_takes_over_everything_safely() {
     .await;
 
     // The fleet stays observable throughout.
-    let status = ops::status(&cluster.root, false).await.unwrap();
+    let status = ops::status(&cluster.root, false, false).await.unwrap();
     assert_eq!(status.databases.len(), dbs.len());
 
     cluster.shutdown().await;

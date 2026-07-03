@@ -10,6 +10,9 @@ Options:
       --compactions
           Also read each database's compaction queue depth from `.compactions` (one read per database)
 
+      --mirrors
+          Also read each (database, target) mirror's source and destination heads and report lag (several reads per pair)
+
       --format <FORMAT>
           Output format
 

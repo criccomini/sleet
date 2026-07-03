@@ -69,6 +69,7 @@ impl Sim {
                 node_id: node_id.into(),
                 services: vec![Service::Gc],
                 max_compaction_jobs: 1,
+                ..NodeOptions::default()
             };
             let token = token.clone();
             async move {

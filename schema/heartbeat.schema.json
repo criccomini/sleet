@@ -55,6 +55,11 @@
           "description": "Compaction workers (RFC-0025).",
           "type": "string",
           "const": "compaction-workers"
+        },
+        {
+          "description": "Mirroring to per-database targets (DESIGN-MIRROR.md).",
+          "type": "string",
+          "const": "mirror"
         }
       ]
     },

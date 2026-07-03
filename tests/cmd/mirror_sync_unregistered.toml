@@ -1,0 +1,3 @@
+bin.name = "sleet"
+args = ["mirror", "sync", "memory:///fleet", "memory:///db", "nosuch"]
+status.code = 1

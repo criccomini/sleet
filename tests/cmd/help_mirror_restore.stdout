@@ -1,0 +1,29 @@
+Copy one restore point's closure from a backup into an empty destination root and commit it
+
+Usage: sleet mirror restore [OPTIONS] <ROOT> <BACKUP> <DEST>
+
+Arguments:
+  <ROOT>
+          Fleet root URL, e.g. s3://ops/sleet/
+
+  <BACKUP>
+          Backup root URL (a mirror destination)
+
+  <DEST>
+          Empty destination root URL
+
+Options:
+      --at <AT>
+          The restore point: a manifest id or an RFC 3339 timestamp. Default: the backup's latest manifest
+
+      --format <FORMAT>
+          Output format
+
+          Possible values:
+          - text: Human-readable text
+          - json: JSON matching the subcommand's response schema
+          
+          [default: text]
+
+  -h, --help
+          Print help (see a summary with '-h')

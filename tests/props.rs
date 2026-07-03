@@ -131,13 +131,8 @@ proptest! {
         let expected_count = db_count.or(fleet_count).unwrap_or(1);
         prop_assert_eq!(resolved.workers.count, expected_count);
 
-        let expected_services = db_services.or(fleet_services).unwrap_or_else(|| {
-            vec![
-                Service::Gc,
-                Service::CompactorCoordinator,
-                Service::CompactionWorkers,
-            ]
-        });
+        let expected_services =
+            db_services.or(fleet_services).unwrap_or_else(|| Service::ALL.to_vec());
         prop_assert_eq!(resolved.services, expected_services);
 
         let expected_min_age = db_min_age.map_or(300, |s| s);

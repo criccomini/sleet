@@ -10,6 +10,22 @@
     {
       "description": "`sleet register`.",
       "$ref": "#/$defs/RegisterResponse"
+    },
+    {
+      "description": "`sleet mirror sync`.",
+      "$ref": "#/$defs/MirrorSyncResponse"
+    },
+    {
+      "description": "`sleet mirror verify`.",
+      "$ref": "#/$defs/MirrorVerifyResponse"
+    },
+    {
+      "description": "`sleet mirror restore`.",
+      "$ref": "#/$defs/MirrorRestoreResponse"
+    },
+    {
+      "description": "`sleet mirror prefixes`.",
+      "$ref": "#/$defs/MirrorPrefixesResponse"
     }
   ],
   "$defs": {
@@ -49,6 +65,295 @@
       "description": "A duration in humantime form, e.g. \"10s\", \"5m\", \"1h 30m\".",
       "type": "string",
       "pattern": "^([0-9]+ *[a-zµ]+ *)+$"
+    },
+    "MirrorPrefixesResponse": {
+      "title": "sleet mirror prefixes response",
+      "description": "The `sleet mirror prefixes` response: the anchored key-prefix\nfilter lists an external replication service needs for one\ndatabase's data directories.",
+      "type": "object",
+      "properties": {
+        "configuration": {
+          "description": "A configuration snippet in the service's native shape."
+        },
+        "database": {
+          "description": "The source database's canonical URL.",
+          "type": "string"
+        },
+        "destination": {
+          "description": "The destination root.",
+          "type": "string"
+        },
+        "destination_bucket": {
+          "description": "The destination bucket (or container).",
+          "type": "string"
+        },
+        "destination_prefixes": {
+          "description": "The same directories under the destination root.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "format": {
+          "description": "Which service's configuration shape is emitted.",
+          "$ref": "#/$defs/PrefixFormat"
+        },
+        "prefixes": {
+          "description": "Source key prefixes to replicate: the database's `wal/` and\n`compacted/` directories.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_bucket": {
+          "description": "The source bucket (or container).",
+          "type": "string"
+        },
+        "target": {
+          "description": "The target's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "database",
+        "target",
+        "destination",
+        "format",
+        "source_bucket",
+        "destination_bucket",
+        "prefixes",
+        "destination_prefixes",
+        "configuration"
+      ]
+    },
+    "MirrorRestoreResponse": {
+      "title": "sleet mirror restore response",
+      "description": "The `sleet mirror restore` response.",
+      "type": "object",
+      "properties": {
+        "backup": {
+          "description": "The backup root restored from.",
+          "type": "string"
+        },
+        "bytes_copied": {
+          "description": "Data bytes copied.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "destination": {
+          "description": "The destination root restored into.",
+          "type": "string"
+        },
+        "manifest_id": {
+          "description": "The restore point committed as the destination's head.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "manifests_committed": {
+          "description": "Manifests committed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "objects_copied": {
+          "description": "Data objects copied.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "backup",
+        "destination",
+        "manifest_id",
+        "manifests_committed",
+        "objects_copied",
+        "bytes_copied"
+      ]
+    },
+    "MirrorStatus": {
+      "description": "One `(database, target)` mirror's lag, from the source and\ndestination heads.",
+      "type": "object",
+      "properties": {
+        "database": {
+          "description": "The source database's canonical URL.",
+          "type": "string"
+        },
+        "destination": {
+          "description": "The destination root the target maps this database to.",
+          "type": "string"
+        },
+        "error": {
+          "description": "Why lag could not be read, if it could not.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifests_behind": {
+          "description": "Manifests the destination is behind.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "seconds_behind": {
+          "description": "Estimated seconds of lag: source and target sequence numbers\nmapped through the source's sequence tracker.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "source_manifest_id": {
+          "description": "The source's latest manifest id.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "target": {
+          "description": "The target's name.",
+          "type": "string"
+        },
+        "target_manifest_id": {
+          "description": "The destination's latest manifest id (the watermark).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "wal_behind": {
+          "description": "WAL ids the destination is behind.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "database",
+        "target",
+        "destination"
+      ]
+    },
+    "MirrorSyncResponse": {
+      "title": "sleet mirror sync response",
+      "description": "The `sleet mirror sync` response: one pass, plus the prune that\nfollows it when retention is set.",
+      "type": "object",
+      "properties": {
+        "bytes_copied": {
+          "description": "Data bytes copied; zero for the rclone copier.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "committed": {
+          "description": "False when the destination was already at the source's head.",
+          "type": "boolean"
+        },
+        "database": {
+          "description": "The source database's canonical URL.",
+          "type": "string"
+        },
+        "destination": {
+          "description": "The destination root.",
+          "type": "string"
+        },
+        "head": {
+          "description": "The manifest id the destination head ended at.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "manifests_committed": {
+          "description": "Manifests written to the destination.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "objects_copied": {
+          "description": "Data objects copied.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "pruned_manifests": {
+          "description": "Manifests the prune deleted; zero without retention.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "pruned_objects": {
+          "description": "Data objects the prune deleted; zero without retention.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "target": {
+          "description": "The target's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "database",
+        "target",
+        "destination",
+        "head",
+        "committed",
+        "manifests_committed",
+        "objects_copied",
+        "bytes_copied",
+        "pruned_manifests",
+        "pruned_objects"
+      ]
+    },
+    "MirrorVerifyResponse": {
+      "title": "sleet mirror verify response",
+      "description": "The `sleet mirror verify` response: existence and size for every\nrestore point's closure.",
+      "type": "object",
+      "properties": {
+        "database": {
+          "description": "The source database's canonical URL.",
+          "type": "string"
+        },
+        "destination": {
+          "description": "The destination root.",
+          "type": "string"
+        },
+        "ok": {
+          "description": "Whether every restore point verified.",
+          "type": "boolean"
+        },
+        "points": {
+          "description": "Every restore point checked, ascending by manifest id.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestorePointStatus"
+          }
+        },
+        "target": {
+          "description": "The target's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "database",
+        "target",
+        "destination",
+        "ok",
+        "points"
+      ]
     },
     "NodeStatus": {
       "description": "One fleet member.",
@@ -93,6 +398,26 @@
         "live",
         "heartbeat_age",
         "services"
+      ]
+    },
+    "PrefixFormat": {
+      "description": "External replication services `sleet mirror prefixes` can emit\nfilter lists for.",
+      "oneOf": [
+        {
+          "description": "S3 bucket replication rules.",
+          "type": "string",
+          "const": "s3"
+        },
+        {
+          "description": "GCS Storage Transfer Service include prefixes.",
+          "type": "string",
+          "const": "sts"
+        },
+        {
+          "description": "Azure object replication rules.",
+          "type": "string",
+          "const": "azure"
+        }
       ]
     },
     "QueueStatus": {
@@ -141,6 +466,35 @@
         "created"
       ]
     },
+    "RestorePointStatus": {
+      "description": "One verified restore point.",
+      "type": "object",
+      "properties": {
+        "manifest_id": {
+          "description": "The restore point's manifest id.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "objects": {
+          "description": "Objects checked in its closure.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "problems": {
+          "description": "What is missing or mismatched; empty means the point verifies.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "manifest_id",
+        "objects"
+      ]
+    },
     "Service": {
       "description": "A per-database service.",
       "oneOf": [
@@ -158,6 +512,11 @@
           "description": "Compaction workers (RFC-0025).",
           "type": "string",
           "const": "compaction-workers"
+        },
+        {
+          "description": "Mirroring to per-database targets (DESIGN-MIRROR.md).",
+          "type": "string",
+          "const": "mirror"
         }
       ]
     },
@@ -192,6 +551,13 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/DatabaseStatus"
+          }
+        },
+        "mirrors": {
+          "description": "Per-target mirror lag; present only with `sleet status\n--mirrors`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MirrorStatus"
           }
         },
         "nodes": {

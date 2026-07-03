@@ -152,7 +152,7 @@ impl Harness {
         Ok(DBS
             .iter()
             .map(|(db, url)| {
-                let key = (url.to_string(), Service::Gc);
+                let key = (url.to_string(), Service::Gc, None);
                 (db.to_string(), owned.contains_key(&key))
             })
             .collect())

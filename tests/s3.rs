@@ -55,7 +55,7 @@ async fn s3_semantics_via_minio() {
     // unreachable means broken, never skip.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
-        match ops::status(&root, false).await {
+        match ops::status(&root, false, false).await {
             Ok(_) => break,
             Err(_) if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(250)).await;

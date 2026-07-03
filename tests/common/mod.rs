@@ -77,6 +77,7 @@ impl Cluster {
                 node_id: node_id.into(),
                 services: services.to_vec(),
                 max_compaction_jobs: 1,
+                ..NodeOptions::default()
             };
             let token = token.clone();
             async move {
@@ -172,11 +173,15 @@ where
 }
 
 /// Expected single-owner pair count per node, straight from the pure
-/// ranking.
+/// ranking. Mirror is skipped: it assigns per target, and these fleets
+/// configure none.
 pub fn expected_pairs(node: &str, ids: &[&str], dbs: &[String]) -> u64 {
     let mut count = 0;
     for db in dbs {
         for service in Service::ALL {
+            if service == Service::Mirror {
+                continue;
+            }
             if sleet::placement::owners(db, service, 1, ids)[0] == node {
                 count += 1;
             }

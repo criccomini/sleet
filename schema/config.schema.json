@@ -117,6 +117,26 @@
       },
       "additionalProperties": false
     },
+    "CopierKind": {
+      "description": "Who moves a mirror target's data objects.",
+      "oneOf": [
+        {
+          "description": "sleet streams objects between the two stores itself.",
+          "type": "string",
+          "const": "builtin"
+        },
+        {
+          "description": "sleet computes the object list per pass and drives\n`rclone copy --files-from`.",
+          "type": "string",
+          "const": "rclone"
+        },
+        {
+          "description": "Bucket replication configured outside sleet ships the data\ndirectories; sleet backfills misses and commits manifests.",
+          "type": "string",
+          "const": "external"
+        }
+      ]
+    },
     "DatabaseConfig": {
       "title": "sleet database config",
       "description": "Per-database service settings: the `[database]` table of `sleet.toml`\nand, verbatim, the contents of a `dbs/<db>.toml` registry file. All\nfields are optional; unset fields fall through to the next precedence\nlayer.",
@@ -149,6 +169,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/GcOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mirror": {
+          "description": "Mirror settings: named destination targets.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MirrorOverrides"
             },
             {
               "type": "null"
@@ -314,6 +345,149 @@
       "type": "string",
       "pattern": "^([0-9]+ *[a-zµ]+ *)+$"
     },
+    "MirrorMode": {
+      "description": "How a mirror target is kept in sync.",
+      "oneOf": [
+        {
+          "description": "The sync pass plus the WAL tail, on a `poll` cadence with idle\nbackoff.",
+          "type": "string",
+          "const": "continuous"
+        },
+        {
+          "description": "One pass every `interval`; each committed manifest is a\npoint-in-time cut.",
+          "type": "string",
+          "const": "periodic"
+        }
+      ]
+    },
+    "MirrorOverrides": {
+      "description": "Mirror settings: the `[database.mirror]` table (fleet-wide) or the\n`[mirror]` table of a `dbs/<db>.toml`.",
+      "type": "object",
+      "properties": {
+        "targets": {
+          "description": "Named mirror targets. Layers merge per target name, then per\nfield: a `dbs/<db>.toml` entry overrides the fleet-wide target\nof the same name field by field, except that `url` and\n`source_prefix` travel together (a layer that sets either\noverrides both).",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/MirrorTargetOverrides"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "MirrorTargetOverrides": {
+      "description": "One named mirror target. All fields are optional; unset fields fall\nthrough to the previous layer, then to built-in defaults.",
+      "type": "object",
+      "properties": {
+        "checkpoint_lifetime": {
+          "description": "Lifetime of the source pin checkpoint a pass holds while\ncopying; refreshed at half-life while the pass runs.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "copier": {
+          "description": "Who moves data objects; sleet always commits manifests.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CopierKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "copy_parallelism": {
+          "description": "Builtin copier: concurrent object copies per pass.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "disabled": {
+          "description": "Opt out of an inherited target. An ordinary overridable field,\nbecause per-field fall-through cannot unset a target.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interval": {
+          "description": "Periodic mode: the cadence between passes.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_age": {
+          "description": "Prune deletion age floor for data objects at the target.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "description": "How the target is kept in sync.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MirrorMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "poll": {
+          "description": "Continuous mode: the pass and WAL tail cadence.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retention": {
+          "description": "Restore-point retention; unset keeps everything.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetentionOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_prefix": {
+          "description": "Scope the target to databases under this URL prefix (matched at\npath-segment boundaries) and map each one to `url` plus its\npath with the prefix stripped. For precedence this field and\n`url` travel together: a layer that sets either overrides both.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "The destination root. On its own an exact destination for one\ndatabase; with `source_prefix`, the base the stripped database\npath is appended to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "NodeConfig": {
       "description": "Settings every node follows. These are fleet-wide agreements: nodes\nmust judge liveness with the same timeout for placement to converge.",
       "type": "object",
@@ -332,6 +506,24 @@
           "description": "Nodes whose heartbeat is older than this are treated as dead.",
           "$ref": "#/$defs/HumanDuration",
           "default": "30s"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RetentionOverrides": {
+      "description": "Restore-point retention for one mirror target.",
+      "type": "object",
+      "properties": {
+        "keep": {
+          "description": "Keep every restore point younger than this, plus the manifests\ntheir live checkpoints pin.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -386,6 +578,11 @@
           "description": "Compaction workers (RFC-0025).",
           "type": "string",
           "const": "compaction-workers"
+        },
+        {
+          "description": "Mirroring to per-database targets (DESIGN-MIRROR.md).",
+          "type": "string",
+          "const": "mirror"
         }
       ]
     },

@@ -33,14 +33,9 @@ fn example_configs_load() {
 #[test]
 fn empty_config_resolves_to_builtin_defaults() {
     let r = config("").resolve(None);
-    assert_eq!(
-        r.services,
-        vec![
-            Service::Gc,
-            Service::CompactorCoordinator,
-            Service::CompactionWorkers
-        ]
-    );
+    assert_eq!(r.services, Service::ALL.to_vec());
+    // Mirror runs by default but is a no-op with zero targets.
+    assert!(r.mirror.targets.is_empty());
     // SlateDB GC defaults; WAL fence GC dry-runs.
     assert_eq!(r.gc.manifest.interval, Duration::from_secs(60));
     assert_eq!(r.gc.manifest.min_age, Duration::from_secs(300));

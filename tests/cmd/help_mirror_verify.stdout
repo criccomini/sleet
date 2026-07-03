@@ -1,0 +1,26 @@
+Re-check a destination: existence and size for every restore point's closure. Exits nonzero when verification fails
+
+Usage: sleet mirror verify [OPTIONS] <ROOT> <DB> <TARGET>
+
+Arguments:
+  <ROOT>
+          Fleet root URL, e.g. s3://ops/sleet/
+
+  <DB>
+          Registered database URL
+
+  <TARGET>
+          Mirror target name
+
+Options:
+      --format <FORMAT>
+          Output format
+
+          Possible values:
+          - text: Human-readable text
+          - json: JSON matching the subcommand's response schema
+          
+          [default: text]
+
+  -h, --help
+          Print help (see a summary with '-h')

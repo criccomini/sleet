@@ -48,12 +48,12 @@ async fn failover_on_unclean_death() {
     );
 
     // Status agrees: placement moved to the survivor.
-    let status = ops::status(&cluster.root, false).await.unwrap();
+    let status = ops::status(&cluster.root, false, false).await.unwrap();
     assert_eq!(status.databases[0].services[0].nodes, vec![survivor]);
 
     // Housekeeping deletes the dead heartbeat after 10x the timeout.
     poll_until("dead heartbeat housekept", || async {
-        let status = ops::status(&cluster.root, false).await.unwrap();
+        let status = ops::status(&cluster.root, false, false).await.unwrap();
         (!status.nodes.iter().any(|n| n.node_id == owner)).then_some(())
     })
     .await;
@@ -85,7 +85,7 @@ async fn placement_partitions_across_nodes() {
     }
 
     // Status placement equals the ranking for every pair, one owner each.
-    let status = ops::status(&cluster.root, false).await.unwrap();
+    let status = ops::status(&cluster.root, false, false).await.unwrap();
     assert_eq!(status.databases.len(), dbs.len());
     for db in &status.databases {
         for entry in &db.services {
@@ -147,14 +147,14 @@ async fn config_changes_propagate() {
         (cluster.task_count("n1", &Service::ALL).await == 0).then_some(())
     })
     .await;
-    let status = ops::status(&cluster.root, false).await.unwrap();
+    let status = ops::status(&cluster.root, false, false).await.unwrap();
     assert_eq!(status.databases.len(), 1);
     assert!(status.databases[0].services.is_empty());
 
     // Delete: unregistered entirely.
     cluster.root.store().delete(&file).await.unwrap();
     poll_until("database unregistered", || async {
-        let status = ops::status(&cluster.root, false).await.unwrap();
+        let status = ops::status(&cluster.root, false, false).await.unwrap();
         status.databases.is_empty().then_some(())
     })
     .await;
@@ -196,7 +196,7 @@ async fn roles_split_and_worker_count_spans_nodes() {
         .await;
     }
 
-    let status = ops::status(&cluster.root, false).await.unwrap();
+    let status = ops::status(&cluster.root, false, false).await.unwrap();
     for entry in &status.databases[0].services {
         match entry.service {
             Service::CompactionWorkers => {
@@ -232,7 +232,7 @@ async fn role_change_replaces_the_heartbeat_name() {
         (old.is_none() && new.is_some()).then_some(())
     })
     .await;
-    let status = ops::status(&cluster.root, false).await.unwrap();
+    let status = ops::status(&cluster.root, false, false).await.unwrap();
     let node = status.nodes.iter().find(|n| n.node_id == "n1").unwrap();
     assert_eq!(node.services, vec![Service::Gc]);
 

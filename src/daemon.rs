@@ -29,7 +29,7 @@ use crate::config::{ResolvedServices, Service};
 use crate::heartbeat::{self, Heartbeat, ServiceSummary};
 use crate::root::{ConfigPoller, FleetRoot, FleetState, HeartbeatEntry, node_view};
 use crate::services::{self, DatabaseHandle};
-use crate::{SLATEDB_VERSION, placement};
+use crate::{SLATEDB_VERSION, mirror, placement};
 
 /// Node-specific settings, from flags only; everything else lives in
 /// the fleet root.
@@ -41,6 +41,23 @@ pub struct NodeOptions {
     pub services: Vec<Service>,
     /// Maximum databases compacting on this node at once.
     pub max_compaction_jobs: usize,
+    /// Maximum `(database, target)` mirror jobs copying or pruning on
+    /// this node at once.
+    pub max_mirror_jobs: usize,
+    /// Path to the rclone binary for `copier = "rclone"` targets.
+    pub rclone: Option<String>,
+}
+
+impl Default for NodeOptions {
+    fn default() -> Self {
+        Self {
+            node_id: String::new(),
+            services: Service::ALL.to_vec(),
+            max_compaction_jobs: 1,
+            max_mirror_jobs: 1,
+            rclone: None,
+        }
+    }
 }
 
 /// A daemon that could not start.
@@ -54,24 +71,27 @@ pub enum DaemonError {
     Root(#[from] crate::root::OpenError),
 }
 
-/// One `(database, service)` assignment.
-type Assignment = (String, Service);
+/// One assignment: a `(database, service)` pair, or a `(database,
+/// mirror, target)` triple when the service is `mirror` (the third
+/// element is the target name, `None` for every other service).
+pub type Assignment = (String, Service, Option<String>);
 
 /// The assignments `node_id` owns: for every registered database and
 /// configured service, the top of the rendezvous ranking over live
 /// nodes offering the service; top 1 for gc and coordinator, top
-/// `count` for workers. A node always counts itself live: reading its
-/// own heartbeat as stale (a skewed clock, a slow PUT) must not make
-/// it drop its share, because peers that consider it dead take over in
-/// parallel, which is a safe double-run, whereas excluding itself
-/// would leave the share unowned. The daemon calls this every tick;
-/// pub so the model-based test drives the same decision function.
+/// `count` for workers, and per applied target for mirror. A node
+/// always counts itself live: reading its own heartbeat as stale (a
+/// skewed clock, a slow PUT) must not make it drop its share, because
+/// peers that consider it dead take over in parallel, which is a safe
+/// double-run, whereas excluding itself would leave the share unowned.
+/// The daemon calls this every tick; pub so the model-based test
+/// drives the same decision function.
 pub fn owned_assignments(
     node_id: &str,
     services: &[Service],
     entries: &[HeartbeatEntry],
     state: &FleetState,
-) -> HashMap<(String, Service), Arc<ResolvedServices>> {
+) -> HashMap<Assignment, Arc<ResolvedServices>> {
     let mut nodes = node_view(entries, state.config.node.heartbeat_timeout.0);
     if !nodes.iter().any(|n| n.node_id == node_id) {
         nodes.push(crate::root::NodeView {
@@ -89,13 +109,24 @@ pub fn owned_assignments(
                 .filter(|n| n.services.contains(&service))
                 .map(|n| n.node_id.as_str())
                 .collect();
+            if service == Service::Mirror {
+                // Placement extends the pair to a triple: each enabled
+                // (database, mirror, target) goes to the top-ranked
+                // live node offering the service.
+                for applied in mirror::applied_targets(url, &resolved.mirror) {
+                    if placement::owner_target(url, &applied.name, &candidates) == Some(node_id) {
+                        owned.insert((url.clone(), service, Some(applied.name)), resolved.clone());
+                    }
+                }
+                continue;
+            }
             let count = match service {
                 Service::CompactionWorkers => resolved.workers.count as usize,
                 _ => 1,
             };
             let owners = placement::owners(url, service, count, &candidates);
             if owners.contains(&node_id) {
-                owned.insert((url.clone(), service), resolved.clone());
+                owned.insert((url.clone(), service, None), resolved.clone());
             }
         }
     }
@@ -134,6 +165,7 @@ pub async fn run(
     let node = Node {
         object_name: heartbeat::object_name(&options.node_id, &options.services),
         jobs: Arc::new(Semaphore::new(options.max_compaction_jobs.max(1))),
+        mirror_jobs: Arc::new(Semaphore::new(options.max_mirror_jobs.max(1))),
         states: TaskStates::default(),
         options,
         root,
@@ -147,6 +179,7 @@ struct Node {
     object_name: String,
     root: FleetRoot,
     jobs: Arc<Semaphore>,
+    mirror_jobs: Arc<Semaphore>,
     states: TaskStates,
 }
 
@@ -216,7 +249,7 @@ impl Node {
             .iter()
             .map(|&service| (service, ServiceSummary::empty(service)))
             .collect();
-        for ((_, service), (_, state)) in self.states.lock().expect("states lock").iter() {
+        for ((_, service, _), (_, state)) in self.states.lock().expect("states lock").iter() {
             let summary = summaries
                 .entry(*service)
                 .or_insert(ServiceSummary::empty(*service));
@@ -283,7 +316,12 @@ impl Node {
             .collect();
         for key in stop {
             if let Some(task) = tasks.remove(&key) {
-                info!(database = %key.0, service = key.1.as_str(), "stopping task");
+                info!(
+                    database = %key.0,
+                    service = key.1.as_str(),
+                    target = key.2.as_deref().unwrap_or(""),
+                    "stopping task"
+                );
                 task.token.cancel();
             }
         }
@@ -295,12 +333,19 @@ impl Node {
             if tasks.contains_key(&key) {
                 continue;
             }
-            info!(database = %key.0, service = key.1.as_str(), "starting task");
+            info!(
+                database = %key.0,
+                service = key.1.as_str(),
+                target = key.2.as_deref().unwrap_or(""),
+                "starting task"
+            );
             let token = CancellationToken::new();
             let handle = tokio::spawn(supervise(
                 key.clone(),
                 resolved.clone(),
                 self.jobs.clone(),
+                self.mirror_jobs.clone(),
+                self.options.rclone.clone(),
                 self.states.clone(),
                 token.clone(),
                 state.config.node.heartbeat_interval.0,
@@ -317,27 +362,50 @@ impl Node {
     }
 }
 
-/// Supervise one `(database, service)` task: run it, restart with
-/// backoff on failure. A fence is treated as view skew rather than a
-/// plain failure: wait one heartbeat interval (giving the rival time to
+/// Supervise one assignment's task: run it, restart with backoff on
+/// failure. A fence is treated as view skew rather than a plain
+/// failure: wait one heartbeat interval (giving the rival time to
 /// refresh and stand down), then rerun; if the pair has actually moved,
 /// the daemon's next ownership recompute cancels this task.
+#[allow(clippy::too_many_arguments)]
 async fn supervise(
     key: Assignment,
     resolved: Arc<ResolvedServices>,
     jobs: Arc<Semaphore>,
+    mirror_jobs: Arc<Semaphore>,
+    rclone: Option<String>,
     states: TaskStates,
     token: CancellationToken,
     heartbeat_interval: Duration,
 ) {
-    let (url, service) = key.clone();
+    let (url, service, target) = key.clone();
     let run = move |child: CancellationToken| {
         let url = url.clone();
+        let target = target.clone();
         let resolved = resolved.clone();
         let jobs = jobs.clone();
+        let mirror_jobs = mirror_jobs.clone();
+        let rclone = rclone.clone();
         async move {
-            let db = DatabaseHandle::open(&url)?;
-            services::run_service(&db, service, &resolved, jobs, child).await
+            if service == Service::Mirror {
+                let name = target.expect("mirror assignments carry a target");
+                let Some(applied) = mirror::applied_targets(&url, &resolved.mirror)
+                    .into_iter()
+                    .find(|t| t.name == name)
+                else {
+                    // The target no longer applies; the next ownership
+                    // recompute drops the assignment.
+                    return Ok(());
+                };
+                let source = DatabaseHandle::open(&url)?;
+                let dest = DatabaseHandle::open(&applied.destination)?;
+                mirror::run_mirror(&source, &dest, &applied, mirror_jobs, rclone, child)
+                    .await
+                    .map_err(services::ServiceError::from)
+            } else {
+                let db = DatabaseHandle::open(&url)?;
+                services::run_service(&db, service, &resolved, jobs, child).await
+            }
         }
     };
     supervise_with(run, key, states, token, heartbeat_interval).await;
@@ -356,7 +424,7 @@ async fn supervise_with<F, Fut>(
     Fut: Future<Output = Result<(), services::ServiceError>>,
 {
     let instance = NEXT_INSTANCE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let (url, service) = &key;
+    let (url, service, _) = &key;
     let mut backoff = Duration::from_secs(1);
     const MAX_BACKOFF: Duration = Duration::from_secs(60);
     loop {
@@ -432,11 +500,12 @@ mod tests {
         let options = NodeOptions {
             node_id: node_id.into(),
             services: services.to_vec(),
-            max_compaction_jobs: 1,
+            ..NodeOptions::default()
         };
         Node {
             object_name: heartbeat::object_name(&options.node_id, &options.services),
             jobs: Arc::new(Semaphore::new(1)),
+            mirror_jobs: Arc::new(Semaphore::new(1)),
             states: TaskStates::default(),
             root: FleetRoot::from_parts(
                 TestStore::in_memory(),
@@ -484,8 +553,12 @@ mod tests {
         // Disjoint single-owner services; every pair owned exactly once.
         for url in ["s3://b/db1", "s3://b/db2"] {
             for service in Service::ALL {
+                if service == Service::Mirror {
+                    // No targets configured: mirror assigns nothing.
+                    continue;
+                }
                 let expected = placement::owners(url, service, 1, &["n1", "n2"])[0];
-                let key = (url.to_string(), service);
+                let key = (url.to_string(), service, None);
                 assert_eq!(n1_owned.contains_key(&key), expected == "n1");
                 assert_eq!(n2_owned.contains_key(&key), expected == "n2");
             }
@@ -502,14 +575,18 @@ mod tests {
             entry("n2", &[Service::CompactionWorkers], 1),
         ];
         let gc_only = node("n1", &[Service::Gc]).owned_assignments(&entries, &dbs);
-        assert!(gc_only.contains_key(&("s3://b/db1".into(), Service::Gc)));
-        assert!(!gc_only.contains_key(&("s3://b/db1".into(), Service::CompactionWorkers)));
+        assert!(gc_only.contains_key(&("s3://b/db1".into(), Service::Gc, None)));
+        assert!(!gc_only.contains_key(&("s3://b/db1".into(), Service::CompactionWorkers, None)));
         // Coordinator has no live offering node: nobody owns it.
-        assert!(!gc_only.contains_key(&("s3://b/db1".into(), Service::CompactorCoordinator)));
+        assert!(!gc_only.contains_key(&("s3://b/db1".into(), Service::CompactorCoordinator, None)));
         let workers_only =
             node("n2", &[Service::CompactionWorkers]).owned_assignments(&entries, &dbs);
         assert_eq!(workers_only.len(), 1);
-        assert!(workers_only.contains_key(&("s3://b/db1".into(), Service::CompactionWorkers)));
+        assert!(workers_only.contains_key(&(
+            "s3://b/db1".into(),
+            Service::CompactionWorkers,
+            None
+        )));
     }
 
     /// `count = 2` puts workers on two nodes; `services = []` yields
@@ -533,7 +610,11 @@ mod tests {
             entry("n2", &Service::ALL, 1),
             entry("n3", &Service::ALL, 999), // dead
         ];
-        let worker_key = ("s3://b/db1".to_string(), Service::CompactionWorkers);
+        let worker_key = (
+            "s3://b/db1".to_string(),
+            Service::CompactionWorkers,
+            None::<String>,
+        );
         let n1 = node("n1", &Service::ALL).owned_assignments(&entries, &dbs);
         let n2 = node("n2", &Service::ALL).owned_assignments(&entries, &dbs);
         let n3 = node("n3", &Service::ALL).owned_assignments(&entries, &dbs);
@@ -543,7 +624,7 @@ mod tests {
         // share it wins over the full candidate set, same as everyone
         // else.
         for key in n3.keys() {
-            let (url, service) = key;
+            let (url, service, _) = key;
             let count = if *service == Service::CompactionWorkers {
                 2
             } else {
@@ -555,8 +636,76 @@ mod tests {
             );
         }
         for owned in [&n1, &n2] {
-            assert!(!owned.keys().any(|(url, _)| url == "s3://b/off"));
+            assert!(!owned.keys().any(|(url, ..)| url == "s3://b/off"));
         }
+    }
+
+    /// Mirror ownership is per target: each enabled applied target is
+    /// its own assignment, placed by the triple hash over mirror
+    /// offerers only, and a database with no applicable target yields
+    /// no mirror assignments.
+    #[test]
+    fn owned_assignments_place_mirror_targets() {
+        use crate::config::{MirrorOverrides, MirrorTargetOverrides};
+        let mirrored = DatabaseConfig {
+            mirror: Some(MirrorOverrides {
+                targets: [
+                    (
+                        "dr".to_string(),
+                        MirrorTargetOverrides {
+                            url: Some("s3://dr/db1".into()),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        "backup".to_string(),
+                        MirrorTargetOverrides {
+                            url: Some("gs://backups/db1".into()),
+                            ..Default::default()
+                        },
+                    ),
+                ]
+                .into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let dbs = state(&[
+            ("s3://b/db1", mirrored),
+            ("s3://b/plain", DatabaseConfig::default()),
+        ]);
+        let entries = vec![
+            entry("n1", &Service::ALL, 1),
+            entry("n2", &Service::ALL, 1),
+            entry("n3", &[Service::Gc], 1), // does not offer mirror
+        ];
+        let mut owners_seen = Vec::new();
+        for id in ["n1", "n2", "n3"] {
+            let owned = node(id, &Service::ALL).owned_assignments(&entries, &dbs);
+            for target in ["dr", "backup"] {
+                let key = (
+                    "s3://b/db1".to_string(),
+                    Service::Mirror,
+                    Some(target.to_string()),
+                );
+                let expected = placement::owner_target("s3://b/db1", target, &["n1", "n2"]);
+                assert_eq!(
+                    owned.contains_key(&key),
+                    expected == Some(id),
+                    "{id} {target}"
+                );
+                if owned.contains_key(&key) {
+                    owners_seen.push((id, target));
+                }
+            }
+            // No applicable target: no mirror assignment at all.
+            assert!(
+                !owned
+                    .keys()
+                    .any(|(url, service, _)| url == "s3://b/plain" && *service == Service::Mirror)
+            );
+        }
+        assert_eq!(owners_seen.len(), 2, "each target owned exactly once");
     }
 
     /// Reconciliation: starts owned pairs, stops unowned ones, restarts
@@ -566,7 +715,7 @@ mod tests {
         let node = node("n1", &Service::ALL);
         let fleet = state(&[]);
         let mut tasks = HashMap::new();
-        let key = ("memory:///db1".to_string(), Service::Gc);
+        let key = ("memory:///db1".to_string(), Service::Gc, None);
         let resolved = Arc::new(SleetConfig::default().resolve(None));
 
         let mut owned = HashMap::new();
@@ -633,7 +782,7 @@ mod tests {
         let heartbeat_interval = Duration::from_secs(7);
         supervise_with(
             run,
-            ("db".into(), Service::CompactorCoordinator),
+            ("db".into(), Service::CompactorCoordinator, None),
             TaskStates::default(),
             CancellationToken::new(),
             heartbeat_interval,
@@ -656,7 +805,7 @@ mod tests {
         let run = |_child: CancellationToken| async { Err(plain()) };
         let handle = tokio::spawn(supervise_with(
             run,
-            ("db".into(), Service::Gc),
+            ("db".into(), Service::Gc, None),
             states.clone(),
             token.clone(),
             Duration::from_secs(10),
