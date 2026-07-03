@@ -235,25 +235,29 @@ per-database files override them with the usual per-field precedence
 (built-in defaults -> `[database]` -> `dbs/<db>.toml`), matched by
 target name.
 
-A fleet-wide target cannot name one destination root for every
-database, so a destination is set as either `url` (one database's
-destination) or `url_prefix` (a root under which each database's
-destination is derived by appending the registry's percent-encoding of
-the canonical source URL: under `url_prefix = "s3://dr/m/"`,
-`s3://prod/db1` mirrors to `s3://dr/m/s3%3A%2F%2Fprod%2Fdb1/`). The
-two are one field for precedence: a layer that sets either overrides
-both from the layer below, and exactly one must be set after
-resolution. Derived destinations carry the source in the path, so
-databases can never collide under one prefix and a derived root names
-its own source.
+A target's `url` is the destination root. Alone, it is one database's
+exact destination. With `source_prefix` set, the target is a derived
+mapping: it applies to every database whose canonical URL falls under
+`source_prefix`, matched at a path-segment boundary (`s3://user-data`
+does not capture `s3://user-database/x`), and each database's
+destination is `url` plus the source URL with the prefix stripped.
+With the fleet target below, `s3://user-data/tenant1/db1` mirrors to
+`s3://dr-bucket/mirrors/tenant1/db1`. Stripping one fixed prefix is
+injective, so no two databases derive the same destination within a
+target. `url` and `source_prefix` resolve as one field for precedence:
+a layer that sets either overrides both from the layer below. A
+database no target applies to does not mirror: this scopes fleet-wide
+targets to a bucket or prefix, and `status` lists databases with no
+applicable target (§10).
 
 ```toml
-# sleet.toml: every database mirrors to the DR bucket by default
+# sleet.toml: databases under s3://user-data mirror to the DR bucket
 [database]
 services = ["gc", "compactor-coordinator", "compaction-workers", "mirror"]
 
 [database.mirror.targets.dr]
-url_prefix = "s3://dr-bucket/mirrors/"
+url = "s3://dr-bucket/mirrors"
+source_prefix = "s3://user-data"
 mode = "continuous"             # continuous | periodic
 copier = "builtin"              # builtin | rclone | external | external-full
 poll = "10s"                    # continuous: pass and tail cadence
@@ -292,18 +296,20 @@ checkpoints (§4, §5), so renaming a target moves its placement and
 abandons its old checkpoints to expiry.
 
 Destinations are never registry entries and sleet runs no services
-against them (§3); validation enforces the boundary. At load: exactly
-one of `url`/`url_prefix` per target; `interval` and `retention`
-require `mode = "periodic"`; `external` and `external-full` copiers
-cannot come from the fleet-wide layer (§8). Across the registry,
-checked by `register` and flagged by `status`: no resolved destination
-may be a registered database (which also makes mirror chains
-inexpressible, §2), and no two databases may resolve the same
-destination. At a target's first pass: the source manifest must have
-empty `external_dbs` and no separate WAL object store, and the
-destination root must be empty or hold a prior mirror of the same
-source (derived roots carry the source in the path; explicit `url`
-roots are checked strictly).
+against them (§3); validation enforces the boundary. At load: every
+target sets `url`; a `sleet.toml` target also sets `source_prefix`,
+since a bare `url` would name one root for every database; `interval`
+and `retention` require `mode = "periodic"`; `external` and
+`external-full` copiers cannot come from the fleet-wide layer (§8).
+Across the registry, checked by `register` and flagged by `status`: no
+resolved destination may be a registered database (which also makes
+mirror chains inexpressible, §2), and no two databases may resolve the
+same or nested destinations, which cross-target overlaps can produce.
+At a target's first pass, the source manifest must have empty
+`external_dbs` and no separate WAL object store. The destination root
+is assumed to be empty or a prior mirror of the same source; sleet
+does not verify this, so a target re-pointed at a foreign root is
+undetected operator error.
 
 Placement extends the pair to a triple: each enabled `(database,
 mirror, target)` is ranked by the frozen rendezvous hash and goes to
@@ -318,8 +324,9 @@ destination store; placement does not consider reachability.
 `(database, target)` and reports lag as manifests behind, WAL ids
 behind, and estimated seconds (source and target sequence numbers
 mapped through the sequence tracker). For `external-full` it reports
-the safe watermark. It also flags destination collisions (§9). Mirror
-task state rides in the heartbeat body like other services.
+the safe watermark. It also flags destination collisions and lists
+databases with no applicable target (§9). Mirror task state rides in
+the heartbeat body like other services.
 
 Every commit already proves closure completeness by existence checks.
 `sleet mirror verify <root> <db> <target>` re-checks on demand: existence
