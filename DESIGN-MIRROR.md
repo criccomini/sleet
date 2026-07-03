@@ -89,21 +89,36 @@ Every mode runs the same pass:
 2. **Read.** Read the source's latest manifest `L`. If `L = W` there is
    nothing to commit; continuous mode keeps tailing (step 7).
 3. **Diff.** Enumerate the closure of `L` (§3): `L`'s data objects and
-   those of every manifest a live checkpoint in `L` pins. LIST `wal/`
-   and `compacted/` at the target and diff. An object exists at the
-   target iff it is done: names are unique, content is immutable, and
-   prune spares everything still in the source's closure (§7), so the
-   check is exact and re-copies are harmless. If nothing is
-   missing (a checkpoint-only change: an operator checkpoint, an
-   expiry strip, a prior pass's unpin), commit (step 5) with no pin.
+   those of every manifest a live checkpoint in `L` pins. Read `W`'s
+   manifest back from the target and subtract its closure, which is
+   fully present (invariant 1) and kept by prune (§7), so shared
+   objects need no check and no copy. The subtraction needs nothing
+   beyond `W`'s own manifest: a checkpoint live in both pins the same
+   immutable manifest already fetched for `L`, and one live only in
+   `W` cannot contribute to `L`'s closure. What remains is the
+   candidate list; the target's data directories are never listed.
+   WAL candidates are HEAD-checked: the tail (step 7) usually copied
+   them already, and WALs above `W` are never pruned, so a hit is
+   final. Compacted candidates are the copy list: the builtin and
+   rclone copiers copy them outright (names are unique and content
+   immutable, so a re-copy is harmless and restarts `min_age`), and
+   the external copier HEADs each one and backfills the misses, which
+   the pin makes safe: a pinned pass's closure is spared by prune
+   (§7). With no watermark (seeding) the candidates are the whole
+   closure, and the external copier LISTs the target once rather
+   than HEADing it per object. If there are no compacted candidates
+   and no WAL misses (a checkpoint-only change: an operator
+   checkpoint, an expiry strip, a prior pass's unpin), everything
+   the commit references is protected without a pin: commit (step 5)
+   directly.
 4. **Pin and copy.** Create a source checkpoint named for the target
    (`sleet-mirror:<target-name>`), lifetime `checkpoint_lifetime`,
    refreshed at half-life while the pass runs; a pass whose pin
    lapses restarts instead of committing. A checkpoint pins the
    manifest its own creation commits, so the pass adopts that manifest
    as `L` and rediffs; nothing is copied yet, so the slip costs a few
-   manifest reads. Then copy the missing objects. No manifest commits
-   until the whole closure is present.
+   manifest reads. Then the copier works the candidate list (step 3).
+   No manifest commits until the whole closure is present.
 5. **Commit.** PUT the closure's manifests in ascending id order, `L`
    last, each with create-if-absent.
 6. **Unpin.** Delete the pin. The deletion writes one more source
@@ -175,7 +190,9 @@ and prune keeps its closure while it lives (§7).
 Cost differs by mode. Continuous copies every compaction rewrite, so
 cross-store transfer scales with ingest times one plus the compaction
 write amplification. A periodic interval longer than the compaction
-cycle copies only surviving SSTs. Either way, a caught-up mirror costs
+cycle copies only surviving SSTs. Request cost is independent of the
+target's size: a pass reads the closure's manifests and spends one
+operation per candidate (§4). Either way, a caught-up mirror costs
 one manifest read per poll and holds no checkpoints (§4), so
 mostly-idle databases stay cheap under fleet-wide targets (§9).
 
@@ -362,11 +379,12 @@ collisions and lists
 databases with no applicable target (§9). Mirror task state rides in
 the heartbeat body like other services.
 
-Every commit already proves closure completeness by existence checks.
-`sleet mirror verify <root> <db> <target>` re-checks on demand: existence
-and size for every restore point's closure. Sizes rather than ETags:
-multipart ETags do not survive
-cross-store copies.
+A commit proves its closure by induction: what it shares with `W` was
+proven by `W`'s commit, and the pass copies or checks every candidate
+(§4). A deletion outside prune (§7) silently breaks the induction, so
+`sleet mirror verify <root> <db> <target>` re-checks on demand:
+existence and size for every restore point's closure. Sizes rather
+than ETags: multipart ETags do not survive cross-store copies.
 
 ## 11. Future work
 
