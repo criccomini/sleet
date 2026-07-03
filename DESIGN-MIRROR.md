@@ -306,7 +306,7 @@ poll = "10s"                    # continuous: pass and tail cadence
 [mirror.targets.dr]
 disabled = true                 # opt out of the fleet-wide target
 
-[mirror.targets.replica]        # read replica; readers tail it (§5)
+[mirror.targets.replica]        # read replica
 url = "s3://eu-replica/db1"
 mode = "continuous"
 
@@ -348,9 +348,8 @@ the heartbeat body like other services.
 
 Every commit already proves closure completeness by existence checks.
 `sleet mirror verify <root> <db> <target>` re-checks on demand: existence
-and size for every restore point's closure, and with `--deep`, a
-checkpoint-free `DbReader` scan (§5) that re-reads every block
-through its checksum. Sizes rather than ETags: multipart ETags do not survive
+and size for every restore point's closure. Sizes rather than ETags:
+multipart ETags do not survive
 cross-store copies.
 
 ## 11. Future work
