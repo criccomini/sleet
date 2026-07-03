@@ -54,11 +54,16 @@ registry entry. The mirror copies the source's immutable objects to
 the same relative names under the target root and commits manifests as
 the atomic step. Two invariants define a valid target:
 
-1. **Completeness**: every manifest present at the target has its full
-   closure present. The closure of a manifest is every object it
-   references: L0 and sorted-run SSTs under `compacted/`, WAL SSTs
-   above `replay_after_wal_id`, and, recursively, every manifest one of
-   its checkpoints pins.
+1. **Completeness**: the target's latest manifest always has its full
+   closure present. The closure is the manifest's own data objects (L0
+   and sorted-run SSTs under `compacted/`, WAL SSTs above
+   `replay_after_wal_id`) plus, for each live checkpoint in its list,
+   the pinned manifest and that manifest's data objects. One level
+   only, matching what GC preserves at the source: a pinned manifest's
+   own checkpoint entries are history, may point at manifests GC has
+   already deleted, and resolve nowhere (readers and GC follow only
+   the latest manifest's list), so the source guarantees nothing
+   deeper.
 2. **Single writer**: the mirror task is the only process that writes
    manifests under the target root. External copiers (§8) write only
    `wal/` and `compacted/`.
@@ -90,10 +95,12 @@ Every mode runs the same pass:
 3. **Pin.** Create a source checkpoint at `L` named for the target
    (`sleet-mirror:<target-name>`), lifetime `checkpoint_lifetime`,
    refreshed at half-life while the pass runs.
-4. **Copy.** Enumerate the closure of `L`. LIST `wal/` and `compacted/`
-   at the target, diff, and copy the missing objects. An object exists
-   at the target iff it is done: names are unique and content is
-   immutable, so the check is exact and re-copies are harmless.
+4. **Copy.** Enumerate the closure of `L` (§3): `L`'s data objects and
+   those of every manifest a live checkpoint in `L` pins. LIST `wal/`
+   and `compacted/` at the target, diff, and copy the missing objects.
+   An object exists at the target iff it is done: names are unique and
+   content is immutable, so the check is exact and re-copies are
+   harmless. No manifest commits until all of it is present.
 5. **Commit.** PUT the closure's manifests in ascending id order, `L`
    last, each with create-if-absent. After each successful create,
    re-read the target's `gc/manifest.boundary` and treat an id at or
@@ -118,11 +125,28 @@ the source, so objects exclusive to unpinned intermediates may already
 be deleted. Skipping is safe because manifest id gaps are already
 normal.
 
+Ascending commit order is load-bearing. A checkpoint pins the manifest
+that was latest at its creation, so an entry's `manifest_id` never
+exceeds the id of the manifest carrying it, and ascending order lands
+every referenced manifest before its referencer. Each transiently
+latest manifest during a commit is therefore complete; the only
+entries in it that can dangle are checkpoints that died before `L`,
+and those resolve nowhere at the source either (readers reach
+checkpoints only through the latest manifest's list, and can already
+race a deletion between listing and opening). Descending order would
+invert this: the latest manifest's live entries would be unresolvable,
+a state the source can never be in. The same creation-order fact keeps
+the window safe for reconciliation: a checkpoint in `L` pinning a
+manifest below a transient latest `M` predates `M` and so is in `M`'s
+list too, meaning a duplicate task reconciling mid-commit never
+deletes a manifest `L` needs; freshly copied data objects sit inside
+`min_age`.
+
 **Reconciliation** (continuous mode) propagates the source's deletions.
-The active set at the target is the closure of the latest manifest plus
-every manifest pinned by an unexpired checkpoint: the same rule
-SlateDB's GC applies, run read-only against manifests. Data objects
-outside the active set and older than `min_age` are deleted. Manifests
+The active set at the target is the latest manifest's closure (§3),
+the same rule SlateDB's GC applies, run read-only against manifests.
+Data objects outside the active set and older than `min_age` are
+deleted. Manifests
 that are neither latest nor pinned are deleted after advancing
 `gc/manifest.boundary` past them, which closes the race with a stale
 mirror task re-committing a deleted id.
