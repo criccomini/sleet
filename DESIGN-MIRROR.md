@@ -130,16 +130,6 @@ and those resolve nowhere at the source either (readers reach
 checkpoints only through the latest manifest's list, and can already
 race a deletion between listing and opening).
 
-Safety follows sleet's core invariant: correctness never depends on
-scheduling. Copies are idempotent, the commit is create-if-absent, and
-a duplicate or stale mirror task at worst loses a create race or
-re-copies bytes; two tasks at different watermarks converge on the same
-target. A crashed pass leaves extra data objects and no committed
-manifest; the next pass resumes from the watermark. If a pass stalls
-past its pin's lifetime, source GC may reclaim and the copy sees
-missing objects; the pass restarts against a fresh latest, and objects
-already copied remain valid because they are immutable.
-
 ## 5. Reading a mirror
 
 Replica readers mount the target with `DbReader` and an explicit
@@ -201,9 +191,8 @@ database at that point.
 
 ## 8. Copiers
 
-`copier` selects who moves data objects. In every mode but
-`external-full`, sleet commits manifests; the copier moves only `wal/`
-and `compacted/`.
+`copier` selects who moves data objects. sleet always commits
+manifests; the copier moves only `wal/` and `compacted/`.
 
 - **`builtin`**: sleet streams objects between the two stores itself,
   `copy_parallelism` objects at a time.
@@ -225,12 +214,6 @@ and `compacted/`.
   `prefixMatch` is include-only. The caps also rule external copiers
   out as fleet-wide defaults (§9). `sleet mirror prefixes <root> <db>
   <target> --format s3|sts|azure` emits the per-database filter lists.
-- **`external-full`**: whole-root replication that cannot be filtered.
-  sleet writes nothing. The mirror task computes the newest manifest
-  whose closure is complete (the **safe watermark**), reports it, and
-  alarms on lag. Replicated manifests above the watermark may reference
-  objects that have not arrived; readers must mount checkpoints at or
-  below the watermark. No retention.
 
 ## 9. Configuration and placement
 
@@ -263,7 +246,7 @@ services = ["gc", "compactor-coordinator", "compaction-workers", "mirror"]
 url = "s3://dr-bucket/mirrors"
 source_prefix = "s3://user-data"
 mode = "continuous"             # continuous | periodic
-copier = "builtin"              # builtin | rclone | external | external-full
+copier = "builtin"              # builtin | rclone | external
 poll = "10s"                    # continuous: pass and tail cadence
 # interval = "24h"              # periodic: cadence between passes
 # min_age = "300s"              # periodic: prune deletion age floor
@@ -304,8 +287,8 @@ against them (§3). Validation enforces this at three points:
 
 - At load: every target sets `url`; a `sleet.toml` target also sets
   `source_prefix`, since a bare `url` is one root for every database;
-  `interval` and `retention` require `mode = "periodic"`; `external`
-  and `external-full` copiers cannot be fleet-wide (§8).
+  `interval` and `retention` require `mode = "periodic"`; the
+  `external` copier cannot be fleet-wide (§8).
 - Across the registry (`register` refuses, `status` flags): no
   destination may be a registered database, which is also what makes
   mirror chains inexpressible (§2), and no two databases may resolve
@@ -329,8 +312,8 @@ placement does not consider reachability.
 `sleet status --mirrors` reads source and destination heads per
 `(database, target)` and reports lag as manifests behind, WAL ids
 behind, and estimated seconds (source and target sequence numbers
-mapped through the sequence tracker). For `external-full` it reports
-the safe watermark. It also flags destination collisions and lists
+mapped through the sequence tracker). It also flags destination
+collisions and lists
 databases with no applicable target (§9). Mirror task state rides in
 the heartbeat body like other services.
 
@@ -376,9 +359,8 @@ paths, or inline them) and databases with a separate WAL object store
 
 `sleet mirror promote <root> <db> <target>`: run a final pass while
 the source is reachable, disable the target in the source's registry
-file, delete `external-full` manifests above the safe watermark
-(`Db::open` reads the latest manifest), and report the manifest and
-WAL id the destination ends at. Until then, going live is manual:
+file, and report the manifest and WAL id the destination ends at.
+Until then, going live is manual:
 disable the target to stop the mirror, then open the destination; the
 first writer bumps `writer_epoch` and replays the copied WAL tail, and
 a coordinator bumps `compactor_epoch` and builds fresh compaction
