@@ -227,28 +227,25 @@ and `compacted/`.
 
 ## 9. Configuration and placement
 
-Mirroring is configured on the source. Each registered database may
-define named targets under `[mirror.targets]`, and `mirror` joins the
-service list like any other service. Targets are part of the shared
-`[database]` shape, so fleet-wide defaults live in `sleet.toml` and
-per-database files override them with the usual per-field precedence
-(built-in defaults -> `[database]` -> `dbs/<db>.toml`), matched by
-target name.
+Mirroring is configured on the source: a database's `[mirror.targets]`
+table names its destinations, and `mirror` joins `services` like any
+other service. Targets are part of the shared `[database]` shape, so
+fleet-wide targets live in `sleet.toml` and per-database files
+override them per-field, matched by target name, with the usual
+precedence: built-in defaults -> `[database]` -> `dbs/<db>.toml`.
 
-A target's `url` is the destination root. Alone, it is one database's
-exact destination. With `source_prefix` set, the target is a derived
-mapping: it applies to every database whose canonical URL falls under
-`source_prefix`, matched at a path-segment boundary (`s3://user-data`
-does not capture `s3://user-database/x`), and each database's
-destination is `url` plus the source URL with the prefix stripped.
-With the fleet target below, `s3://user-data/tenant1/db1` mirrors to
-`s3://dr-bucket/mirrors/tenant1/db1`. Stripping one fixed prefix is
-injective, so no two databases derive the same destination within a
-target. `url` and `source_prefix` resolve as one field for precedence:
-a layer that sets either overrides both from the layer below. A
-database no target applies to does not mirror: this scopes fleet-wide
-targets to a bucket or prefix, and `status` lists databases with no
-applicable target (§10).
+`url` is the destination root. On its own it is an exact destination
+for one database. Adding `source_prefix` turns the target into a
+mapping: it applies to every database under the prefix and sends each
+one to `url` plus its path with the prefix stripped, so the fleet
+target below mirrors `s3://user-data/tenant1/db1` to
+`s3://dr-bucket/mirrors/tenant1/db1`. Prefixes match at path-segment
+boundaries (`s3://user-data` does not capture `s3://user-database/x`),
+and stripping a fixed prefix cannot send two databases to the same
+place. For precedence the two fields travel together: a layer that
+sets either overrides both. A database no target applies to does not
+mirror; that is how a fleet target is scoped to one bucket or prefix,
+and `status` lists databases left uncovered (§10).
 
 ```toml
 # sleet.toml: databases under s3://user-data mirror to the DR bucket
@@ -285,38 +282,40 @@ lifetime = "1h"
 keep = "30d"
 ```
 
-`disabled` is an ordinary overridable field: per-field fall-through
-cannot unset an inherited target, so opting a database out of a
-fleet-wide target is explicit. A database mirrors iff its resolved
-services include `mirror` and at least one enabled target resolves;
-zero targets is a no-op, not an error. Removing or disabling a target
-stops that mirror and leaves the destination valid at its watermark.
-The target name is an identity: it keys placement and names the source
-checkpoints (§4, §5), so renaming a target moves its placement and
-abandons its old checkpoints to expiry.
+Opting out is explicit, because per-field fall-through cannot unset
+an inherited target: `disabled` is an ordinary overridable field. A
+database mirrors iff its resolved services include `mirror` and at
+least one enabled target applies; zero targets is a no-op, not an
+error. Removing or disabling a target stops that mirror and leaves
+the destination valid at its watermark. The target name is an
+identity: it keys placement and names the source checkpoints (§4,
+§5), so renaming one moves its placement and abandons its checkpoints
+to expiry.
 
-Destinations are never registry entries and sleet runs no services
-against them (§3); validation enforces the boundary. At load: every
-target sets `url`; a `sleet.toml` target also sets `source_prefix`,
-since a bare `url` would name one root for every database; `interval`
-and `retention` require `mode = "periodic"`; `external` and
-`external-full` copiers cannot come from the fleet-wide layer (§8).
-Across the registry, checked by `register` and flagged by `status`: no
-resolved destination may be a registered database (which also makes
-mirror chains inexpressible, §2), and no two databases may resolve the
-same or nested destinations, which cross-target overlaps can produce.
-At a target's first pass, the source manifest must have empty
-`external_dbs` and no separate WAL object store. The destination root
-is assumed to be empty or a prior mirror of the same source; sleet
-does not verify this, so a target re-pointed at a foreign root is
-undetected operator error.
+Destinations are never registry entries; sleet runs no services
+against them (§3). Validation enforces this at three points:
+
+- At load: every target sets `url`; a `sleet.toml` target also sets
+  `source_prefix`, since a bare `url` is one root for every database;
+  `interval` and `retention` require `mode = "periodic"`; `external`
+  and `external-full` copiers cannot be fleet-wide (§8).
+- Across the registry (`register` refuses, `status` flags): no
+  destination may be a registered database, which is also what makes
+  mirror chains inexpressible (§2), and no two databases may resolve
+  the same or nested destinations, which cross-target overlaps can
+  produce.
+- At a target's first pass: the source manifest must have empty
+  `external_dbs` and no separate WAL object store. The destination
+  root is assumed empty or a prior mirror of the same source,
+  unverified: re-pointing a target at a foreign root is undetected
+  operator error.
 
 Placement extends the pair to a triple: each enabled `(database,
-mirror, target)` is ranked by the frozen rendezvous hash and goes to
-the top-ranked live node offering the service, heartbeat letter `m`.
-`--max-mirror-jobs` caps concurrently syncing `(database, target)`
-jobs per node. Nodes offering `mirror` must reach every source and
-destination store; placement does not consider reachability.
+mirror, target)` goes to the top-ranked live node offering the
+service (heartbeat letter `m`) under the frozen rendezvous hash.
+`--max-mirror-jobs` caps concurrent `(database, target)` jobs per
+node. Mirror nodes must reach both source and destination stores;
+placement does not consider reachability.
 
 ## 10. Observability and verification
 
