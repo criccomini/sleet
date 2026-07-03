@@ -249,13 +249,13 @@ async fn read_target_manifest<'a>(
     id: u64,
     cache: &'a mut BTreeMap<u64, slatedb::VersionedManifest>,
 ) -> Result<Option<&'a slatedb::VersionedManifest>, MirrorError> {
-    if !cache.contains_key(&id) {
-        match dest.admin.read_manifest(Some(id)).await? {
-            Some(m) => {
-                cache.insert(id, m);
+    match cache.entry(id) {
+        std::collections::btree_map::Entry::Occupied(entry) => Ok(Some(entry.into_mut())),
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            match dest.admin.read_manifest(Some(id)).await? {
+                Some(m) => Ok(Some(entry.insert(m))),
+                None => Ok(None),
             }
-            None => return Ok(None),
         }
     }
-    Ok(cache.get(&id))
 }

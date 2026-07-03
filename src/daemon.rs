@@ -666,7 +666,6 @@ mod tests {
                     ),
                 ]
                 .into(),
-                ..Default::default()
             }),
             ..Default::default()
         };

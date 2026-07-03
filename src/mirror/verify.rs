@@ -177,9 +177,11 @@ async fn read_cached<'a>(
     id: u64,
     cache: &'a mut BTreeMap<u64, Option<slatedb::VersionedManifest>>,
 ) -> Result<Option<&'a slatedb::VersionedManifest>, MirrorError> {
-    if !cache.contains_key(&id) {
-        let manifest = dest.admin.read_manifest(Some(id)).await.unwrap_or(None);
-        cache.insert(id, manifest);
+    match cache.entry(id) {
+        std::collections::btree_map::Entry::Occupied(entry) => Ok(entry.into_mut().as_ref()),
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            let manifest = dest.admin.read_manifest(Some(id)).await.unwrap_or(None);
+            Ok(entry.insert(manifest).as_ref())
+        }
     }
-    Ok(cache.get(&id).and_then(|m| m.as_ref()))
 }

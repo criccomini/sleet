@@ -231,15 +231,15 @@ impl ManifestCache {
         db: &DatabaseHandle,
         id: u64,
     ) -> Result<Option<&VersionedManifest>, MirrorError> {
-        if !self.by_id.contains_key(&id) {
-            match db.admin.read_manifest(Some(id)).await? {
-                Some(manifest) => {
-                    self.by_id.insert(id, manifest);
+        match self.by_id.entry(id) {
+            std::collections::btree_map::Entry::Occupied(entry) => Ok(Some(entry.into_mut())),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                match db.admin.read_manifest(Some(id)).await? {
+                    Some(manifest) => Ok(Some(entry.insert(manifest))),
+                    None => Ok(None),
                 }
-                None => return Ok(None),
             }
         }
-        Ok(self.by_id.get(&id))
     }
 }
 
