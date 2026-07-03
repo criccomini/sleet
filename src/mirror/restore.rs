@@ -1,0 +1,202 @@
+//! `sleet mirror restore` (DESIGN-MIRROR §7): a one-shot pass with a
+//! chosen restore point as `L`, copying its closure to an empty
+//! destination and committing it. The destination is then an ordinary
+//! database at that point.
+
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Utc};
+use futures::StreamExt;
+use object_store::{ObjectStoreExt, PutMode, PutOptions};
+use slatedb::seq_tracker::FindOption;
+
+use super::MirrorError;
+use super::copier::Copier;
+use super::layout::{self, ManifestObjects, object_path};
+use crate::config::{CopierKind, ResolvedMirrorTarget};
+use crate::services::DatabaseHandle;
+
+/// Which restore point to restore.
+#[derive(Clone, Debug)]
+pub enum RestorePoint {
+    /// The backup's latest manifest.
+    Latest,
+    /// A manifest id.
+    Manifest(u64),
+    /// A wall-clock time, mapped through the sequence tracker.
+    Time(DateTime<Utc>),
+}
+
+impl RestorePoint {
+    /// Parse `--at`: a manifest id or an RFC 3339 timestamp.
+    pub fn parse(at: &str) -> Result<Self, String> {
+        if let Ok(id) = at.parse::<u64>() {
+            return Ok(RestorePoint::Manifest(id));
+        }
+        DateTime::parse_from_rfc3339(at)
+            .map(|t| RestorePoint::Time(t.with_timezone(&Utc)))
+            .map_err(|_| format!("--at {at:?} is neither a manifest id nor an RFC 3339 timestamp"))
+    }
+}
+
+/// What one restore did.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RestoreOutcome {
+    /// The restore point committed as the destination's head.
+    pub manifest_id: u64,
+    /// Manifests committed (the closure's, ascending, the point last).
+    pub manifests_committed: u64,
+    /// Data objects copied.
+    pub copied_objects: u64,
+    /// Data bytes copied.
+    pub copied_bytes: u64,
+}
+
+/// Restore `backup` at `point` into the empty root `dest`.
+pub async fn restore(
+    backup: &DatabaseHandle,
+    dest: &DatabaseHandle,
+    point: RestorePoint,
+) -> Result<RestoreOutcome, MirrorError> {
+    // The destination must be empty; restore refuses anything else and
+    // never deletes.
+    let mut existing = dest.store.list(Some(&dest.path));
+    if existing.next().await.transpose()?.is_some() {
+        return Err(MirrorError::DestinationNotEmpty {
+            url: dest.url.clone(),
+        });
+    }
+
+    let manifests = layout::list_manifests(backup).await?;
+    if manifests.is_empty() {
+        return Err(MirrorError::NotADatabase {
+            url: backup.url.clone(),
+        });
+    }
+    let chosen = resolve_point(backup, &manifests, &point).await?;
+    let manifest = backup
+        .admin
+        .read_manifest(Some(chosen))
+        .await?
+        .ok_or_else(|| MirrorError::NoRestorePoint {
+            at: format!("{point:?}"),
+            reason: format!("manifest {chosen} vanished from the backup"),
+        })?;
+
+    // The closure, read wholly from the backup. A support manifest's
+    // own live entries may dangle; restore fails rather than commit an
+    // incomplete closure.
+    let now = Utc::now();
+    let mut members: BTreeMap<u64, ManifestObjects> = BTreeMap::new();
+    members.insert(chosen, layout::manifest_objects(&manifest));
+    for cp in manifest.checkpoints() {
+        if !layout::checkpoint_live(cp, now) || cp.manifest_id == chosen {
+            continue;
+        }
+        match backup.admin.read_manifest(Some(cp.manifest_id)).await? {
+            Some(pinned) => {
+                members.insert(cp.manifest_id, layout::manifest_objects(&pinned));
+            }
+            None => {
+                return Err(MirrorError::NoRestorePoint {
+                    at: format!("{point:?}"),
+                    reason: format!(
+                        "manifest {chosen} is closure support, not a restore point: its live \
+                         checkpoint pins manifest {}, which the backup no longer has",
+                        cp.manifest_id
+                    ),
+                });
+            }
+        }
+    }
+
+    // Copy the closure's data objects, then commit the manifests in
+    // ascending id order, the restore point last.
+    let mut objects = ManifestObjects::default();
+    for member in members.values() {
+        objects.extend(member);
+    }
+    let settings = ResolvedMirrorTarget {
+        copier: CopierKind::Builtin,
+        ..ResolvedMirrorTarget::default()
+    };
+    let copier = Copier::new(&settings, None, backup, dest);
+    let copied = copier.copy(&objects.rel_names()).await?;
+
+    let mut committed = 0;
+    for &id in members.keys() {
+        let rel = layout::manifest_rel(id);
+        let bytes = backup
+            .store
+            .get(&object_path(backup, &rel))
+            .await?
+            .bytes()
+            .await?;
+        dest.store
+            .put_opts(
+                &object_path(dest, &rel),
+                bytes.into(),
+                PutOptions::from(PutMode::Create),
+            )
+            .await?;
+        committed += 1;
+    }
+    Ok(RestoreOutcome {
+        manifest_id: chosen,
+        manifests_committed: committed,
+        copied_objects: copied.objects,
+        copied_bytes: copied.bytes,
+    })
+}
+
+/// Resolve `--at` to a manifest id. Restore points map to wall-clock
+/// time by the manifest's sequence tracker: a timestamp maps to a
+/// sequence through the latest manifest's tracker, then to the newest
+/// manifest whose recorded state does not pass that sequence.
+async fn resolve_point(
+    backup: &DatabaseHandle,
+    manifests: &[(u64, object_store::ObjectMeta)],
+    point: &RestorePoint,
+) -> Result<u64, MirrorError> {
+    let latest = manifests.last().expect("nonempty").0;
+    match point {
+        RestorePoint::Latest => Ok(latest),
+        RestorePoint::Manifest(id) => {
+            if manifests.iter().any(|(m, _)| m == id) {
+                Ok(*id)
+            } else {
+                Err(MirrorError::NoRestorePoint {
+                    at: id.to_string(),
+                    reason: format!("the backup has no manifest {id}"),
+                })
+            }
+        }
+        RestorePoint::Time(ts) => {
+            let head = backup
+                .admin
+                .read_manifest(Some(latest))
+                .await?
+                .ok_or_else(|| MirrorError::NotADatabase {
+                    url: backup.url.clone(),
+                })?;
+            let seq = head
+                .sequence_tracker()
+                .find_seq(*ts, FindOption::RoundDown)
+                .ok_or_else(|| MirrorError::NoRestorePoint {
+                    at: ts.to_rfc3339(),
+                    reason: "the timestamp predates the backup's history".to_string(),
+                })?;
+            for (id, _) in manifests.iter().rev() {
+                if let Some(m) = backup.admin.read_manifest(Some(*id)).await?
+                    && m.last_l0_seq() <= seq
+                {
+                    return Ok(*id);
+                }
+            }
+            Err(MirrorError::NoRestorePoint {
+                at: ts.to_rfc3339(),
+                reason: "no restore point is old enough for the timestamp".to_string(),
+            })
+        }
+    }
+}

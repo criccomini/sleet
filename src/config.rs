@@ -137,6 +137,8 @@ pub enum Service {
     CompactorCoordinator,
     /// Compaction workers (RFC-0025).
     CompactionWorkers,
+    /// Mirroring to per-database targets (DESIGN-MIRROR.md).
+    Mirror,
 }
 
 impl Service {
@@ -147,6 +149,7 @@ impl Service {
             Service::Gc => "gc",
             Service::CompactorCoordinator => "compactor-coordinator",
             Service::CompactionWorkers => "compaction-workers",
+            Service::Mirror => "mirror",
         }
     }
 
@@ -157,6 +160,7 @@ impl Service {
             Service::Gc => 'g',
             Service::CompactorCoordinator => 'c',
             Service::CompactionWorkers => 'w',
+            Service::Mirror => 'm',
         }
     }
 
@@ -166,15 +170,17 @@ impl Service {
             'g' => Some(Service::Gc),
             'c' => Some(Service::CompactorCoordinator),
             'w' => Some(Service::CompactionWorkers),
+            'm' => Some(Service::Mirror),
             _ => None,
         }
     }
 
     /// Every service, in canonical order.
-    pub const ALL: [Service; 3] = [
+    pub const ALL: [Service; 4] = [
         Service::Gc,
         Service::CompactorCoordinator,
         Service::CompactionWorkers,
+        Service::Mirror,
     ];
 }
 
@@ -205,6 +211,10 @@ pub struct DatabaseConfig {
     /// Compaction worker settings.
     #[serde(rename = "compaction-workers", skip_serializing_if = "Option::is_none")]
     pub compaction_workers: Option<WorkersOverrides>,
+
+    /// Mirror settings: named destination targets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror: Option<MirrorOverrides>,
 }
 
 /// Garbage collection settings, per SlateDB resource directory.
@@ -389,6 +399,113 @@ pub enum CompressionCodec {
     Zstd,
 }
 
+/// Mirror settings: the `[database.mirror]` table (fleet-wide) or the
+/// `[mirror]` table of a `dbs/<db>.toml`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MirrorOverrides {
+    /// Named mirror targets. Layers merge per target name, then per
+    /// field: a `dbs/<db>.toml` entry overrides the fleet-wide target
+    /// of the same name field by field, except that `url` and
+    /// `source_prefix` travel together (a layer that sets either
+    /// overrides both).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub targets: std::collections::BTreeMap<String, MirrorTargetOverrides>,
+}
+
+/// One named mirror target. All fields are optional; unset fields fall
+/// through to the previous layer, then to built-in defaults.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MirrorTargetOverrides {
+    /// The destination root. On its own an exact destination for one
+    /// database; with `source_prefix`, the base the stripped database
+    /// path is appended to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+
+    /// Scope the target to databases under this URL prefix (matched at
+    /// path-segment boundaries) and map each one to `url` plus its
+    /// path with the prefix stripped. For precedence this field and
+    /// `url` travel together: a layer that sets either overrides both.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_prefix: Option<String>,
+
+    /// Opt out of an inherited target. An ordinary overridable field,
+    /// because per-field fall-through cannot unset a target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+
+    /// How the target is kept in sync.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<MirrorMode>,
+
+    /// Who moves data objects; sleet always commits manifests.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copier: Option<CopierKind>,
+
+    /// Continuous mode: the pass and WAL tail cadence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poll: Option<HumanDuration>,
+
+    /// Periodic mode: the cadence between passes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<HumanDuration>,
+
+    /// Prune deletion age floor for data objects at the target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_age: Option<HumanDuration>,
+
+    /// Lifetime of the source pin checkpoint a pass holds while
+    /// copying; refreshed at half-life while the pass runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoint_lifetime: Option<HumanDuration>,
+
+    /// Builtin copier: concurrent object copies per pass.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copy_parallelism: Option<u32>,
+
+    /// Restore-point retention; unset keeps everything.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retention: Option<RetentionOverrides>,
+}
+
+/// Restore-point retention for one mirror target.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RetentionOverrides {
+    /// Keep every restore point younger than this, plus the manifests
+    /// their live checkpoints pin.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keep: Option<HumanDuration>,
+}
+
+/// How a mirror target is kept in sync.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum MirrorMode {
+    /// The sync pass plus the WAL tail, on a `poll` cadence with idle
+    /// backoff.
+    Continuous,
+    /// One pass every `interval`; each committed manifest is a
+    /// point-in-time cut.
+    Periodic,
+}
+
+/// Who moves a mirror target's data objects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CopierKind {
+    /// sleet streams objects between the two stores itself.
+    Builtin,
+    /// sleet computes the object list per pass and drives
+    /// `rclone copy --files-from`.
+    Rclone,
+    /// Bucket replication configured outside sleet ships the data
+    /// directories; sleet backfills misses and commits manifests.
+    External,
+}
+
 // ---------------------------------------------------------------------
 // Resolved settings
 // ---------------------------------------------------------------------
@@ -404,6 +521,8 @@ pub struct ResolvedServices {
     pub coordinator: ResolvedCoordinator,
     /// Compaction worker settings.
     pub workers: ResolvedWorkers,
+    /// Mirror targets.
+    pub mirror: ResolvedMirror,
 }
 
 impl Default for ResolvedServices {
@@ -413,6 +532,61 @@ impl Default for ResolvedServices {
             gc: ResolvedGc::default(),
             coordinator: ResolvedCoordinator::default(),
             workers: ResolvedWorkers::default(),
+            mirror: ResolvedMirror::default(),
+        }
+    }
+}
+
+/// Resolved mirror settings: every configured target by name, layered
+/// per field. Whether a target applies to a given database (and where
+/// it sends it) is decided by `crate::mirror::applied_targets`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ResolvedMirror {
+    /// Configured targets by name, enabled or not.
+    pub targets: std::collections::BTreeMap<String, ResolvedMirrorTarget>,
+}
+
+/// One resolved mirror target.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedMirrorTarget {
+    /// The destination root; required unless the target is disabled.
+    pub url: Option<String>,
+    /// Scope-and-map prefix; travels with `url` across layers.
+    pub source_prefix: Option<String>,
+    /// Whether the target is opted out.
+    pub disabled: bool,
+    /// How the target is kept in sync.
+    pub mode: MirrorMode,
+    /// Who moves data objects.
+    pub copier: CopierKind,
+    /// Continuous mode: the pass and WAL tail cadence.
+    pub poll: Duration,
+    /// Periodic mode: the cadence between passes.
+    pub interval: Duration,
+    /// Prune deletion age floor for data objects.
+    pub min_age: Duration,
+    /// Source pin checkpoint lifetime.
+    pub checkpoint_lifetime: Duration,
+    /// Builtin copier: concurrent object copies.
+    pub copy_parallelism: u32,
+    /// Restore-point retention; `None` keeps everything.
+    pub keep: Option<Duration>,
+}
+
+impl Default for ResolvedMirrorTarget {
+    fn default() -> Self {
+        Self {
+            url: None,
+            source_prefix: None,
+            disabled: false,
+            mode: MirrorMode::Continuous,
+            copier: CopierKind::Builtin,
+            poll: Duration::from_secs(10),
+            interval: Duration::from_secs(24 * 60 * 60),
+            min_age: Duration::from_secs(300),
+            checkpoint_lifetime: Duration::from_secs(15 * 60),
+            copy_parallelism: 8,
+            keep: None,
         }
     }
 }
@@ -614,6 +788,59 @@ impl DatabaseConfig {
         }
         if let Some(workers) = &self.compaction_workers {
             workers.apply(&mut r.workers);
+        }
+        if let Some(mirror) = &self.mirror {
+            mirror.apply(&mut r.mirror);
+        }
+    }
+}
+
+impl MirrorOverrides {
+    fn apply(&self, r: &mut ResolvedMirror) {
+        for (name, target) in &self.targets {
+            target.apply(r.targets.entry(name.clone()).or_default());
+        }
+    }
+}
+
+impl MirrorTargetOverrides {
+    fn apply(&self, r: &mut ResolvedMirrorTarget) {
+        // `url` and `source_prefix` travel together: a layer that sets
+        // either overrides both, so a plain-url layer clears an
+        // inherited prefix instead of inheriting a mapping it never
+        // asked for.
+        if self.url.is_some() || self.source_prefix.is_some() {
+            r.url = self.url.clone();
+            r.source_prefix = self.source_prefix.clone();
+        }
+        if let Some(v) = self.disabled {
+            r.disabled = v;
+        }
+        if let Some(v) = self.mode {
+            r.mode = v;
+        }
+        if let Some(v) = self.copier {
+            r.copier = v;
+        }
+        if let Some(v) = self.poll {
+            r.poll = v.0;
+        }
+        if let Some(v) = self.interval {
+            r.interval = v.0;
+        }
+        if let Some(v) = self.min_age {
+            r.min_age = v.0;
+        }
+        if let Some(v) = self.checkpoint_lifetime {
+            r.checkpoint_lifetime = v.0;
+        }
+        if let Some(v) = self.copy_parallelism {
+            r.copy_parallelism = v;
+        }
+        if let Some(retention) = &self.retention
+            && let Some(keep) = retention.keep
+        {
+            r.keep = Some(keep.0);
         }
     }
 }
@@ -855,6 +1082,43 @@ fn check_resolved(r: &ResolvedServices, at: &str, errs: &mut Vec<String>) {
             s.max_compaction_sources
         ));
     }
+    for (name, target) in &r.mirror.targets {
+        if target.disabled {
+            continue;
+        }
+        let table = format!("mirror.targets.{name}");
+        match &target.url {
+            None => errs.push(format!(
+                "{}: url is required unless the target is disabled",
+                loc(at, &table)
+            )),
+            Some(url) => {
+                if let Err(e) = crate::registry::canonicalize_url(url) {
+                    errs.push(format!("{}.url: {e}", loc(at, &table)));
+                }
+            }
+        }
+        if let Some(prefix) = &target.source_prefix
+            && let Err(e) = crate::registry::canonicalize_url(prefix)
+        {
+            errs.push(format!("{}.source_prefix: {e}", loc(at, &table)));
+        }
+    }
+}
+
+/// Check a mirror target name for use as a placement key and source
+/// checkpoint name: nonempty, at most 128 chars of `[A-Za-z0-9_-]`.
+pub fn validate_target_name(name: &str) -> Result<(), String> {
+    let ok = !name.is_empty()
+        && name.len() <= 128
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'));
+    if ok {
+        Ok(())
+    } else {
+        Err("mirror target names are 1-128 chars of [A-Za-z0-9_-]".to_string())
+    }
 }
 
 fn check_database(o: &DatabaseConfig, at: &str, errs: &mut Vec<String>) {
@@ -930,6 +1194,41 @@ fn check_database(o: &DatabaseConfig, at: &str, errs: &mut Vec<String>) {
                 errs.push(format!(
                     "{} must be a positive number",
                     loc(at, &format!("{cc}.scheduler.include_size_threshold"))
+                ));
+            }
+        }
+    }
+    if let Some(m) = &o.mirror {
+        for (name, t) in &m.targets {
+            let table = format!("mirror.targets.{name}");
+            if let Err(e) = validate_target_name(name) {
+                errs.push(format!("{}: {e}", loc(at, &table)));
+            }
+            for (field, d) in [
+                ("poll", t.poll),
+                ("interval", t.interval),
+                ("min_age", t.min_age),
+                ("checkpoint_lifetime", t.checkpoint_lifetime),
+            ] {
+                if d.is_some_and(|d| d.0.is_zero()) {
+                    errs.push(format!(
+                        "{} must be > 0",
+                        loc(at, &format!("{table}.{field}"))
+                    ));
+                }
+            }
+            if t.copy_parallelism == Some(0) {
+                errs.push(format!(
+                    "{} must be >= 1",
+                    loc(at, &format!("{table}.copy_parallelism"))
+                ));
+            }
+            if let Some(retention) = &t.retention
+                && retention.keep.is_some_and(|d| d.0.is_zero())
+            {
+                errs.push(format!(
+                    "{} must be > 0",
+                    loc(at, &format!("{table}.retention.keep"))
                 ));
             }
         }

@@ -3337,6 +3337,7 @@ dependencies = [
  "tracing-subscriber",
  "trycmd",
  "url",
+ "uuid",
 ]
 
 [[package]]

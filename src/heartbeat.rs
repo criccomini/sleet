@@ -4,9 +4,9 @@
 //! `heartbeat_interval`. Placement never reads a body: it gets the node
 //! id and offered services from the name, and liveness from
 //! `LastModified`. `<services>` is the offered services' letters
-//! (`c` = compactor-coordinator, `g` = gc, `w` = compaction-workers)
-//! sorted ascending, e.g. `sleet-1.cgw.json`. Node ids must not
-//! contain `.`.
+//! (`c` = compactor-coordinator, `g` = gc, `m` = mirror,
+//! `w` = compaction-workers) sorted ascending, e.g.
+//! `sleet-1.cgmw.json`. Node ids must not contain `.`.
 //!
 //! The body is observability-only, read by `sleet status` and never
 //! fetched for placement. Compatibility: readers ignore unknown fields
@@ -154,9 +154,18 @@ mod tests {
 
     #[test]
     fn object_names_roundtrip_and_reject_garbage() {
-        let (id, services) = parse_object_name("sleet-1.cgw.json").unwrap();
+        let (id, services) = parse_object_name("sleet-1.cgmw.json").unwrap();
         assert_eq!(id, "sleet-1");
         assert_eq!(services, Service::ALL.to_vec());
+        let (_, services) = parse_object_name("sleet-1.cgw.json").unwrap();
+        assert_eq!(
+            services,
+            vec![
+                Service::Gc,
+                Service::CompactorCoordinator,
+                Service::CompactionWorkers
+            ]
+        );
         // Unknown letters are ignored; the node still parses.
         let (id, services) = parse_object_name("sleet-2.gx.json").unwrap();
         assert_eq!(id, "sleet-2");

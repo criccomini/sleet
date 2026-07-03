@@ -49,6 +49,9 @@ pub enum ServiceError {
     /// The underlying SlateDB service failed.
     #[error(transparent)]
     SlateDb(#[from] slatedb::Error),
+    /// The mirror task failed.
+    #[error(transparent)]
+    Mirror(#[from] crate::mirror::MirrorError),
 }
 
 impl ServiceError {
@@ -71,6 +74,11 @@ pub struct DatabaseHandle {
     pub url: String,
     /// The SlateDB admin API over the database's store.
     pub admin: Admin,
+    /// The database's object store, for raw object reads and writes
+    /// (the mirror byte-copies data objects and manifests).
+    pub store: Arc<dyn ObjectStore>,
+    /// The database root's path within the store.
+    pub path: StorePath,
 }
 
 impl DatabaseHandle {
@@ -85,10 +93,12 @@ impl DatabaseHandle {
 
     /// A handle over an existing store, for tests and embedding.
     pub fn from_parts(url: &str, store: Arc<dyn ObjectStore>, path: StorePath) -> Self {
-        let admin = AdminBuilder::new(path, store).build();
+        let admin = AdminBuilder::new(path.clone(), store.clone()).build();
         Self {
             url: url.to_string(),
             admin,
+            store,
+            path,
         }
     }
 }
@@ -218,6 +228,9 @@ pub async fn queue_depth(admin: &Admin) -> Result<QueueDepth, slatedb::Error> {
 }
 
 /// Run the resolved services for one `(database, service)` assignment.
+/// Mirror assignments carry a target and run through
+/// `crate::mirror::run_mirror` instead; the daemon dispatches them
+/// before reaching here.
 pub async fn run_service(
     db: &DatabaseHandle,
     service: crate::config::Service,
@@ -230,6 +243,7 @@ pub async fn run_service(
         Service::Gc => run_gc(db, &resolved.gc, token).await,
         Service::CompactorCoordinator => run_coordinator(db, &resolved.coordinator, token).await,
         Service::CompactionWorkers => run_workers(db, &resolved.workers, jobs, token).await,
+        Service::Mirror => unreachable!("mirror assignments dispatch to mirror::run_mirror"),
     }
 }
 

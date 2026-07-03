@@ -17,6 +17,7 @@
 pub mod config;
 pub mod daemon;
 pub mod heartbeat;
+pub mod mirror;
 pub mod ops;
 pub mod placement;
 pub mod registry;
