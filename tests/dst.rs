@@ -277,3 +277,53 @@ async fn failover_latency_is_bounded_in_virtual_time() {
     );
     sim.shutdown().await;
 }
+
+/// A continuous mirror over a source with no manifest yet polls with
+/// idle backoff: over 1000 virtual seconds of a 1s poll, wakeups
+/// follow 1, 2, 4, ... capped at 300s, so only a handful of source
+/// LISTs instead of ~1000.
+#[tokio::test(start_paused = true)]
+async fn mirror_polling_backs_off_while_idle() {
+    use sleet::config::ResolvedMirrorTarget;
+    use sleet::mirror::{self, AppliedTarget};
+    use sleet::services::DatabaseHandle;
+
+    let source_store = TestStore::in_memory();
+    let dest_store = TestStore::in_memory();
+    let target = AppliedTarget {
+        name: "dr".into(),
+        destination: "memory:///dst".into(),
+        settings: ResolvedMirrorTarget {
+            poll: Duration::from_secs(1),
+            ..ResolvedMirrorTarget::default()
+        },
+    };
+    let token = CancellationToken::new();
+    let task = tokio::spawn({
+        let source_store = source_store.clone();
+        let dest_store = dest_store.clone();
+        let target = target.clone();
+        let token = token.clone();
+        async move {
+            let source =
+                DatabaseHandle::from_parts("memory:///src", source_store, StorePath::from("src"));
+            let dest =
+                DatabaseHandle::from_parts("memory:///dst", dest_store, StorePath::from("dst"));
+            let jobs = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
+        }
+    });
+
+    tokio::time::sleep(Duration::from_secs(1000)).await;
+    token.cancel();
+    task.await.unwrap().unwrap();
+
+    let lists = source_store.counters().count(Op::List);
+    assert!(lists >= 5, "mirror never polled: {lists} LISTs");
+    assert!(
+        lists <= 30,
+        "mirror polled without backing off: {lists} LISTs in 1000s"
+    );
+    // An idle mirror touches the destination not at all.
+    assert_eq!(dest_store.counters().count(Op::Put), 0);
+}

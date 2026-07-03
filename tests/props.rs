@@ -145,3 +145,109 @@ proptest! {
         prop_assert_eq!(resolved.coordinator.poll_interval, Duration::from_secs(5));
     }
 }
+
+proptest! {
+    /// Mirror target layering: per-field last-writer-wins by target
+    /// name, except `url` and `source_prefix` travel together (a layer
+    /// that sets either overrides both), and `disabled` is an ordinary
+    /// overridable field.
+    #[test]
+    fn mirror_targets_layer_per_field(
+        fleet_url in prop::option::of(url_strategy()),
+        fleet_prefix in prop::option::of(url_strategy()),
+        db_url in prop::option::of(url_strategy()),
+        db_prefix in prop::option::of(url_strategy()),
+        fleet_poll_secs in prop::option::of(1u64..3600),
+        db_disabled in prop::option::of(proptest::bool::ANY),
+    ) {
+        use sleet::config::{MirrorOverrides, MirrorTargetOverrides};
+        let target = |url: &Option<String>, prefix: &Option<String>| MirrorTargetOverrides {
+            url: url.clone(),
+            source_prefix: prefix.clone(),
+            ..Default::default()
+        };
+        let fleet = SleetConfig {
+            database: DatabaseConfig {
+                mirror: Some(MirrorOverrides {
+                    targets: [(
+                        "dr".to_string(),
+                        MirrorTargetOverrides {
+                            poll: fleet_poll_secs
+                                .map(|s| HumanDuration(Duration::from_secs(s))),
+                            ..target(&fleet_url, &fleet_prefix)
+                        },
+                    )]
+                    .into(),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let db = DatabaseConfig {
+            mirror: Some(MirrorOverrides {
+                targets: [(
+                    "dr".to_string(),
+                    MirrorTargetOverrides {
+                        disabled: db_disabled,
+                        ..target(&db_url, &db_prefix)
+                    },
+                )]
+                .into(),
+            }),
+            ..Default::default()
+        };
+        let resolved = fleet.resolve(Some(&db));
+        let t = &resolved.mirror.targets["dr"];
+        // url and source_prefix travel together across layers.
+        let (want_url, want_prefix) = if db_url.is_some() || db_prefix.is_some() {
+            (db_url.clone(), db_prefix.clone())
+        } else if fleet_url.is_some() || fleet_prefix.is_some() {
+            (fleet_url.clone(), fleet_prefix.clone())
+        } else {
+            (None, None)
+        };
+        prop_assert_eq!(&t.url, &want_url);
+        prop_assert_eq!(&t.source_prefix, &want_prefix);
+        // Independent fields fall through per field.
+        let want_poll = fleet_poll_secs.map_or(Duration::from_secs(10), Duration::from_secs);
+        prop_assert_eq!(t.poll, want_poll);
+        prop_assert_eq!(t.disabled, db_disabled.unwrap_or(false));
+    }
+
+    /// Prefix mapping is injective: distinct databases under the same
+    /// prefix map to distinct destinations, and databases outside the
+    /// prefix never apply.
+    #[test]
+    fn prefix_mapping_is_injective_and_scoped(
+        segs in prop::collection::btree_set("[a-z0-9]{1,10}", 2..6),
+        outside in "[a-z0-9]{1,10}",
+    ) {
+        use sleet::config::ResolvedMirrorTarget;
+        use sleet::mirror;
+        let target = ResolvedMirrorTarget {
+            url: Some("s3://dr/mirrors".to_string()),
+            source_prefix: Some("s3://data/tenants".to_string()),
+            ..Default::default()
+        };
+        let mirror_config = sleet::config::ResolvedMirror {
+            targets: [("dr".to_string(), target)].into(),
+        };
+        let mut destinations = BTreeSet::new();
+        for seg in &segs {
+            let db = format!("s3://data/tenants/{seg}");
+            let applied = mirror::applied_targets(&db, &mirror_config);
+            prop_assert_eq!(applied.len(), 1, "{}", db);
+            prop_assert!(
+                destinations.insert(applied[0].destination.clone()),
+                "stripping a fixed prefix cannot send two databases to the same place"
+            );
+        }
+        // Segment boundaries: a sibling of the prefix never matches.
+        let sibling = format!("s3://data/tenants{outside}");
+        prop_assert!(mirror::applied_targets(&sibling, &mirror_config).is_empty());
+        // Unrelated buckets never match.
+        prop_assert!(
+            mirror::applied_targets("s3://other/tenants/x", &mirror_config).is_empty()
+        );
+    }
+}

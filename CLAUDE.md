@@ -5,8 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `sleet` is a fleet manager for [SlateDB](https://slatedb.io) databases.
-`DESIGN.md` is the design source of truth; read it before making changes
-and keep it consistent when the design evolves. The fleet config format
+`DESIGN.md` is the design source of truth (`DESIGN-MIRROR.md` for the
+mirror service); read them before making changes
+and keep them consistent when the design evolves. The fleet config format
 (`sleet.toml` and `dbs/<db>.toml`) is defined by the serde structs in
 `src/config.rs`, which generate `schema/config.schema.json`; a test fails
 when the two drift.
@@ -45,7 +46,8 @@ when the two drift.
   (policy: defaults, timing), `dbs/` (registry; one file per database,
   empty = defaults, `services = []` = disabled), `nodes/` (heartbeats;
   liveness and offered services come from the object name, versions and
-  stats from the body). Nodes are stateless; the only node-local config
+  stats from the body; letters: `c` coordinator, `g` gc, `m` mirror,
+  `w` workers). Nodes are stateless; the only node-local config
   is flags.
 - Databases are registered manually, with `sleet register <root> <url>`
   or by
@@ -56,10 +58,12 @@ when the two drift.
   No assignment state is stored; ownership is recomputed each tick from
   the shared tree.
 - Per-database services wrap SlateDB primitives via `slatedb::Admin`:
-  garbage collection, standalone compaction coordinators (RFC-0025), and
+  garbage collection, standalone compaction coordinators (RFC-0025),
   compaction workers (top-`count` ranked nodes poll `.compactions` with
-  idle backoff).
-  Mirroring is future work.
+  idle backoff), and mirroring (DESIGN-MIRROR.md: byte-copy a
+  database's manifest closure to per-target destination roots,
+  committing manifests with create-if-absent; placement is per
+  `(database, mirror, target)` triple; `src/mirror/`).
 - Core invariant: safety never depends on sleet's scheduling. Duplicate or
   stale processes must be harmless; mutual exclusion comes only from
   SlateDB's manifest CAS, epoch fencing, and `.compactions` claims;

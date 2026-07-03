@@ -2,13 +2,13 @@
 
 `sleet` operates fleets of [SlateDB](https://slatedb.io) databases: it
 runs their background services (garbage collection, compaction
-coordination, and compaction execution) for deployments that move that
-work out of the writer process.
+coordination, compaction execution, and mirroring) for deployments
+that move that work out of the writer process.
 
 ## Goals
 
-- Run GC, compactor coordinators, and compaction workers for millions of
-  databases from a small pool of `sleet` nodes.
+- Run GC, compactor coordinators, compaction workers, and mirrors for
+  millions of databases from a small pool of `sleet` nodes.
 - Register databases explicitly, with the CLI or by writing
   `dbs/<db>.toml`.
 - No dependencies beyond object storage. Mutual exclusion comes from
@@ -25,7 +25,6 @@ work out of the writer process.
   and readers directly.
 - No leader election. SlateDB's object-store fencing is the only
   mutual-exclusion mechanism.
-- No mirroring in v1; see [Future work](#future-work).
 
 ## Architecture
 
@@ -108,9 +107,9 @@ fall through to the previous layer.
 
 Each node PUTs a heartbeat at `nodes/<node_id>.<services>.json` every
 `heartbeat_interval`, where `<services>` is the offered services' letters
-(`c` = compactor-coordinator, `g` = gc, `w` = compaction-workers) sorted
-ascending, e.g. `sleet-1.cgw.json`; node ids are 1-128 characters of
-`[A-Za-z0-9_-]`.
+(`c` = compactor-coordinator, `g` = gc, `m` = mirror,
+`w` = compaction-workers) sorted ascending, e.g. `sleet-1.cgmw.json`;
+node ids are 1-128 characters of `[A-Za-z0-9_-]`.
 Assignment never looks inside a heartbeat: the name says which services
 a node offers and `LastModified` says whether it is alive, so one LIST
 of `nodes/` per tick is the only read placement makes.
@@ -144,7 +143,10 @@ by hashing the pair together with its node id, and the ranking assigns
 owners: `gc` and `compactor-coordinator` run on the top-ranked
 node, and `compaction-workers` runs on the top `count` nodes (`count`
 distinct pollers per database, or every offering node if there are
-fewer). Removing a node moves only the pairs it owned; adding one moves
+fewer). `mirror` extends the pair to a triple: each enabled
+`(database, mirror, target)` is scored with the target name in the key
+and goes to the top-ranked node (DESIGN-MIRROR.md). Removing a node
+moves only the pairs it owned; adding one moves
 only the pairs it now wins. Every node recomputes ownership each
 heartbeat tick from the same shared inputs (the `dbs/` registry and the
 live set) and runs exactly the pairs it owns. No assignment state is
@@ -187,9 +189,12 @@ compaction stall.
 
 `sleet run <root>` is a tokio process. Flags cover only what is
 node-specific: `--node-id` (required; ids must be unique within a fleet),
-`--services` (default: all services), and capacity caps defaulted from
-the machine (e.g. `--max-compaction-jobs`, the maximum number of
-databases compacting on the node at once). Heterogeneous
+`--services` (default: all services), capacity caps defaulted from
+the machine (`--max-compaction-jobs`, the maximum number of
+databases compacting on the node at once, and `--max-mirror-jobs`, the
+maximum `(database, target)` mirror jobs copying at once), and
+`--rclone`, the rclone binary path for `copier = "rclone"` mirror
+targets. Heterogeneous
 fleets run the same binary with different flags, e.g. large machines
 with `--services compaction-workers`. Each owned assignment is a
 supervised task built on the `slatedb::Admin` API, restarted with backoff
@@ -240,6 +245,16 @@ parallelism spans nodes: a database with `count = 8` has eight distinct
 nodes competing for its jobs, or every worker node if the pool is
 smaller.
 
+### 4. Mirroring
+
+Replicates a database into another object-store root by copying its
+immutable objects and committing manifests as the atomic step. Targets,
+modes, copiers, retention, and the sync pass are specified in
+DESIGN-MIRROR.md; placement, config layering, and the process model
+here apply unchanged. Duplicate mirror tasks are safe: manifests commit
+with create-if-absent, and identical bodies mean a racing mirror, not a
+conflict.
+
 ## Scaling
 
 Coordination cost scales with nodes, not databases. Each node PUTs one
@@ -263,21 +278,26 @@ poll floors keep a million mostly-idle databases affordable.
 - Nodes run no HTTP server and export no metrics API. `sleet status`
   derives fleet state from the tree: node liveness, roles, and versions
   from `nodes/`, intent from `sleet.toml` and `dbs/`, placement by
-  computing the same rendezvous ranking, and compaction queue depth from
-  `.compactions` (behind `--compactions`: one read per database). If no
+  computing the same rendezvous ranking, compaction queue depth from
+  `.compactions` (behind `--compactions`: one read per database), and
+  mirror lag per `(database, target)` (behind `--mirrors`: several
+  reads per pair; see DESIGN-MIRROR.md). If no
   live node offers a service, `status` says so.
 - Structured logs per `(database, service)`.
 
 ## Crate layout
 
 A single `sleet` crate with one binary: `sleet run <root>` is the
-long-running daemon; `status` and `register` are one-shots. Config types
+long-running daemon; `status`, `register`, and the `mirror` family
+(`sync`, `verify`, `restore`, `prefixes`) are one-shots. Config types
 (`sleet.toml`, `dbs/*.toml`) live in `src/config.rs`
 (`schema/config.schema.json`); the heartbeat format lives in
 `src/heartbeat.rs` (`schema/heartbeat.schema.json`). The frozen
 rendezvous hash lives in `src/placement.rs`, registry naming in
 `src/registry.rs`, fleet-root reads in `src/root.rs`, the daemon in
-`src/daemon.rs`, the SlateDB service wrappers in `src/services.rs`, and
+`src/daemon.rs`, the SlateDB service wrappers in `src/services.rs`,
+the mirror service in `src/mirror/` (layout facts, the sync pass and
+WAL tail, copiers, prune, verify, restore), and
 the one-shots in `src/ops.rs`. One-shot subcommands take `--format
 json`; response types in `src/response.rs` generate
 `schema/cli.schema.json` (one `$defs` entry per command), and text
@@ -288,10 +308,6 @@ Depends on `slatedb` (`Admin` drives GC, coordinators, and workers) and
 
 ## Future work
 
-- **Mirroring**: continuously replicate a database into another bucket (same
-  or different cloud) via manifest-driven copy: copy each manifest's SST
-  diff, then conditional-PUT the manifest as the commit point, with a source
-  checkpoint and a `GcFilter` protecting not-yet-copied files from GC.
 - **Elastic workers**: size worker pools or per-database `count` from
   fleet-wide compaction backlog.
 - **Auto-discovery**: scan configured bucket prefixes for databases (a

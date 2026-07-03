@@ -58,6 +58,8 @@ jobs:
             args: >-
               --test fleet --test cluster --test config --test cli
               --test schemas --test schema_sync --test corpus
+          - name: mirror
+            args: --test mirror
           - name: chaos
             args: --test chaos
           - name: dst

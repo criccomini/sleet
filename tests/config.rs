@@ -150,3 +150,112 @@ fn scheduler_bounds_check_the_layered_result() {
     .to_string();
     assert!(msg.contains("min_compaction_sources"), "{msg}");
 }
+
+#[test]
+fn mirror_targets_parse_layer_and_travel_together() {
+    use sleet::config::{CopierKind, MirrorMode};
+    let fleet = config(
+        r#"
+        [database.mirror.targets.dr]
+        url = "s3://dr-bucket/mirrors"
+        source_prefix = "s3://user-data"
+        mode = "continuous"
+        copier = "builtin"
+        poll = "10s"
+        "#,
+    );
+    let resolved = fleet.resolve(None);
+    let dr = &resolved.mirror.targets["dr"];
+    assert_eq!(dr.url.as_deref(), Some("s3://dr-bucket/mirrors"));
+    assert_eq!(dr.source_prefix.as_deref(), Some("s3://user-data"));
+    assert_eq!(dr.mode, MirrorMode::Continuous);
+    assert_eq!(dr.poll, Duration::from_secs(10));
+    assert_eq!(dr.checkpoint_lifetime, Duration::from_secs(900), "default");
+
+    // The registry file opts out of dr, adds a periodic backup with
+    // retention, and repoints a replica with a bare url: the inherited
+    // source_prefix must NOT survive (url and source_prefix travel
+    // together).
+    let db = database(
+        &fleet,
+        r#"
+        [mirror.targets.dr]
+        disabled = true
+
+        [mirror.targets.backup]
+        url = "gs://backups/db1"
+        mode = "periodic"
+        interval = "24h"
+        copier = "external"
+
+        [mirror.targets.backup.retention]
+        keep = "30d"
+        "#,
+    );
+    let resolved = fleet.resolve(Some(&db));
+    assert!(resolved.mirror.targets["dr"].disabled);
+    // Non-travel fields still fall through on the disabled target.
+    assert_eq!(
+        resolved.mirror.targets["dr"].url.as_deref(),
+        Some("s3://dr-bucket/mirrors")
+    );
+    let backup = &resolved.mirror.targets["backup"];
+    assert_eq!(backup.mode, MirrorMode::Periodic);
+    assert_eq!(backup.copier, CopierKind::External);
+    assert_eq!(backup.interval, Duration::from_secs(24 * 3600));
+    assert_eq!(backup.keep, Some(Duration::from_secs(30 * 24 * 3600)));
+    assert_eq!(backup.source_prefix, None);
+
+    // A db layer that sets only url clears an inherited prefix.
+    let repointed = database(
+        &fleet,
+        "[mirror.targets.dr]\nurl = \"s3://elsewhere/db1\"\n",
+    );
+    let dr = &fleet.resolve(Some(&repointed)).mirror.targets["dr"];
+    assert_eq!(dr.url.as_deref(), Some("s3://elsewhere/db1"));
+    assert_eq!(
+        dr.source_prefix, None,
+        "url and source_prefix travel together"
+    );
+}
+
+#[test]
+fn mirror_target_validation_rejects_bad_fields() {
+    let msg = config_errors("[database.mirror.targets.dr]\nmode = \"continuous\"");
+    assert!(msg.contains("url is required"), "{msg}");
+
+    let msg = config_errors("[database.mirror.targets.dr]\nurl = \"ftp://nope/x\"");
+    assert!(msg.contains("scheme"), "{msg}");
+
+    let msg = config_errors("[database.mirror.targets.dr]\nurl = \"s3://ok/x\"\npoll = \"0s\"");
+    assert!(msg.contains("poll"), "{msg}");
+
+    let msg =
+        config_errors("[database.mirror.targets.dr]\nurl = \"s3://ok/x\"\ncopy_parallelism = 0");
+    assert!(msg.contains("copy_parallelism"), "{msg}");
+
+    let msg = config_errors(
+        "[database.mirror.targets.dr]\nurl = \"s3://ok/x\"\n[database.mirror.targets.dr.retention]\nkeep = \"0s\"",
+    );
+    assert!(msg.contains("retention.keep"), "{msg}");
+
+    // Target names key placement and the pin checkpoint: same charset
+    // as node ids.
+    let msg = config_errors("[database.mirror.targets.\"bad name\"]\nurl = \"s3://ok/x\"");
+    assert!(msg.contains("1-128 chars"), "{msg}");
+
+    // A disabled target needs no url.
+    config("[database.mirror.targets.dr]\ndisabled = true");
+}
+
+#[test]
+fn mirror_validation_checks_the_layered_result() {
+    // The fleet layer alone is valid (disabled); the db layer enables
+    // it without supplying a url anywhere: only the resolved
+    // combination is invalid.
+    let fleet = config("[database.mirror.targets.dr]\ndisabled = true");
+    let msg = sleet::config::parse_database(&fleet, "[mirror.targets.dr]\ndisabled = false")
+        .expect_err("enabled target without url")
+        .to_string();
+    assert!(msg.contains("url is required"), "{msg}");
+}

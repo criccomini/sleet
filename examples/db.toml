@@ -7,3 +7,17 @@ services = ["gc"]
 
 [gc.compacted]
 min_age = "30m"
+
+# Opt out of the fleet-wide target: per-field fall-through cannot
+# unset an inherited target, so disabled is an ordinary field.
+[mirror.targets.dr]
+disabled = true
+
+# An explicit second target: point-in-time backups with retention.
+[mirror.targets.backup]
+url = "gs://backups/db1"
+mode = "periodic"
+interval = "24h"
+
+[mirror.targets.backup.retention]
+keep = "30d"                    # restore points younger than this

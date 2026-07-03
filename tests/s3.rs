@@ -117,3 +117,124 @@ async fn s3_semantics_via_minio() {
     );
     assert!(state.warnings.is_empty(), "{:?}", state.warnings);
 }
+
+/// The mirror's commit protocol against real S3 semantics: a pass
+/// seeds a destination prefix with create-if-absent manifest commits,
+/// verify passes, a racing duplicate commit is harmless, and a forked
+/// destination manifest is detected as divergence.
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_mirror_pass_and_divergence_via_minio() {
+    use sleet::config::ResolvedMirrorTarget;
+    use sleet::mirror;
+    use sleet::services::DatabaseHandle;
+
+    let Ok(endpoint) = std::env::var("SLEET_S3_ENDPOINT") else {
+        eprintln!("note: SLEET_S3_ENDPOINT unset; skipping MinIO mirror test");
+        return;
+    };
+    let store = minio_store(&endpoint);
+    let run = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let src_path = format!("mirror-{run}/src");
+    let dst_path = format!("mirror-{run}/dst");
+    let source = DatabaseHandle::from_parts(
+        &format!("s3://sleet/{src_path}"),
+        store.clone(),
+        StorePath::from(src_path.clone()),
+    );
+    let dest = DatabaseHandle::from_parts(
+        &format!("s3://sleet/{dst_path}"),
+        store.clone(),
+        StorePath::from(dst_path.clone()),
+    );
+
+    // A real database in MinIO.
+    let writer = slatedb::Db::builder(source.path.clone(), source.store.clone())
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .unwrap();
+    for key in 0..64 {
+        writer
+            .put(format!("k-{key}").as_bytes(), vec![7u8; 1024].as_slice())
+            .await
+            .unwrap();
+    }
+    writer
+        .flush_with_options(slatedb::config::FlushOptions {
+            flush_type: slatedb::config::FlushType::MemTable,
+        })
+        .await
+        .unwrap();
+    writer.close().await.unwrap();
+
+    let settings = ResolvedMirrorTarget::default();
+    let outcome = mirror::sync_pass(&source, &dest, "dr", &settings, None)
+        .await
+        .unwrap();
+    assert!(outcome.committed);
+    // Converge the unpin manifest; the watermark reaches the head.
+    mirror::sync_pass(&source, &dest, "dr", &settings, None)
+        .await
+        .unwrap();
+    let src_head = source.admin.read_manifest(None).await.unwrap().unwrap();
+    let dst_head = dest.admin.read_manifest(None).await.unwrap().unwrap();
+    assert_eq!(src_head.id(), dst_head.id());
+    let verified = mirror::verify(&source, &dest, None).await.unwrap();
+    assert!(verified.ok(), "{:?}", verified.points);
+
+    // A forked destination: a real writer opens the target and commits
+    // its own manifests. However the fork's and source's manifest id
+    // ranges interleave, If-None-Match plus the byte comparison must
+    // call it divergence rather than mix the histories.
+    let fork = slatedb::Db::builder(dest.path.clone(), dest.store.clone())
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .unwrap();
+    for i in 0..6u8 {
+        fork.put(format!("fork-{i}").as_bytes(), b"x")
+            .await
+            .unwrap();
+        fork.flush_with_options(slatedb::config::FlushOptions {
+            flush_type: slatedb::config::FlushType::MemTable,
+        })
+        .await
+        .unwrap();
+    }
+    fork.close().await.unwrap();
+    let writer = slatedb::Db::builder(source.path.clone(), source.store.clone())
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .unwrap();
+    writer.put(b"more", b"data").await.unwrap();
+    writer
+        .flush_with_options(slatedb::config::FlushOptions {
+            flush_type: slatedb::config::FlushType::MemTable,
+        })
+        .await
+        .unwrap();
+    writer.close().await.unwrap();
+    let err = mirror::sync_pass(&source, &dest, "dr", &settings, None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, mirror::MirrorError::Diverged { .. }),
+        "{err:?}"
+    );
+}

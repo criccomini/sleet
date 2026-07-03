@@ -435,10 +435,10 @@ shutdown around the switch stays outside sleet (§2).
 
 ## Open questions
 
-1. Closure enumeration needs manifest decoding. Are 0.14.1's public
-   `VersionedManifest` accessors enough, or does sleet decode the
-   FlatBuffer and construct paths itself? The layout is frozen like a
-   wire format, so a corpus test would pin it either way.
+1. Resolved: 0.14.1's public `VersionedManifest` accessors cover the
+   closure (the root and segment trees, checkpoints, and the WAL
+   window), and sleet constructs object names itself; the name formats
+   are frozen in `src/mirror/layout.rs` and pinned by tests.
 2. Racing mirror tasks can briefly create two pin checkpoints; both
    expire, so this is waste, not a hazard. A create-if-name-absent
    checkpoint API upstream would remove it.
