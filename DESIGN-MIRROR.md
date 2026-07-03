@@ -179,11 +179,14 @@ mostly-idle databases stay cheap under fleet-wide targets (§9).
 ## 7. Retention and backups
 
 A target's committed manifests are its restore points. With a
-target's `retention` table set (§9), the pruner, in either mode, keeps
-the latest manifest, every manifest younger than `keep`, and any
-manifest a live checkpoint pins, and deletes the rest: the manifests,
-then data objects unreferenced by any kept manifest and older than
-`min_age`. Data-object deletion also holds back behind in-flight
+target's `retention` table set (§9), the pruner, in either mode,
+keeps two tiers: restore points (the latest manifest and every
+manifest younger than `keep`) and closure support (for each restore
+point, the manifests its live checkpoints pin). Support is one level,
+matching the closure (§3): support manifests are kept for their
+objects, and their own checkpoint entries may dangle. Everything else
+is deleted: the manifests, then data objects unreferenced by any kept
+manifest and older than `min_age`. Data-object deletion also holds back behind in-flight
 passes: the pruner reads the source's latest manifest, and while any
 live checkpoint named for the target exists, deletes only objects
 older than the oldest one's `create_time` less `min_age` (clock
@@ -207,12 +210,23 @@ create-if-absent finds the source's next id already taken. The pruner
 deletes without writing manifests. Once a target goes live (§11.5) it
 is an ordinary database and normal GC applies.
 
+Support is judged per restore point because deletion outruns expiry:
+delete a 90-day checkpoint on day 40 and newer manifests drop its
+entry, but a day-20 restore point (`keep = 30d`) still carries it,
+live until day 90. Judged against the latest list alone, prune would
+delete the pinned manifest, restore at the day-20 point could not
+build its closure, and byte-copy leaves no way to strip the dangling
+entry. Expired entries are harmless: they count nowhere.
+
 Restore points map to wall-clock time by the manifest's sequence
 tracker, so `--at` accepts a manifest id or a timestamp.
 
 `sleet mirror restore <root> <backup-url> <dest-url> --at <point>` is a
 one-shot pass with the chosen manifest as `L`, copying its closure to
-the destination and committing it. The destination must be empty;
+the destination and committing it. `--at` must name a restore point:
+a support manifest's own live entries may dangle, and restore fails
+rather than commit an incomplete closure. The destination must be
+empty;
 restore refuses anything else and never deletes, so rolling back in
 place means restoring to a fresh root and repointing clients. The
 destination is then an ordinary database at that point.
@@ -332,7 +346,7 @@ the heartbeat body like other services.
 
 Every commit already proves closure completeness by existence checks.
 `sleet mirror verify <root> <db> <target>` re-checks on demand: existence
-and size for every kept manifest's closure, and with `--deep`, a
+and size for every restore point's closure, and with `--deep`, a
 `DbReader` scan at a checkpoint that re-reads every block through its
 checksum. Sizes rather than ETags: multipart ETags do not survive
 cross-store copies.
