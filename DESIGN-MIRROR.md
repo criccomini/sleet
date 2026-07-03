@@ -153,11 +153,11 @@ write cadence that costs the source.
 ## 6. Modes
 
 - **`continuous`**: the pass plus the WAL tail, on a `poll` cadence
-  with idle backoff. RPO is one poll plus tail copy time. Nothing is
-  deleted at the target: superseded objects accumulate until the
-  target is opened live and its own GC reclaims them.
-- **`periodic`**: one pass every `interval`, no WAL tail; retention
-  pruning instead (§7). Each committed
+  with idle backoff. RPO is one poll plus tail copy time. Without
+  `retention` (§7) nothing is deleted at the target: superseded
+  objects accumulate until the target is opened live and its own GC
+  reclaims them.
+- **`periodic`**: one pass every `interval`, no WAL tail. Each committed
   manifest is a point-in-time cut. Scheduling is stateless: a pass runs
   when the target's latest manifest's `LastModified` is older than
   `interval`.
@@ -171,15 +171,26 @@ cycle copies only surviving SSTs. Either way, a caught-up mirror costs
 one manifest read per poll and holds no checkpoints (§4), so
 mostly-idle databases stay cheap under fleet-wide targets (§9).
 
-## 7. Backups and retention
+## 7. Retention and backups
 
-A periodic target's committed manifests are its restore points. With
-a target's `retention` table set (§9), the pruner keeps the latest
-manifest, every manifest younger than `keep`, and any manifest a live
-checkpoint pins, and deletes the rest: first advance
+A target's committed manifests are its restore points. With a
+target's `retention` table set (§9), the pruner, in either mode, keeps
+the latest manifest, every manifest younger than `keep`, and any
+manifest a live checkpoint pins, and deletes the rest: first advance
 the boundary past the pruned manifest ids (RFC-0026), then delete the
 manifests, then delete data objects unreferenced by any kept manifest
-and older than `min_age`. Unset retention keeps everything.
+and older than `min_age`. The WAL tail above the latest manifest is
+never pruned. Unset retention keeps everything. On a continuous
+target, a short `keep` bounds growth at roughly the source's active
+set plus one `keep` window of churn.
+
+Pruning is the only deletion that may run against a target. SlateDB's
+own GC cannot: it commits manifests (a CAS that strips expired
+checkpoints), which violates single-writer (§3), forks the target's
+history from the source's, and wedges the next pass, whose
+create-if-absent finds the source's next id already taken. The pruner
+deletes without writing manifests. Once a target goes live (§11.5) it
+is an ordinary database and normal GC applies.
 
 Restore points map to wall-clock time by the manifest's sequence
 tracker, so `--at` accepts a manifest id or a timestamp.
@@ -249,7 +260,7 @@ mode = "continuous"             # continuous | periodic
 copier = "builtin"              # builtin | rclone | external
 poll = "10s"                    # continuous: pass and tail cadence
 # interval = "24h"              # periodic: cadence between passes
-# min_age = "300s"              # periodic: prune deletion age floor
+# min_age = "300s"              # prune deletion age floor
 # checkpoint_lifetime = "15m"   # source pin checkpoint TTL
 # copy_parallelism = 8          # builtin: concurrent object copies
 ```
@@ -268,7 +279,7 @@ interval = "24h"
 refresh = "1m"
 lifetime = "1h"
 
-[mirror.targets.backup.retention]   # periodic mode (§7)
+[mirror.targets.backup.retention]   # restore-point retention (§7)
 keep = "30d"
 ```
 
