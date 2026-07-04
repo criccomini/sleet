@@ -138,12 +138,15 @@ jobs:
             | tar xz --strip-components=1 -C "$HOME/fizzbee"
       # The exhaustive runs peak at several GB of Go heap; swap plus a
       # low GOGC keep the 16 GB runner from OOM-killing the agent.
+      # The runner image already runs a 4G /swapfile; add more on the
+      # ephemeral disk under a different name.
       - name: Add swap for the exhaustive runs
         run: |
-          sudo fallocate -l 12G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          sudo fallocate -l 12G /mnt/mirror-swap
+          sudo chmod 600 /mnt/mirror-swap
+          sudo mkswap /mnt/mirror-swap
+          sudo swapon /mnt/mirror-swap
+          free -h
       - name: Model-check the mirror spec
         env:
           GOGC: "50"
