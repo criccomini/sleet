@@ -1,66 +1,320 @@
-# sleet
+# Sleet
 
-A fleet manager for [SlateDB](https://slatedb.io) databases. `sleet`
-runs their background services (garbage collection, compaction
-coordination, and compaction execution) outside the writer process,
-managing many databases from a small pool of nodes.
+Sleet runs background services for fleets of
+[SlateDB](https://slatedb.io) databases.
 
-Its only dependency is object storage. There is no etcd, no leader
-election, and no stored assignment state: a fleet is a directory tree
-under one object-store URL, nodes are stateless processes pointed at
-it, and each node decides what to run by rendezvous-hashing the live
-membership. When scheduling goes wrong, the worst case is two nodes
-briefly running the same service, which SlateDB's manifest CAS and
-epoch fencing make harmless. [DESIGN.md](DESIGN.md) has the details.
+Point a pool of Sleet nodes at one object-store root. Register the SlateDB
+database roots you want managed. The nodes heartbeat, read the registry, and
+split the work with rendezvous hashing. The fleet root is the only shared
+coordination state.
 
-**Status: early development.** The daemon, services, and CLI work
-against SlateDB 0.14; mirroring and auto-discovery are future work.
+Sleet handles:
 
-## Usage
+- SlateDB garbage collection
+- standalone compaction coordinators
+- distributed compaction workers
+- optional physical mirroring to another object-store root
 
-Pick a fleet root (any object-store URL), register a database, and
-start a node:
+Clients keep opening SlateDB databases directly. Sleet moves background work
+out of writer processes.
+
+## Why Sleet exists
+
+A deployment with many SlateDB databases should not need one dedicated
+background process per database. Sleet lets a small node pool run that work
+for the fleet.
+
+Sleet stores intent and liveness in object storage:
+
+```text
+<fleet-root>/
+  sleet.toml
+  dbs/<percent-encoded-database-url>.toml
+  nodes/<node-id>.<service-letters>.json
+```
+
+There is no assignment table. Each node computes the same placement from the
+same inputs: the database registry, resolved config, and live heartbeats. If
+two nodes run the same service during a stale view, SlateDB's manifest CAS,
+epochs, and `.compactions` claims decide what takes effect.
+
+## Status
+
+Sleet is a pre-1.0 Rust crate. The current design and compatibility rules are
+captured in:
+
+- [RFC 0001: Sleet fleet coordination](rfcs/0001-design.md)
+- [RFC 0002: Mirroring](rfcs/0002-mirroring.md)
+
+The older design notes remain in [DESIGN.md](DESIGN.md) and
+[DESIGN-MIRROR.md](DESIGN-MIRROR.md).
+
+## Quick start
+
+Build the binary:
 
 ```sh
-sleet register s3://ops/sleet/ s3://bucket/db
-sleet run s3://ops/sleet/ --node-id sleet-1
-sleet status s3://ops/sleet/
+cargo build --release
 ```
 
-Grow the fleet by starting more nodes with different ids; they find
-each other through the root. `--services` restricts what a node
-offers, so a heterogeneous fleet can point its large machines at
-compaction work alone. `status --compactions` adds compaction queue
-depth.
+Pick an object-store root for Sleet's own state:
 
-The fleet root holds everything:
-
-```
-<root>/
-  sleet.toml       # fleet-wide policy (optional)
-  dbs/<db>.toml    # one file per registered database
-  nodes/           # heartbeats, written by nodes
+```sh
+export SLEET_ROOT=s3://ops/sleet
 ```
 
-`sleet.toml` sets policy and per-database defaults; `dbs/<db>.toml`
-overrides fields for one database, and an empty file accepts the
-defaults. See [examples/sleet.toml](examples/sleet.toml) and
-[examples/db.toml](examples/db.toml); the field reference is
-[schema/config.schema.json](schema/config.schema.json). One-shot
-commands take `--format json`, with responses documented by
+Register a SlateDB database:
+
+```sh
+target/release/sleet register "$SLEET_ROOT" s3://app-data/db1
+```
+
+Start a node:
+
+```sh
+target/release/sleet run "$SLEET_ROOT" --node-id sleet-1
+```
+
+Check fleet state:
+
+```sh
+target/release/sleet status "$SLEET_ROOT"
+```
+
+The node offers all services by default:
+
+```text
+gc,compactor-coordinator,compaction-workers,mirror
+```
+
+Run specialized pools with `--services`:
+
+```sh
+target/release/sleet run "$SLEET_ROOT" \
+  --node-id worker-1 \
+  --services compaction-workers \
+  --max-compaction-jobs 16
+```
+
+## Registering databases
+
+The registry lives under `dbs/` in the fleet root. The file name is the
+canonical database URL, percent-encoded, with `.toml` appended. An empty file
+is valid and uses fleet defaults.
+
+The CLI writes registry files with create-only semantics:
+
+```sh
+sleet register s3://ops/sleet s3://app-data/db1
+```
+
+A per-database file can override fleet defaults:
+
+```toml
+services = ["gc", "compaction-workers"]
+
+[compaction-workers]
+count = 4
+```
+
+Set `services = []` to keep a database registered while running no services.
+Delete the registry file to unregister it.
+
+## Fleet config
+
+`sleet.toml` is optional. Add it when you want explicit timing, service
+selection, or database defaults:
+
+```toml
+[node]
+heartbeat_interval = "10s"
+heartbeat_timeout = "30s"
+config_poll = "1m"
+
+[database]
+services = ["gc", "compactor-coordinator", "compaction-workers"]
+
+[database.compaction-workers]
+count = 2
+```
+
+Config resolves per database in this order:
+
+1. built-in defaults
+2. `[database]` in `sleet.toml`
+3. the database file under `dbs/`
+
+Fields fall through independently. The generated schema is checked in at
+[schema/config.schema.json](schema/config.schema.json).
+
+## Mirroring
+
+Sleet can copy a database to another object-store root and commit manifests
+there. A mirror target stays readable at committed manifests, and Sleet is the
+only process that writes target manifests while mirroring is enabled.
+
+A fleet-wide target can map a source prefix into a destination prefix:
+
+```toml
+[database]
+services = ["gc", "compactor-coordinator", "compaction-workers", "mirror"]
+
+[database.mirror.targets.dr]
+url = "s3://dr-bucket/mirrors"
+source_prefix = "s3://app-data"
+mode = "continuous"
+copier = "builtin"
+poll = "10s"
+```
+
+Per-database files can opt out or add targets:
+
+```toml
+[mirror.targets.dr]
+disabled = true
+
+[mirror.targets.backup]
+url = "gs://backups/db1"
+mode = "periodic"
+interval = "24h"
+
+[mirror.targets.backup.retention]
+keep = "30d"
+```
+
+Mirror modes:
+
+| Mode | Use |
+| --- | --- |
+| `continuous` | disaster recovery, migration, read replica targets |
+| `periodic` | restore-point backups |
+| one-shot sync | operator-triggered copy of one target |
+
+Sleet supports builtin copies, rclone, and external bucket replication for
+data objects. Sleet always commits manifests itself.
+
+## CLI
+
+```text
+sleet <COMMAND>
+
+Commands:
+  run       Run a fleet node
+  status    Show fleet state and placement
+  register  Register a database
+  mirror    Run mirror operations
+```
+
+Useful status reads:
+
+```sh
+sleet status "$SLEET_ROOT" --compactions
+sleet status "$SLEET_ROOT" --mirrors
+sleet status "$SLEET_ROOT" --format json
+```
+
+Mirror one-shots:
+
+```sh
+sleet mirror sync "$SLEET_ROOT" s3://app-data/db1 backup
+sleet mirror verify "$SLEET_ROOT" s3://app-data/db1 backup
+sleet mirror restore "$SLEET_ROOT" gs://backups/db1 s3://restore/db1
+sleet mirror prefixes --format s3 "$SLEET_ROOT" s3://app-data/db1 dr
+```
+
+JSON responses are described by
 [schema/cli.schema.json](schema/cli.schema.json).
 
-## Developing
+## Operating model
+
+Sleet nodes are disposable. Start more nodes to add capacity. Stop nodes
+cleanly to delete their heartbeats. If a node dies, peers stop considering it
+live after `heartbeat_timeout`.
+
+Node-local flags:
+
+| Flag | Purpose |
+| --- | --- |
+| `--node-id` | unique identity inside the fleet |
+| `--services` | offered service list |
+| `--max-compaction-jobs` | databases compacting on one node |
+| `--max-mirror-jobs` | mirror jobs on one node |
+| `--rclone` | rclone binary used by rclone mirror targets |
+
+Nodes that offer a service must reach every database and destination that
+service may touch. Placement does not test credentials or network reachability.
+
+`sleet status` derives state from object storage. Nodes do not serve an API.
+
+## Safety model
+
+Sleet schedules work. SlateDB protects the data.
+
+Duplicate service execution can happen while nodes disagree about heartbeats
+or config. The outcomes remain bounded:
+
+- GC deletes are idempotent and checkpoint-aware.
+- Coordinators fence each other with `compactor_epoch`.
+- Workers claim `.compactions` jobs with CAS.
+- Mirrors commit manifests with create-if-absent.
+
+A missing owner delays work until the next poll. It does not change database
+state.
+
+## Documentation
+
+Operator docs live under [docs/](docs/):
+
+- [Getting started](docs/getting-started.md)
+- [Architecture](docs/architecture.md)
+- [Configuration](docs/configuration.md)
+- [Operations](docs/operations.md)
+- [Mirroring](docs/mirroring.md)
+- [CLI reference](docs/cli.md)
+
+Design records:
+
+- [RFC 0001: Sleet fleet coordination](rfcs/0001-design.md)
+- [RFC 0002: Mirroring](rfcs/0002-mirroring.md)
+
+Examples and schemas:
+
+- [examples/sleet.toml](examples/sleet.toml)
+- [examples/db.toml](examples/db.toml)
+- [schema/config.schema.json](schema/config.schema.json)
+- [schema/heartbeat.schema.json](schema/heartbeat.schema.json)
+- [schema/cli.schema.json](schema/cli.schema.json)
+
+## Development
+
+Run the test suite:
 
 ```sh
-cargo test    # unit, property, integration, system, chaos, DST, schema, snapshots
-cargo fmt && cargo clippy --all-targets
-fizz --experimental_no_state_returns specs/coordination.fizz
+cargo test
 ```
 
-The last command model-checks the coordination protocol; CI also
-replays the spec's action sequences against the real code with
-model-based testing (`tests/mbt`, gated on `SLEET_MBT`).
+Run formatting and lints before committing:
 
-The MinIO test connects to `SLEET_S3_ENDPOINT` and skips when it is
-unset; CI provides MinIO as a service container.
+```sh
+cargo fmt
+cargo clippy --all-targets
+```
+
+Update generated schemas after changing config, heartbeat, or response types:
+
+```sh
+UPDATE_SCHEMAS=1 cargo test --test schema_sync
+```
+
+Update CLI snapshots after intentional command output changes:
+
+```sh
+TRYCMD=overwrite cargo test --test cli
+```
+
+The MinIO-backed S3 test uses `SLEET_S3_ENDPOINT` and skips when the variable
+is unset. Model-based tests use `SLEET_MBT`.
+
+## License
+
+MIT
