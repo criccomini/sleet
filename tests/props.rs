@@ -482,3 +482,112 @@ proptest! {
         prop_assert!(result.is_ok(), "{}", result.unwrap_err());
     }
 }
+
+proptest! {
+    /// The frozen layout name formats are inverse to their parsers,
+    /// and never cross-parse as another directory's names.
+    #[test]
+    fn layout_names_roundtrip_and_never_cross_parse(
+        id in any::<u64>(),
+        ulid in "[0-9A-HJKMNP-TV-Z]{26}",
+    ) {
+        use sleet::mirror::layout;
+        let base = |rel: &str| rel.rsplit('/').next().unwrap().to_string();
+
+        let manifest = base(&layout::manifest_rel(id));
+        prop_assert_eq!(layout::parse_manifest_name(&manifest), Some(id));
+        prop_assert_eq!(layout::parse_wal_name(&manifest), None);
+        prop_assert_eq!(layout::parse_compacted_name(&manifest), None);
+
+        let wal = base(&layout::wal_rel(id));
+        prop_assert_eq!(layout::parse_wal_name(&wal), Some(id));
+        prop_assert_eq!(layout::parse_manifest_name(&wal), None);
+        // A WAL id is never 26 digits, so it cannot read as a ULID.
+        prop_assert_eq!(layout::parse_compacted_name(&wal), None);
+
+        let compacted = base(&layout::compacted_rel(&ulid));
+        prop_assert_eq!(layout::parse_compacted_name(&compacted), Some(ulid));
+        prop_assert_eq!(layout::parse_manifest_name(&compacted), None);
+        prop_assert_eq!(layout::parse_wal_name(&compacted), None);
+    }
+
+    /// `ManifestObjects::difference` and `extend` obey the set laws the
+    /// pass's diff-against-watermark subtraction relies on: the
+    /// difference is disjoint from the subtrahend, within the minuend,
+    /// and extending the subtrahend by it covers the minuend.
+    #[test]
+    fn manifest_objects_difference_is_a_set_difference(
+        a_compacted in prop::collection::btree_set("[0-9A-HJKMNP-TV-Z]{26}", 0..8),
+        b_compacted in prop::collection::btree_set("[0-9A-HJKMNP-TV-Z]{26}", 0..8),
+        a_wal in prop::collection::btree_set(any::<u32>(), 0..8),
+        b_wal in prop::collection::btree_set(any::<u32>(), 0..8),
+    ) {
+        use sleet::mirror::layout::ManifestObjects;
+        let a = ManifestObjects {
+            compacted: a_compacted,
+            wal: a_wal.iter().map(|&w| w as u64).collect(),
+        };
+        let mut b = ManifestObjects {
+            compacted: b_compacted,
+            wal: b_wal.iter().map(|&w| w as u64).collect(),
+        };
+        let d = a.difference(&b);
+        prop_assert!(d.compacted.is_disjoint(&b.compacted));
+        prop_assert!(d.wal.is_disjoint(&b.wal));
+        prop_assert!(d.compacted.is_subset(&a.compacted));
+        prop_assert!(d.wal.is_subset(&a.wal));
+        prop_assert_eq!(d.len(), d.compacted.len() + d.wal.len());
+        b.extend(&d);
+        prop_assert!(a.compacted.is_subset(&b.compacted));
+        prop_assert!(a.wal.is_subset(&b.wal));
+    }
+
+    /// `--at` parsing: manifest ids and RFC 3339 timestamps resolve to
+    /// their restore point, and non-timestamp text is refused.
+    #[test]
+    fn restore_points_parse_ids_and_timestamps(
+        id in any::<u64>(),
+        secs in 0i64..4_102_444_800,
+        garbage in "[a-z ]{1,20}",
+    ) {
+        use sleet::mirror::RestorePoint;
+        prop_assert!(matches!(
+            RestorePoint::parse(&id.to_string()),
+            Ok(RestorePoint::Manifest(parsed)) if parsed == id
+        ));
+        let ts = chrono::DateTime::from_timestamp(secs, 0).unwrap();
+        prop_assert!(matches!(
+            RestorePoint::parse(&ts.to_rfc3339()),
+            Ok(RestorePoint::Time(parsed)) if parsed == ts
+        ));
+        prop_assert!(RestorePoint::parse(&garbage).is_err());
+    }
+
+    /// Verify record names are injective per `(database, target)`:
+    /// distinct pairs never collide at the fleet root. Target names
+    /// carry no `.`, so the encoded database and the target split
+    /// unambiguously.
+    #[test]
+    fn verify_paths_are_injective(
+        db_a in url_strategy(),
+        db_b in url_strategy(),
+        target_a in "[a-z0-9_-]{1,12}",
+        target_b in "[a-z0-9_-]{1,12}",
+    ) {
+        use object_store::path::Path as StorePath;
+        use sleet::root::FleetRoot;
+        let root = FleetRoot::from_parts(
+            std::sync::Arc::new(object_store::memory::InMemory::new()),
+            StorePath::from("fleet"),
+            "memory:///f",
+        );
+        let path_a = root.verify_path(&db_a, &target_a);
+        let path_b = root.verify_path(&db_b, &target_b);
+        prop_assert!(path_a.as_ref().starts_with("fleet/verify/"));
+        if (&db_a, &target_a) != (&db_b, &target_b) {
+            prop_assert_ne!(path_a, path_b);
+        } else {
+            prop_assert_eq!(path_a, path_b);
+        }
+    }
+}
