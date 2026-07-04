@@ -57,28 +57,24 @@ Build the binary:
 cargo build --release
 ```
 
-Pick an object-store root for Sleet's own state:
-
-```sh
-export SLEET_ROOT=s3://ops/sleet
-```
+Use `s3://ops/sleet` as the fleet root in these examples.
 
 Register a SlateDB database:
 
 ```sh
-target/release/sleet register "$SLEET_ROOT" s3://app-data/db1
+target/release/sleet register s3://ops/sleet s3://app-data/db1
 ```
 
 Start a node:
 
 ```sh
-target/release/sleet run "$SLEET_ROOT" --node-id sleet-1
+target/release/sleet run s3://ops/sleet --node-id sleet-1
 ```
 
 Check fleet state:
 
 ```sh
-target/release/sleet status "$SLEET_ROOT"
+target/release/sleet status s3://ops/sleet
 ```
 
 The node offers all services by default:
@@ -90,7 +86,7 @@ gc,compactor-coordinator,compaction-workers,mirror
 Run specialized pools with `--services`:
 
 ```sh
-target/release/sleet run "$SLEET_ROOT" \
+target/release/sleet run s3://ops/sleet \
   --node-id worker-1 \
   --services compaction-workers \
   --max-compaction-jobs 16
@@ -208,18 +204,18 @@ Commands:
 Useful status reads:
 
 ```sh
-sleet status "$SLEET_ROOT" --compactions
-sleet status "$SLEET_ROOT" --mirrors
-sleet status "$SLEET_ROOT" --format json
+sleet status s3://ops/sleet --compactions
+sleet status s3://ops/sleet --mirrors
+sleet status s3://ops/sleet --format json
 ```
 
 Mirror one-shots:
 
 ```sh
-sleet mirror sync "$SLEET_ROOT" s3://app-data/db1 backup
-sleet mirror verify "$SLEET_ROOT" s3://app-data/db1 backup
-sleet mirror restore "$SLEET_ROOT" gs://backups/db1 s3://restore/db1
-sleet mirror prefixes --format s3 "$SLEET_ROOT" s3://app-data/db1 dr
+sleet mirror sync s3://ops/sleet s3://app-data/db1 backup
+sleet mirror verify s3://ops/sleet s3://app-data/db1 backup
+sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1
+sleet mirror prefixes --format s3 s3://ops/sleet s3://app-data/db1 dr
 ```
 
 JSON responses are described by
