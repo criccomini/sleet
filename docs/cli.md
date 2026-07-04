@@ -104,21 +104,6 @@ sleet mirror sync s3://ops/sleet s3://bucket/db backup
 
 Use `--rclone <PATH>` when the target uses `copier = "rclone"`.
 
-## `sleet mirror verify`
-
-```sh
-sleet mirror verify [OPTIONS] <ROOT> <DB> <TARGET>
-```
-
-Checks every restore point's closure at the mirror destination. The command exits nonzero if verification fails.
-
-```sh
-sleet mirror verify s3://ops/sleet s3://bucket/db backup
-sleet mirror verify s3://ops/sleet s3://bucket/db backup --deep
-```
-
-`--deep` also re-reads every closure object from both stores and compares bytes, catching same-size corruption the default existence-and-size check cannot. It reads every object once from each side, so cost scales with data size.
-
 ## `sleet mirror restore`
 
 ```sh

@@ -41,7 +41,6 @@ sleet run s3://ops/sleet/
   sleet.toml               # policy: defaults, timing
   dbs/<db>.toml            # registry: one file per database, overrides only
   nodes/<node>.<services>.json  # liveness + offered services in the name
-  verify/<db>.<target>.json     # mirror verify records (DESIGN-MIRROR §10)
 ```
 
 Each node heartbeats under `nodes/`, computes its assignments by
@@ -290,7 +289,7 @@ poll floors keep a million mostly-idle databases affordable.
 
 A single `sleet` crate with one binary: `sleet run <root>` is the
 long-running daemon; `status`, `register`, and the `mirror` family
-(`sync`, `verify`, `restore`, `prefixes`) are one-shots. Config types
+(`sync`, `restore`, `drill`, `prefixes`) are one-shots. Config types
 (`sleet.toml`, `dbs/*.toml`) live in `src/config.rs`
 (`schema/config.schema.json`); the heartbeat format lives in
 `src/heartbeat.rs` (`schema/heartbeat.schema.json`). The frozen
@@ -298,7 +297,7 @@ rendezvous hash lives in `src/placement.rs`, registry naming in
 `src/registry.rs`, fleet-root reads in `src/root.rs`, the daemon in
 `src/daemon.rs`, the SlateDB service wrappers in `src/services.rs`,
 the mirror service in `src/mirror/` (layout facts, the sync pass and
-WAL tail, copiers, prune, verify, restore), and
+WAL tail, copiers, prune, restore), and
 the one-shots in `src/ops.rs`. One-shot subcommands take `--format
 json`; response types in `src/response.rs` generate
 `schema/cli.schema.json` (one `$defs` entry per command), and text

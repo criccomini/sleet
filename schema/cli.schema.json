@@ -16,10 +16,6 @@
       "$ref": "#/$defs/MirrorSyncResponse"
     },
     {
-      "description": "`sleet mirror verify`.",
-      "$ref": "#/$defs/MirrorVerifyResponse"
-    },
-    {
       "description": "`sleet mirror restore`.",
       "$ref": "#/$defs/MirrorRestoreResponse"
     },
@@ -311,33 +307,6 @@
           "format": "uint64",
           "minimum": 0
         },
-        "verified_age": {
-          "description": "Age of the newest verify record for this `(database, target)`\nunder `verify/` at the fleet root; absent when no periodic\nverification has recorded an outcome.",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/HumanDuration"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "verify_ok": {
-          "description": "Whether the recorded verification passed.",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "verify_problems": {
-          "description": "Problems the recorded verification found.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
-        },
         "wal_behind": {
           "description": "WAL ids the destination is behind.",
           "type": [
@@ -423,48 +392,6 @@
         "bytes_copied",
         "pruned_manifests",
         "pruned_objects"
-      ]
-    },
-    "MirrorVerifyResponse": {
-      "title": "sleet mirror verify response",
-      "description": "The `sleet mirror verify` response: existence and size for every\nrestore point's closure.",
-      "type": "object",
-      "properties": {
-        "database": {
-          "description": "The source database's canonical URL.",
-          "type": "string"
-        },
-        "deep": {
-          "description": "Whether bytes were compared (`--deep`), not just sizes.",
-          "type": "boolean"
-        },
-        "destination": {
-          "description": "The destination root.",
-          "type": "string"
-        },
-        "ok": {
-          "description": "Whether every restore point verified.",
-          "type": "boolean"
-        },
-        "points": {
-          "description": "Every restore point checked, ascending by manifest id.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/RestorePointStatus"
-          }
-        },
-        "target": {
-          "description": "The target's name.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "database",
-        "target",
-        "destination",
-        "deep",
-        "ok",
-        "points"
       ]
     },
     "NodeStatus": {
@@ -576,35 +503,6 @@
         "url",
         "file",
         "created"
-      ]
-    },
-    "RestorePointStatus": {
-      "description": "One verified restore point.",
-      "type": "object",
-      "properties": {
-        "manifest_id": {
-          "description": "The restore point's manifest id.",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
-        "objects": {
-          "description": "Objects checked in its closure.",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
-        "problems": {
-          "description": "What is missing or mismatched; empty means the point verifies.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "manifest_id",
-        "objects"
       ]
     },
     "Service": {

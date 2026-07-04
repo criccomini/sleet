@@ -1,7 +1,7 @@
 //! Mirror integration tests against real SlateDB databases: the sync
 //! pass invariants (DESIGN-MIRROR §3-4), the WAL tail, retention and
-//! both prune guards (§7), copiers (§8), verify (§10), restore, and
-//! failover by opening the target as an ordinary database (§3).
+//! both prune guards (§7), copiers (§8), restore, and failover by
+//! opening the target as an ordinary database (§3).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +10,7 @@ use object_store::ObjectStoreExt;
 use object_store::memory::InMemory;
 use object_store::path::Path as StorePath;
 use sleet::config::{CopierKind, ResolvedMirrorTarget};
-use sleet::mirror::{self, Depth, RestorePoint, layout, pass};
+use sleet::mirror::{self, RestorePoint, layout, pass};
 use sleet::root::Clock;
 use sleet::services::DatabaseHandle;
 use sleet::testing::{Op, TestClock, TestStore};
@@ -108,6 +108,62 @@ async fn assert_mirrored(source: &DatabaseHandle, dest: &DatabaseHandle) {
             .get(&layout::object_path(dest, &rel))
             .await
             .unwrap_or_else(|e| panic!("{rel} missing at target: {e}"));
+    }
+}
+
+/// The completeness invariant (§3) as a test oracle: the destination's
+/// latest manifest must hold its own objects and, for every live
+/// checkpoint entry whose checkpoint still exists at the source, the
+/// pinned manifest and its objects. Entries of checkpoints retired at
+/// the source may dangle (§3). Returns the first problem found.
+async fn closure_problems(source: &DatabaseHandle, dest: &DatabaseHandle) -> Option<String> {
+    let head = dest
+        .admin
+        .read_manifest(None)
+        .await
+        .unwrap()
+        .expect("destination head");
+    let src_cps: std::collections::BTreeSet<uuid::Uuid> = source
+        .admin
+        .read_manifest(None)
+        .await
+        .unwrap()
+        .expect("source head")
+        .checkpoints()
+        .iter()
+        .map(|cp| cp.id)
+        .collect();
+    let now = chrono::Utc::now();
+    let mut members = vec![head.id()];
+    for cp in head.checkpoints() {
+        if layout::checkpoint_live(cp, now)
+            && src_cps.contains(&cp.id)
+            && cp.manifest_id != head.id()
+        {
+            members.push(cp.manifest_id);
+        }
+    }
+    for id in members {
+        let Some(manifest) = dest.admin.read_manifest(Some(id)).await.unwrap() else {
+            return Some(format!("pinned manifest {id} missing at the destination"));
+        };
+        for rel in layout::manifest_objects(&manifest).rel_names() {
+            if dest
+                .store
+                .head(&layout::object_path(dest, &rel))
+                .await
+                .is_err()
+            {
+                return Some(format!("{rel} missing at the destination (member {id})"));
+            }
+        }
+    }
+    None
+}
+
+async fn assert_closure_complete(source: &DatabaseHandle, dest: &DatabaseHandle) {
+    if let Some(problem) = closure_problems(source, dest).await {
+        panic!("destination closure incomplete: {problem}");
     }
 }
 
@@ -550,110 +606,6 @@ async fn prune_honors_the_pin_floor() {
     );
 }
 
-/// §10: verify passes on an intact target, then catches a data-object
-/// deletion, a size mismatch, and (at Depth::Bytes only) a same-size
-/// corruption.
-#[tokio::test(flavor = "multi_thread")]
-async fn verify_catches_missing_and_mismatched_objects() {
-    let source = handle(Arc::new(InMemory::new()), "memory:///src", "src");
-    let dest = handle(Arc::new(InMemory::new()), "memory:///dst", "dst");
-    seed(&source, 2).await;
-    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
-        .await
-        .unwrap();
-
-    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
-        .await
-        .unwrap();
-    assert!(outcome.ok(), "{:?}", outcome.points);
-
-    // Delete one referenced SST behind the mirror's back.
-    let head = dest.admin.read_manifest(None).await.unwrap().unwrap();
-    let victim = layout::manifest_objects(&head)
-        .compacted
-        .iter()
-        .next()
-        .cloned()
-        .expect("head references an SST");
-    let victim_rel = layout::compacted_rel(&victim);
-    dest.store
-        .delete(&layout::object_path(&dest, &victim_rel))
-        .await
-        .unwrap();
-    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
-        .await
-        .unwrap();
-    assert!(!outcome.ok());
-    assert!(
-        outcome
-            .points
-            .iter()
-            .flat_map(|p| &p.problems)
-            .any(|p| p.contains(&victim_rel) && p.contains("missing")),
-        "{:?}",
-        outcome.points
-    );
-
-    // Restore it with the wrong bytes: size mismatch.
-    dest.store
-        .put(&layout::object_path(&dest, &victim_rel), "short".into())
-        .await
-        .unwrap();
-    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
-        .await
-        .unwrap();
-    assert!(!outcome.ok());
-    assert!(
-        outcome
-            .points
-            .iter()
-            .flat_map(|p| &p.problems)
-            .any(|p| p.contains("size mismatch")),
-        "{:?}",
-        outcome.points
-    );
-
-    // Same-size corruption: flip one byte. Sizes cannot see it; bytes
-    // report the offset.
-    let bytes = source
-        .store
-        .get(&layout::object_path(&source, &victim_rel))
-        .await
-        .unwrap()
-        .bytes()
-        .await
-        .unwrap();
-    let mut corrupt = bytes.to_vec();
-    let mid = corrupt.len() / 2;
-    corrupt[mid] ^= 0xff;
-    dest.store
-        .put(&layout::object_path(&dest, &victim_rel), corrupt.into())
-        .await
-        .unwrap();
-    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
-        .await
-        .unwrap();
-    assert!(
-        outcome.ok(),
-        "sizes miss the corruption: {:?}",
-        outcome.points
-    );
-    let outcome = mirror::verify(&source, &dest, None, Depth::Bytes)
-        .await
-        .unwrap();
-    assert!(!outcome.ok());
-    assert!(
-        outcome
-            .points
-            .iter()
-            .flat_map(|p| &p.problems)
-            .any(|p| p.contains(&victim_rel)
-                && p.contains(&format!("content mismatch at byte {mid}"))),
-        "{:?}",
-        outcome.points
-    );
-}
-
 /// §7: restore copies a chosen restore point's closure into an empty
 /// root, which then opens as an ordinary database at that point;
 /// non-empty destinations are refused.
@@ -1002,10 +954,7 @@ async fn faulted_passes_converge_after_healing() {
             .unwrap();
     }
     assert_mirrored(&source, &dest).await;
-    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
-        .await
-        .unwrap();
-    assert!(outcome.ok(), "{:?}", outcome.points);
+    assert_closure_complete(&source, &dest).await;
     // Expired or deleted pins only; a healed fleet leaves none live
     // past their lifetime.
     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -1039,7 +988,7 @@ async fn continuous_mode_tracks_the_source() {
         let token = token.clone();
         async move {
             let jobs = Arc::new(tokio::sync::Semaphore::new(1));
-            mirror::run_mirror(&source, &dest, &target, jobs, None, None, token).await
+            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
         }
     });
 
@@ -1095,7 +1044,7 @@ async fn periodic_mode_cuts_on_the_interval() {
         let token = token.clone();
         async move {
             let jobs = Arc::new(tokio::sync::Semaphore::new(1));
-            mirror::run_mirror(&source, &dest, &target, jobs, None, None, token).await
+            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
         }
     });
 
@@ -1112,103 +1061,8 @@ async fn periodic_mode_cuts_on_the_interval() {
     token.cancel();
     task.await.unwrap().unwrap();
 
-    // The cut is a valid point: its closure verifies.
-    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
-        .await
-        .unwrap();
-    assert!(outcome.ok(), "{:?}", outcome.points);
-}
-
-/// §10: with `verify_interval` set and a reporter, the mirror task
-/// re-verifies the target on the cadence and records the outcome at
-/// the fleet root; a deletion behind the mirror's back flips the
-/// record to failing.
-#[tokio::test(flavor = "multi_thread")]
-async fn periodic_verify_records_outcomes_at_the_fleet_root() {
-    use sleet::mirror::{VerifyRecord, VerifyReporter};
-    use sleet::root::FleetRoot;
-    use tokio_util::sync::CancellationToken;
-    let source_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
-    let dest_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
-    let source = handle(source_store.clone(), "memory:///src", "src");
-    seed(&source, 2).await;
-    let root = FleetRoot::from_parts(
-        Arc::new(InMemory::new()),
-        StorePath::from("fleet"),
-        "memory:///fleet",
-    );
-
-    let target = mirror::AppliedTarget {
-        name: "dr".into(),
-        destination: "memory:///dst".into(),
-        settings: ResolvedMirrorTarget {
-            poll: Duration::from_millis(50),
-            verify_interval: Some(Duration::from_millis(100)),
-            ..target_settings()
-        },
-    };
-    let token = CancellationToken::new();
-    let task = tokio::spawn({
-        let source = handle(source_store.clone(), "memory:///src", "src");
-        let dest = handle(dest_store.clone(), "memory:///dst", "dst");
-        let target = target.clone();
-        let token = token.clone();
-        let reporter = VerifyReporter {
-            root: root.clone(),
-            node_id: "n1".into(),
-        };
-        async move {
-            let jobs = Arc::new(tokio::sync::Semaphore::new(1));
-            mirror::run_mirror(&source, &dest, &target, jobs, None, Some(&reporter), token).await
-        }
-    });
-
-    // A passing record appears once the mirror converges.
-    let record_path = root.verify_path("memory:///src", "dr");
-    let read_record = || async {
-        let bytes = root
-            .store()
-            .get(&record_path)
-            .await
-            .ok()?
-            .bytes()
-            .await
-            .ok()?;
-        serde_json::from_slice::<VerifyRecord>(&bytes).ok()
-    };
-    let record = poll_until("passing verify record", || async {
-        read_record().await.filter(|r| r.ok)
-    })
-    .await;
-    assert_eq!(record.node_id, "n1");
-    assert_eq!(record.database, "memory:///src");
-    assert_eq!(record.target, "dr");
-    assert_eq!(record.destination, "memory:///dst");
-    assert!(record.points >= 1 && record.objects >= 1);
-    assert_eq!(record.problems, 0);
-
-    // Delete a referenced SST behind the mirror's back: the caught-up
-    // pass never re-copies it, and the next verification records the
-    // break.
-    let dest = handle(dest_store.clone(), "memory:///dst", "dst");
-    let head = dest.admin.read_manifest(None).await.unwrap().unwrap();
-    let victim = layout::manifest_objects(&head)
-        .compacted
-        .iter()
-        .next()
-        .cloned()
-        .expect("head references an SST");
-    dest.store
-        .delete(&layout::object_path(&dest, &layout::compacted_rel(&victim)))
-        .await
-        .unwrap();
-    poll_until("failing verify record", || async {
-        read_record().await.filter(|r| !r.ok && r.problems > 0)
-    })
-    .await;
-
-    token.cancel();
-    task.await.unwrap().unwrap();
+    // The cut is a valid point: its closure is complete.
+    assert_closure_complete(&source, &dest).await;
 }
 
 /// §8: the rclone copier drives `rclone copy --files-from` for the
@@ -1273,16 +1127,13 @@ async fn rclone_copier_moves_data_objects() {
     .await
     .unwrap();
     assert_mirrored(&source, &dest).await;
-    let verified = mirror::verify(&source, &dest, None, Depth::Bytes)
-        .await
-        .unwrap();
-    assert!(verified.ok(), "{:?}", verified.points);
+    assert_closure_complete(&source, &dest).await;
 }
 
 /// The whole stack over a file:// fleet root: a daemon node owns the
 /// (database, mirror, target) assignment, its heartbeat carries the
 /// mirror summary, the destination converges, and the ops one-shots
-/// (status --mirrors, verify, sync) agree.
+/// (status --mirrors, sync) agree.
 #[tokio::test(flavor = "multi_thread")]
 async fn daemon_mirrors_a_registered_database() {
     use sleet::daemon::{self, NodeOptions};
@@ -1317,8 +1168,7 @@ async fn daemon_mirrors_a_registered_database() {
         .put(
             &root.database_path(&registry::canonicalize_url(&db_url).unwrap()),
             format!(
-                "[mirror.targets.dr]\nurl = \"{dest_url}\"\nmode = \"continuous\"\npoll = \"250ms\"\n\
-                 verify_interval = \"500ms\"\n"
+                "[mirror.targets.dr]\nurl = \"{dest_url}\"\nmode = \"continuous\"\npoll = \"250ms\"\n"
             )
             .into(),
         )
@@ -1370,21 +1220,8 @@ async fn daemon_mirrors_a_registered_database() {
     })
     .await;
 
-    // Verify agrees, through the ops layer.
-    let verify = ops::mirror_verify(&root, &db_url, "dr", Depth::Sizes)
-        .await
-        .unwrap();
-    assert!(verify.ok, "{:?}", verify.points);
-
-    // The daemon's periodic verification records an outcome and
-    // status surfaces it.
-    poll_until("verify record in status", || async {
-        let status = ops::status(&root, false, true).await.unwrap();
-        let m = status.mirrors.first()?;
-        (m.verify_ok == Some(true) && m.verified_age.is_some() && m.verify_problems == Some(0))
-            .then_some(())
-    })
-    .await;
+    // The converged destination's closure is complete.
+    assert_closure_complete(&source, &dest).await;
 
     // One-shot sync on a caught-up pair is a clean no-op.
     shutdown.cancel();
@@ -1397,9 +1234,16 @@ async fn daemon_mirrors_a_registered_database() {
         .await
         .unwrap_err();
     assert!(matches!(err, ops::OpsError::NoSuchTarget { .. }));
-    let err = ops::mirror_verify(&root, "file:///not/registered", "dr", Depth::Sizes)
-        .await
-        .unwrap_err();
+    let err = ops::mirror_drill(
+        &root,
+        "file:///not/registered",
+        "dr",
+        RestorePoint::Latest,
+        None,
+        false,
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(err, ops::OpsError::NotRegistered { .. }));
 }
 
@@ -1574,7 +1418,7 @@ async fn caught_up_mirror_costs_one_list_and_one_probe_per_wakeup() {
         let token = token.clone();
         async move {
             let jobs = Arc::new(tokio::sync::Semaphore::new(1));
-            mirror::run_mirror(&source, &dest, &target, jobs, None, None, token).await
+            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
         }
     });
 
@@ -1824,11 +1668,6 @@ async fn soak_mirror_races_live_compaction_and_gc() {
         })
         .await;
     }
-    let verify = ops::mirror_verify(&root, &db_url, "dr", Depth::Bytes)
-        .await
-        .unwrap();
-    assert!(verify.ok, "{:#?}", verify.points);
-
     shutdown.cancel();
     node.await.unwrap().unwrap();
 
@@ -2255,10 +2094,7 @@ async fn two_targets_run_and_disable_stops_one() {
     let backup = DatabaseHandle::open(&backup_url).unwrap();
     let frozen = backup.admin.read_manifest(None).await.unwrap().unwrap();
     assert_eq!(frozen.id(), backup_head_at_disable, "left at the watermark");
-    let verify = mirror::verify(&source, &backup, None, Depth::Sizes)
-        .await
-        .unwrap();
-    assert!(verify.ok(), "{:?}", verify.points);
+    assert_closure_complete(&source, &backup).await;
 }
 
 /// A broken mirror target must not hurt anything else: its task backs
@@ -2353,10 +2189,7 @@ async fn broken_target_backs_off_without_hurting_others() {
     // And the healthy database's other services never wobbled: its
     // destination verifies while the fleet stays live.
     let good_dest = DatabaseHandle::open(&good_dst).unwrap();
-    let verify = mirror::verify(&good, &good_dest, None, Depth::Sizes)
-        .await
-        .unwrap();
-    assert!(verify.ok(), "{:?}", verify.points);
+    assert_closure_complete(&good, &good_dest).await;
 
     shutdown.cancel();
     node.await.unwrap().unwrap();
@@ -2389,7 +2222,7 @@ async fn mirror_jobs_semaphore_gates_passes() {
         let target = target.clone();
         let jobs = jobs.clone();
         let token = token.clone();
-        async move { mirror::run_mirror(&source, &dest, &target, jobs, None, None, token).await }
+        async move { mirror::run_mirror(&source, &dest, &target, jobs, None, token).await }
     });
 
     tokio::time::sleep(Duration::from_millis(600)).await;
@@ -2519,63 +2352,17 @@ async fn external_copier_backfills_incrementally() {
         .await
         .unwrap();
     assert_mirrored(&source, &dest).await;
-    let verified = mirror::verify(&source, &dest, None, Depth::Bytes)
-        .await
-        .unwrap();
-    assert!(verified.ok(), "{:?}", verified.points);
-}
-
-/// §10: with retention set, verify judges only the keep window's
-/// restore points (plus the latest), not every manifest ever.
-#[tokio::test(flavor = "multi_thread")]
-async fn verify_scopes_restore_points_to_the_keep_window() {
-    let source = handle(Arc::new(InMemory::new()), "memory:///src", "src");
-    let dest = handle(Arc::new(InMemory::new()), "memory:///dst", "dst");
-    seed(&source, 1).await;
-    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
-        .await
-        .unwrap();
-    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
-        .await
-        .unwrap();
-    // Age the first epoch's manifests past a small keep.
-    tokio::time::sleep(Duration::from_millis(1200)).await;
-    seed(&source, 1).await;
-    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
-        .await
-        .unwrap();
-    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
-        .await
-        .unwrap();
-
-    let all = mirror::verify(&source, &dest, None, Depth::Sizes)
-        .await
-        .unwrap();
-    let windowed = mirror::verify(
-        &source,
-        &dest,
-        Some(Duration::from_millis(1000)),
-        Depth::Sizes,
-    )
-    .await
-    .unwrap();
-    assert!(all.ok() && windowed.ok());
-    assert!(
-        windowed.points.len() < all.points.len(),
-        "keep window must narrow the judged points: {} vs {}",
-        windowed.points.len(),
-        all.points.len()
-    );
+    assert_closure_complete(&source, &dest).await;
 }
 
 /// Regression, found by the stateful property test (the minimal
 /// schedule was Checkpoint, Checkpoint, DropCheckpoint): a support
 /// manifest immutably carries a deleted checkpoint's entry whose
-/// pinned manifest was never promised to the target. Verify must not
-/// flag that sanctioned dangle, and must still flag a missing pinned
-/// manifest for a checkpoint that is alive at the source.
+/// pinned manifest was never promised to the target. The completeness
+/// oracle must not flag that sanctioned dangle, and must still flag a
+/// missing pinned manifest for a checkpoint alive at the source.
 #[tokio::test(flavor = "multi_thread")]
-async fn verify_skips_source_retired_checkpoint_dangles() {
+async fn closure_oracle_skips_source_retired_checkpoint_dangles() {
     let source = handle(Arc::new(InMemory::new()), "memory:///src", "src");
     let dest = handle(Arc::new(InMemory::new()), "memory:///dst", "dst");
     seed(&source, 1).await;
@@ -2604,17 +2391,11 @@ async fn verify_skips_source_retired_checkpoint_dangles() {
         .await
         .unwrap();
 
-    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
-        .await
-        .unwrap();
-    assert!(
-        outcome.ok(),
-        "sanctioned dangle flagged: {:#?}",
-        outcome.points
-    );
+    let problem = closure_problems(&source, &dest).await;
+    assert!(problem.is_none(), "sanctioned dangle flagged: {problem:?}");
 
     // The still-live checkpoint's support is a different story: losing
-    // it is corruption, and verify must say so.
+    // it is corruption, and the oracle must say so.
     dest.store
         .delete(&layout::object_path(
             &dest,
@@ -2622,11 +2403,8 @@ async fn verify_skips_source_retired_checkpoint_dangles() {
         ))
         .await
         .unwrap();
-    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
-        .await
-        .unwrap();
     assert!(
-        !outcome.ok(),
-        "a live checkpoint's missing support must fail verification"
+        closure_problems(&source, &dest).await.is_some(),
+        "a live checkpoint's missing support must be flagged"
     );
 }

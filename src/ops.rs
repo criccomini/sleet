@@ -14,8 +14,8 @@ use crate::placement;
 use crate::registry;
 use crate::response::{
     DatabaseStatus, MirrorDrillResponse, MirrorPrefixesResponse, MirrorRestoreResponse,
-    MirrorStatus, MirrorSyncResponse, MirrorVerifyResponse, NodeStatus, PrefixFormat, QueueStatus,
-    RegisterResponse, RestorePointStatus, ServicePlacement, StatusResponse,
+    MirrorStatus, MirrorSyncResponse, NodeStatus, PrefixFormat, QueueStatus, RegisterResponse,
+    ServicePlacement, StatusResponse,
 };
 use crate::root::{ConfigPoller, FleetRoot, HeartbeatEntry, node_view};
 use crate::services::{self, DatabaseHandle};
@@ -130,7 +130,7 @@ pub async fn status(
                             .entry(target.destination.clone())
                             .or_default()
                             .push(format!("{url} target {}", target.name));
-                        mirror_statuses.push(mirror_status(root, url, &target).await);
+                        mirror_statuses.push(mirror_status(url, &target).await);
                     }
                 }
                 continue;
@@ -195,9 +195,9 @@ pub async fn status(
 }
 
 /// One `(database, target)`'s lag, from the source and destination
-/// heads, plus the last recorded periodic verification. Read failures
-/// land in the `error` field rather than failing the whole status.
-async fn mirror_status(root: &FleetRoot, url: &str, target: &AppliedTarget) -> MirrorStatus {
+/// heads. Read failures land in the `error` field rather than failing
+/// the whole status.
+async fn mirror_status(url: &str, target: &AppliedTarget) -> MirrorStatus {
     let mut status = MirrorStatus {
         database: url.to_string(),
         target: target.name.clone(),
@@ -207,42 +207,13 @@ async fn mirror_status(root: &FleetRoot, url: &str, target: &AppliedTarget) -> M
         manifests_behind: None,
         wal_behind: None,
         seconds_behind: None,
-        verified_age: None,
-        verify_ok: None,
-        verify_problems: None,
         error: None,
     };
     match mirror_lag(url, target, &mut status).await {
         Ok(()) => {}
         Err(e) => status.error = Some(e.to_string()),
     }
-    if let Some(record) = verify_record(root, url, &target.name).await {
-        let age = (chrono::Utc::now() - record.verified_at)
-            .to_std()
-            .unwrap_or_default();
-        status.verified_age = Some(std::time::Duration::from_secs(age.as_secs()).into());
-        status.verify_ok = Some(record.ok);
-        status.verify_problems = Some(record.problems);
-    }
     status
-}
-
-/// The verify record for one `(database, target)`, if one exists and
-/// parses.
-async fn verify_record(
-    root: &FleetRoot,
-    url: &str,
-    target_name: &str,
-) -> Option<mirror::VerifyRecord> {
-    let bytes = root
-        .store()
-        .get(&root.verify_path(url, target_name))
-        .await
-        .ok()?
-        .bytes()
-        .await
-        .ok()?;
-    serde_json::from_slice(&bytes).ok()
 }
 
 async fn mirror_lag(
@@ -384,36 +355,6 @@ pub async fn mirror_sync(
         bytes_copied: outcome.copied.bytes,
         pruned_manifests: pruned.deleted_manifests,
         pruned_objects: pruned.deleted_objects,
-    })
-}
-
-/// `sleet mirror verify`: existence and size for every restore point's
-/// closure at the destination; `Depth::Bytes` also compares content.
-pub async fn mirror_verify(
-    root: &FleetRoot,
-    db_url: &str,
-    target_name: &str,
-    depth: mirror::Depth,
-) -> Result<MirrorVerifyResponse, OpsError> {
-    let (canonical, target) = applied_target(root, db_url, target_name).await?;
-    let source = DatabaseHandle::open(&canonical)?;
-    let dest = DatabaseHandle::open(&target.destination)?;
-    let outcome = mirror::verify(&source, &dest, target.settings.keep, depth).await?;
-    Ok(MirrorVerifyResponse {
-        database: canonical,
-        target: target.name,
-        destination: target.destination,
-        deep: depth == mirror::Depth::Bytes,
-        ok: outcome.ok(),
-        points: outcome
-            .points
-            .into_iter()
-            .map(|p| RestorePointStatus {
-                manifest_id: p.manifest_id,
-                objects: p.objects,
-                problems: p.problems,
-            })
-            .collect(),
     })
 }
 

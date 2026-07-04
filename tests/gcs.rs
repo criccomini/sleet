@@ -16,6 +16,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use object_store::ObjectStoreExt;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::path::Path as StorePath;
 use sleet::config::ResolvedMirrorTarget;
@@ -127,6 +128,57 @@ fn run_id() -> u128 {
         .as_nanos()
 }
 
+/// The completeness oracle: the destination's latest manifest holds
+/// its own objects and, for every live checkpoint entry whose
+/// checkpoint still exists at the source, the pinned manifest and its
+/// objects (DESIGN-MIRROR §3).
+async fn assert_closure_complete(source: &DatabaseHandle, dest: &DatabaseHandle) {
+    use sleet::mirror::layout;
+    let head = dest
+        .admin
+        .read_manifest(None)
+        .await
+        .unwrap()
+        .expect("destination head");
+    let src_cps: std::collections::BTreeSet<uuid::Uuid> = source
+        .admin
+        .read_manifest(None)
+        .await
+        .unwrap()
+        .expect("source head")
+        .checkpoints()
+        .iter()
+        .map(|cp| cp.id)
+        .collect();
+    let now = chrono::Utc::now();
+    let mut members = vec![head.id()];
+    for cp in head.checkpoints() {
+        if layout::checkpoint_live(cp, now)
+            && src_cps.contains(&cp.id)
+            && cp.manifest_id != head.id()
+        {
+            members.push(cp.manifest_id);
+        }
+    }
+    for id in members {
+        let manifest = dest
+            .admin
+            .read_manifest(Some(id))
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("pinned manifest {id} missing at the destination"));
+        for rel in layout::manifest_objects(&manifest).rel_names() {
+            assert!(
+                dest.store
+                    .head(&layout::object_path(dest, &rel))
+                    .await
+                    .is_ok(),
+                "{rel} missing at the destination (member {id})"
+            );
+        }
+    }
+}
+
 /// The mirror's commit protocol against GCS semantics: a pass seeds a
 /// destination with create-if-absent commits (generation match zero),
 /// byte-verifies, and a forked destination is detected as divergence.
@@ -165,10 +217,7 @@ async fn gcs_mirror_pass_and_divergence() {
     let src_head = source.admin.read_manifest(None).await.unwrap().unwrap();
     let dst_head = dest.admin.read_manifest(None).await.unwrap().unwrap();
     assert_eq!(src_head.id(), dst_head.id());
-    let verified = mirror::verify(&source, &dest, None, mirror::Depth::Bytes)
-        .await
-        .unwrap();
-    assert!(verified.ok(), "{:?}", verified.points);
+    assert_closure_complete(&source, &dest).await;
 
     // A forked destination: a real writer opens the target and commits
     // its own manifests; generation-match plus the byte comparison must
@@ -253,10 +302,7 @@ async fn cross_store_mirror_s3_to_gcs() {
     mirror::sync_pass(&source, &dest, "dr", &settings, None)
         .await
         .unwrap();
-    let verified = mirror::verify(&source, &dest, None, mirror::Depth::Bytes)
-        .await
-        .unwrap();
-    assert!(verified.ok(), "{:?}", verified.points);
+    assert_closure_complete(&source, &dest).await;
 
     // Drill back out of the GCS backup into a fresh S3 root: restore,
     // open, and scan every key.

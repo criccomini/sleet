@@ -291,6 +291,47 @@ fn mirror_op() -> impl Strategy<Value = MirrorOp> {
     ]
 }
 
+/// The completeness oracle (DESIGN-MIRROR §3): the destination's
+/// latest manifest holds its own objects and, for every live
+/// checkpoint entry whose checkpoint still exists at the source, the
+/// pinned manifest and its objects. Returns the first problem found.
+async fn closure_problems(
+    source: &sleet::services::DatabaseHandle,
+    dest: &sleet::services::DatabaseHandle,
+) -> Option<String> {
+    use sleet::mirror::layout;
+    let head = dest.admin.read_manifest(None).await.ok()??;
+    let src_head = source.admin.read_manifest(None).await.ok()??;
+    let src_cps: BTreeSet<uuid::Uuid> = src_head.checkpoints().iter().map(|cp| cp.id).collect();
+    let now = chrono::Utc::now();
+    let mut members = vec![head.id()];
+    for cp in head.checkpoints() {
+        if layout::checkpoint_live(cp, now)
+            && src_cps.contains(&cp.id)
+            && cp.manifest_id != head.id()
+        {
+            members.push(cp.manifest_id);
+        }
+    }
+    for id in members {
+        let Ok(Some(manifest)) = dest.admin.read_manifest(Some(id)).await else {
+            return Some(format!("pinned manifest {id} missing at the destination"));
+        };
+        for rel in layout::manifest_objects(&manifest).rel_names() {
+            use object_store::ObjectStoreExt;
+            if dest
+                .store
+                .head(&layout::object_path(dest, &rel))
+                .await
+                .is_err()
+            {
+                return Some(format!("{rel} missing at the destination (member {id})"));
+            }
+        }
+    }
+    None
+}
+
 async fn run_mirror_schedule(ops: Vec<MirrorOp>) -> Result<(), String> {
     use object_store::path::Path as StorePath;
     use sleet::config::{ResolvedGc, ResolvedMirrorTarget};
@@ -454,11 +495,8 @@ async fn run_mirror_schedule(ops: Vec<MirrorOp>) -> Result<(), String> {
             dst_head.id()
         ));
     }
-    let verified = mirror::verify(&source, &dest, None, mirror::Depth::Bytes)
-        .await
-        .map_err(err("verify"))?;
-    if !verified.ok() {
-        return Err(format!("verification failed: {:#?}", verified.points));
+    if let Some(problem) = closure_problems(&source, &dest).await {
+        return Err(format!("closure incomplete: {problem}"));
     }
     Ok(())
 }
@@ -563,31 +601,4 @@ proptest! {
         prop_assert!(RestorePoint::parse(&garbage).is_err());
     }
 
-    /// Verify record names are injective per `(database, target)`:
-    /// distinct pairs never collide at the fleet root. Target names
-    /// carry no `.`, so the encoded database and the target split
-    /// unambiguously.
-    #[test]
-    fn verify_paths_are_injective(
-        db_a in url_strategy(),
-        db_b in url_strategy(),
-        target_a in "[a-z0-9_-]{1,12}",
-        target_b in "[a-z0-9_-]{1,12}",
-    ) {
-        use object_store::path::Path as StorePath;
-        use sleet::root::FleetRoot;
-        let root = FleetRoot::from_parts(
-            std::sync::Arc::new(object_store::memory::InMemory::new()),
-            StorePath::from("fleet"),
-            "memory:///f",
-        );
-        let path_a = root.verify_path(&db_a, &target_a);
-        let path_b = root.verify_path(&db_b, &target_b);
-        prop_assert!(path_a.as_ref().starts_with("fleet/verify/"));
-        if (&db_a, &target_a) != (&db_b, &target_b) {
-            prop_assert_ne!(path_a, path_b);
-        } else {
-            prop_assert_eq!(path_a, path_b);
-        }
-    }
 }

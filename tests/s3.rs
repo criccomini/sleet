@@ -118,6 +118,60 @@ async fn s3_semantics_via_minio() {
     assert!(state.warnings.is_empty(), "{:?}", state.warnings);
 }
 
+/// The completeness oracle: the destination's latest manifest holds
+/// its own objects and, for every live checkpoint entry whose
+/// checkpoint still exists at the source, the pinned manifest and its
+/// objects (DESIGN-MIRROR §3).
+async fn assert_closure_complete(
+    source: &sleet::services::DatabaseHandle,
+    dest: &sleet::services::DatabaseHandle,
+) {
+    use sleet::mirror::layout;
+    let head = dest
+        .admin
+        .read_manifest(None)
+        .await
+        .unwrap()
+        .expect("destination head");
+    let src_cps: std::collections::BTreeSet<uuid::Uuid> = source
+        .admin
+        .read_manifest(None)
+        .await
+        .unwrap()
+        .expect("source head")
+        .checkpoints()
+        .iter()
+        .map(|cp| cp.id)
+        .collect();
+    let now = chrono::Utc::now();
+    let mut members = vec![head.id()];
+    for cp in head.checkpoints() {
+        if layout::checkpoint_live(cp, now)
+            && src_cps.contains(&cp.id)
+            && cp.manifest_id != head.id()
+        {
+            members.push(cp.manifest_id);
+        }
+    }
+    for id in members {
+        let manifest = dest
+            .admin
+            .read_manifest(Some(id))
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("pinned manifest {id} missing at the destination"));
+        for rel in layout::manifest_objects(&manifest).rel_names() {
+            assert!(
+                dest.store
+                    .head(&layout::object_path(dest, &rel))
+                    .await
+                    .is_ok(),
+                "{rel} missing at the destination (member {id})"
+            );
+        }
+    }
+}
+
 /// The mirror's commit protocol against real S3 semantics: a pass
 /// seeds a destination prefix with create-if-absent manifest commits,
 /// verify passes, a racing duplicate commit is harmless, and a forked
@@ -186,10 +240,7 @@ async fn s3_mirror_pass_and_divergence_via_minio() {
     let src_head = source.admin.read_manifest(None).await.unwrap().unwrap();
     let dst_head = dest.admin.read_manifest(None).await.unwrap().unwrap();
     assert_eq!(src_head.id(), dst_head.id());
-    let verified = mirror::verify(&source, &dest, None, mirror::Depth::Bytes)
-        .await
-        .unwrap();
-    assert!(verified.ok(), "{:?}", verified.points);
+    assert_closure_complete(&source, &dest).await;
 
     // A forked destination: a real writer opens the target and commits
     // its own manifests. However the fork's and source's manifest id
@@ -324,8 +375,5 @@ async fn s3_multipart_copy_of_a_large_sst_via_minio() {
         largest > 8 * 1024 * 1024,
         "expected an SST above the multipart threshold, largest is {largest}"
     );
-    let verified = mirror::verify(&source, &dest, None, mirror::Depth::Bytes)
-        .await
-        .unwrap();
-    assert!(verified.ok(), "{:?}", verified.points);
+    assert_closure_complete(&source, &dest).await;
 }

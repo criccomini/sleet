@@ -88,7 +88,7 @@ enum Command {
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
     },
-    /// Mirror operations: sync, verify, restore, drill, prefixes.
+    /// Mirror operations: sync, restore, drill, prefixes.
     Mirror {
         #[command(subcommand)]
         command: MirrorCommand,
@@ -113,27 +113,6 @@ enum MirrorCommand {
         /// copier = "rclone".
         #[arg(long)]
         rclone: Option<String>,
-
-        /// Output format.
-        #[arg(long, value_enum, default_value = "text")]
-        format: Format,
-    },
-    /// Re-check a destination: existence and size for every restore
-    /// point's closure. Exits nonzero when verification fails.
-    Verify {
-        /// Fleet root URL, e.g. s3://ops/sleet/.
-        root: String,
-
-        /// Registered database URL.
-        db: String,
-
-        /// Mirror target name.
-        target: String,
-
-        /// Also re-read every closure object from both stores and
-        /// compare bytes, where the source still holds the object.
-        #[arg(long)]
-        deep: bool,
 
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
@@ -306,31 +285,6 @@ async fn main() -> ExitCode {
                 };
                 match ops::mirror_sync(&root, &db, &target, rclone.as_deref()).await {
                     Ok(response) => emit(&response, format),
-                    Err(e) => fail(e),
-                }
-            }
-            MirrorCommand::Verify {
-                root,
-                db,
-                target,
-                deep,
-                format,
-            } => {
-                let root = match FleetRoot::open(&root) {
-                    Ok(root) => root,
-                    Err(e) => return fail(e),
-                };
-                let depth = if deep {
-                    sleet::mirror::Depth::Bytes
-                } else {
-                    sleet::mirror::Depth::Sizes
-                };
-                match ops::mirror_verify(&root, &db, &target, depth).await {
-                    Ok(response) => {
-                        let ok = response.ok;
-                        let code = emit(&response, format);
-                        if ok { code } else { ExitCode::FAILURE }
-                    }
                     Err(e) => fail(e),
                 }
             }

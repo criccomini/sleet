@@ -1,10 +1,9 @@
-Mirror operations: sync, verify, restore, drill, prefixes
+Mirror operations: sync, restore, drill, prefixes
 
 Usage: sleet mirror <COMMAND>
 
 Commands:
   sync      Run a single sync pass for one (database, target), regardless of the target's mode; prunes afterward when retention is set
-  verify    Re-check a destination: existence and size for every restore point's closure. Exits nonzero when verification fails
   restore   Copy one restore point's closure from a backup into an empty destination root and commit it
   drill     Restore drill: restore a point from the target's destination into a scratch root, open it, and scan every key. Proves the backup restores end to end
   prefixes  Emit the anchored key-prefix filter lists an external replication service needs for one (database, target)

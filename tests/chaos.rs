@@ -551,14 +551,9 @@ mod mirror_completeness {
             dst.id(),
             "seed {seed}: not converged ({faulted_ops} faulted ops)"
         );
-        let verified = mirror::verify(&source, &checker, None, mirror::Depth::Bytes)
-            .await
-            .unwrap();
-        assert!(
-            verified.ok(),
-            "seed {seed}: verify failed: {:#?}",
-            verified.points
-        );
+        if let Err(problem) = target_complete(&source, &checker).await {
+            panic!("seed {seed}: healed target incomplete: {problem}");
+        }
     }
 
     /// The schedule under six seeds; each mutation of the destination

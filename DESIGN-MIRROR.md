@@ -338,7 +338,6 @@ poll = "10s"                    # continuous: pass and tail cadence
 # interval = "24h"              # periodic: cadence between passes
 # min_age = "300s"              # prune deletion age floor
 # checkpoint_lifetime = "15m"   # source pin checkpoint TTL
-# verify_interval = "24h"       # periodic re-verification (§10)
 # copy_parallelism = 8          # builtin: concurrent object copies
 ```
 
@@ -377,7 +376,7 @@ service (heartbeat letter `m`) under the frozen rendezvous hash.
 node. Mirror nodes must reach both source and destination stores;
 placement does not consider reachability.
 
-## 10. Observability and verification
+## 10. Observability
 
 `sleet status --mirrors` reads source and destination heads per
 `(database, target)` and reports lag as manifests behind, WAL ids
@@ -389,20 +388,9 @@ the heartbeat body like other services.
 
 A commit proves its closure by induction: what it shares with `W` was
 proven by `W`'s commit, and the pass copies or checks every candidate
-(§4). A deletion outside prune (§7) silently breaks the induction, so
-`sleet mirror verify <root> <db> <target>` re-checks on demand:
-existence and size for every restore point's closure. Sizes rather
-than ETags: multipart ETags do not survive cross-store copies.
-`--deep` re-reads every closure object from both stores and compares
-bytes, reporting the first differing offset. Either way an object the
-source has since garbage-collected checks by target existence only:
-the target holds the only copy, which the commit that promised it
-already proved.
-Entries of checkpoints already retired at the source are skipped:
-a support manifest immutably carries them, its pinned manifest was
-never promised to the target (§7), and they resolve nowhere at the
-source either; restore refuses such points rather than verify
-flagging sanctioned dangles.
+(§4). A deletion outside prune (§7) silently breaks the induction;
+re-checking a target's closures after the fact belongs in a SlateDB
+admin command (§11.6).
 
 `sleet mirror drill <root> <db> <target>` is the end-to-end proof:
 restore a point (`--at`, default the latest) into a scratch root
@@ -411,19 +399,6 @@ result as an ordinary database, and scan every key, reporting key and
 byte counts. The scratch is removed afterward unless `--keep`;
 restore's refusal of non-empty roots (§7) means cleanup only ever
 deletes what the drill wrote.
-
-With `verify_interval` set on a target, the owning daemon task
-re-runs the existence-and-size check on that cadence (under the
-node's mirror-job cap) and records the outcome at the fleet root as
-`verify/<encoded-db>.<target>.json`: version, node, timestamp, ok,
-counts, and a problem sample (schema:
-`schema/verify-record.schema.json`; readers ignore unknown fields).
-`sleet status --mirrors` reads the record and reports its age,
-verdict, and problem count per `(database, target)`; the record's
-age growing past the interval means verification is not running.
-Records are observability-only and never read by placement or the
-pass; a record for a removed target or database is inert and may be
-deleted freely.
 
 ## 11. Future work
 
@@ -471,6 +446,15 @@ first writer bumps `writer_epoch` and replays the copied WAL tail, and
 a coordinator bumps `compactor_epoch` and builds fresh compaction
 state. Epochs fence within one root only, so sequencing source writer
 shutdown around the switch stays outside sleet (§2).
+
+### 11.6 Closure verification
+
+Re-check a database's manifest closures (existence, sizes, bytes)
+against its root, as a SlateDB admin command: the closure walk is the
+same for a mirror target as for any database, so the check belongs
+upstream rather than in sleet. Entries of checkpoints retired at the
+source may dangle at a target (§3) and would need a flag or a source
+to judge against.
 
 ## Open questions
 

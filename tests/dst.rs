@@ -310,7 +310,7 @@ async fn mirror_polling_backs_off_while_idle() {
             let dest =
                 DatabaseHandle::from_parts("memory:///dst", dest_store, StorePath::from("dst"));
             let jobs = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
-            mirror::run_mirror(&source, &dest, &target, jobs, None, None, token).await
+            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
         }
     });
 

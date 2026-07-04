@@ -23,8 +23,7 @@ when the two drift.
   without it. The MBT test needs `SLEET_MBT` and skips without it.
 - `UPDATE_SCHEMAS=1 cargo test --test schema_sync` regenerates the
   files under `schema/` after changing `src/config.rs`,
-  `src/response.rs`, `src/heartbeat.rs`, or the verify record in
-  `src/mirror/verify.rs`.
+  `src/response.rs`, or `src/heartbeat.rs`.
 - `TRYCMD=overwrite cargo test --test cli` updates CLI snapshots in
   `tests/cmd/` after changing command-line behavior.
 - `UPDATE_CORPUS=1 cargo test --test corpus` cuts a wire-format corpus

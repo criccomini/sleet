@@ -28,8 +28,6 @@ pub enum Response {
     Register(RegisterResponse),
     /// `sleet mirror sync`.
     MirrorSync(MirrorSyncResponse),
-    /// `sleet mirror verify`.
-    MirrorVerify(MirrorVerifyResponse),
     /// `sleet mirror restore`.
     MirrorRestore(MirrorRestoreResponse),
     /// `sleet mirror drill`.
@@ -95,20 +93,6 @@ pub struct MirrorStatus {
     /// mapped through the source's sequence tracker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seconds_behind: Option<u64>,
-
-    /// Age of the newest verify record for this `(database, target)`
-    /// under `verify/` at the fleet root; absent when no periodic
-    /// verification has recorded an outcome.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verified_age: Option<HumanDuration>,
-
-    /// Whether the recorded verification passed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verify_ok: Option<bool>,
-
-    /// Problems the recorded verification found.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verify_problems: Option<u64>,
 
     /// Why lag could not be read, if it could not.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -226,44 +210,6 @@ pub struct MirrorSyncResponse {
 
     /// Data objects the prune deleted; zero without retention.
     pub pruned_objects: u64,
-}
-
-/// The `sleet mirror verify` response: existence and size for every
-/// restore point's closure.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[schemars(title = "sleet mirror verify response")]
-pub struct MirrorVerifyResponse {
-    /// The source database's canonical URL.
-    pub database: String,
-
-    /// The target's name.
-    pub target: String,
-
-    /// The destination root.
-    pub destination: String,
-
-    /// Whether bytes were compared (`--deep`), not just sizes.
-    pub deep: bool,
-
-    /// Whether every restore point verified.
-    pub ok: bool,
-
-    /// Every restore point checked, ascending by manifest id.
-    pub points: Vec<RestorePointStatus>,
-}
-
-/// One verified restore point.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct RestorePointStatus {
-    /// The restore point's manifest id.
-    pub manifest_id: u64,
-
-    /// Objects checked in its closure.
-    pub objects: u64,
-
-    /// What is missing or mismatched; empty means the point verifies.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub problems: Vec<String>,
 }
 
 /// The `sleet mirror restore` response.

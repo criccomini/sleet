@@ -131,22 +131,6 @@ impl FleetRoot {
         self.nodes_prefix().join(object_name)
     }
 
-    /// `<root>/verify/`.
-    pub fn verify_prefix(&self) -> StorePath {
-        self.prefix.clone().join("verify")
-    }
-
-    /// The verify record for one `(database, target)`: the registry
-    /// file name's encoding plus the target,
-    /// `verify/<encoded-db>.<target>.json`. Target names cannot
-    /// contain `.`, so the name parses like a heartbeat's.
-    pub fn verify_path(&self, canonical_url: &str, target: &str) -> StorePath {
-        let db = registry::file_name(canonical_url);
-        let db = db.strip_suffix(".toml").unwrap_or(&db);
-        StorePath::parse(format!("{}/{db}.{target}.json", self.verify_prefix()))
-            .expect("verify record names are valid paths")
-    }
-
     /// Every heartbeat object under `nodes/`, with parsed names and
     /// ages. Objects that aren't heartbeats are ignored.
     pub async fn list_heartbeats(&self) -> Result<Vec<HeartbeatEntry>, object_store::Error> {

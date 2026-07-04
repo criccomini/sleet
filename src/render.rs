@@ -12,8 +12,8 @@ use std::io::{self, Write};
 
 use crate::config::Service;
 use crate::response::{
-    MirrorDrillResponse, MirrorPrefixesResponse, MirrorRestoreResponse, MirrorStatus,
-    MirrorSyncResponse, MirrorVerifyResponse, RegisterResponse, StatusResponse,
+    MirrorDrillResponse, MirrorPrefixesResponse, MirrorRestoreResponse, MirrorSyncResponse,
+    RegisterResponse, StatusResponse,
 };
 
 /// Human-readable rendering of a response.
@@ -133,17 +133,8 @@ impl Render for StatusResponse {
                 "MANIFESTS",
                 "WAL",
                 "SECONDS",
-                "VERIFIED",
             ]);
             let behind = |v: &Option<u64>| v.map_or_else(dash, |n| n.to_string());
-            let verified = |m: &MirrorStatus| match (m.verify_ok, &m.verified_age) {
-                (Some(ok), Some(age)) => format!(
-                    "{} {} ago",
-                    if ok { "ok" } else { "FAIL" },
-                    humantime::format_duration(age.0)
-                ),
-                _ => dash(),
-            };
             for m in &self.mirrors {
                 mirrors.row(vec![
                     m.database.clone(),
@@ -152,7 +143,6 @@ impl Render for StatusResponse {
                     behind(&m.manifests_behind),
                     behind(&m.wal_behind),
                     behind(&m.seconds_behind),
-                    verified(m),
                 ]);
             }
             mirrors.write(w)?;
@@ -211,46 +201,6 @@ impl Render for MirrorSyncResponse {
             )?;
         }
         Ok(())
-    }
-}
-
-impl Render for MirrorVerifyResponse {
-    fn render(&self, w: &mut dyn Write) -> io::Result<()> {
-        let mut points = Table::new(&["RESTORE POINT", "OBJECTS", "OK"]);
-        for p in &self.points {
-            points.row(vec![
-                p.manifest_id.to_string(),
-                p.objects.to_string(),
-                if p.problems.is_empty() { "yes" } else { "no" }.into(),
-            ]);
-        }
-        points.write(w)?;
-        let problems: Vec<(u64, &String)> = self
-            .points
-            .iter()
-            .flat_map(|p| p.problems.iter().map(move |x| (p.manifest_id, x)))
-            .collect();
-        if !problems.is_empty() {
-            writeln!(w)?;
-            for (id, problem) in problems {
-                writeln!(w, "problem: restore point {id}: {problem}")?;
-            }
-        }
-        writeln!(w)?;
-        let deep = if self.deep { " (deep)" } else { "" };
-        if self.ok {
-            writeln!(
-                w,
-                "{} target {} verifies at {}{deep}",
-                self.database, self.target, self.destination
-            )
-        } else {
-            writeln!(
-                w,
-                "{} target {} FAILS verification at {}{deep}",
-                self.database, self.target, self.destination
-            )
-        }
     }
 }
 
@@ -376,9 +326,6 @@ warning: no live node offers compactor-coordinator
                     manifests_behind: Some(2),
                     wal_behind: Some(7),
                     seconds_behind: Some(31),
-                    verified_age: Some(std::time::Duration::from_secs(180).into()),
-                    verify_ok: Some(true),
-                    verify_problems: Some(0),
                     error: None,
                 },
                 MirrorStatus {
@@ -390,9 +337,6 @@ warning: no live node offers compactor-coordinator
                     manifests_behind: None,
                     wal_behind: None,
                     seconds_behind: None,
-                    verified_age: None,
-                    verify_ok: None,
-                    verify_problems: None,
                     error: Some("bucket unreachable".into()),
                 },
             ],
@@ -405,9 +349,9 @@ NODE  LIVE  HEARTBEAT  SERVICES  SLEET  SLATEDB
 
 DATABASE  SERVICE  NODES
 
-DATABASE   TARGET  DESTINATION      MANIFESTS  WAL  SECONDS  VERIFIED
-s3://b/db  dr      s3://dr/db       2          7    31       ok 3m ago
-s3://b/db  backup  gs://backups/db  -          -    -        -
+DATABASE   TARGET  DESTINATION      MANIFESTS  WAL  SECONDS
+s3://b/db  dr      s3://dr/db       2          7    31
+s3://b/db  backup  gs://backups/db  -          -    -
 error: s3://b/db target backup: bucket unreachable
 ";
         assert_eq!(String::from_utf8(out).unwrap(), expected);

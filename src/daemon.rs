@@ -346,10 +346,6 @@ impl Node {
                 self.jobs.clone(),
                 self.mirror_jobs.clone(),
                 self.options.rclone.clone(),
-                mirror::VerifyReporter {
-                    root: self.root.clone(),
-                    node_id: self.options.node_id.clone(),
-                },
                 self.states.clone(),
                 token.clone(),
                 state.config.node.heartbeat_interval.0,
@@ -378,7 +374,6 @@ async fn supervise(
     jobs: Arc<Semaphore>,
     mirror_jobs: Arc<Semaphore>,
     rclone: Option<String>,
-    reporter: mirror::VerifyReporter,
     states: TaskStates,
     token: CancellationToken,
     heartbeat_interval: Duration,
@@ -391,7 +386,6 @@ async fn supervise(
         let jobs = jobs.clone();
         let mirror_jobs = mirror_jobs.clone();
         let rclone = rclone.clone();
-        let reporter = reporter.clone();
         async move {
             if service == Service::Mirror {
                 let name = target.expect("mirror assignments carry a target");
@@ -405,17 +399,9 @@ async fn supervise(
                 };
                 let source = DatabaseHandle::open(&url)?;
                 let dest = DatabaseHandle::open(&applied.destination)?;
-                mirror::run_mirror(
-                    &source,
-                    &dest,
-                    &applied,
-                    mirror_jobs,
-                    rclone,
-                    Some(&reporter),
-                    child,
-                )
-                .await
-                .map_err(services::ServiceError::from)
+                mirror::run_mirror(&source, &dest, &applied, mirror_jobs, rclone, child)
+                    .await
+                    .map_err(services::ServiceError::from)
             } else {
                 let db = DatabaseHandle::open(&url)?;
                 services::run_service(&db, service, &resolved, jobs, child).await
