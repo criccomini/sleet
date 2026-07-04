@@ -1,8 +1,7 @@
 //! `sleet mirror restore` (DESIGN-MIRROR §7): a one-shot pass with a
 //! chosen restore point as `L`, copying its closure to an empty
 //! destination and committing it. The destination is then an ordinary
-//! database at that point. `drill` (§10) is restore's proof: restore
-//! into a scratch root, open it, and scan every key.
+//! database at that point.
 
 use std::collections::BTreeMap;
 
@@ -147,51 +146,6 @@ pub async fn restore(
         manifests_committed: committed,
         copied_objects: copied.objects,
         copied_bytes: copied.bytes,
-    })
-}
-
-/// What one drill proved.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DrillOutcome {
-    /// The restore exercised.
-    pub restored: RestoreOutcome,
-    /// Keys the full scan read back.
-    pub keys: u64,
-    /// Key and value bytes the full scan read back.
-    pub bytes: u64,
-}
-
-/// Restore `backup` at `point` into the empty `scratch` root, open the
-/// result as an ordinary database (compactor and GC off), and scan
-/// every key: the end-to-end proof that the point restores and reads.
-/// The caller owns the scratch root's cleanup.
-pub async fn drill(
-    backup: &DatabaseHandle,
-    scratch: &DatabaseHandle,
-    point: RestorePoint,
-) -> Result<DrillOutcome, MirrorError> {
-    let restored = restore(backup, scratch, point).await?;
-    let db = slatedb::Db::builder(scratch.path.clone(), scratch.store.clone())
-        .with_settings(slatedb::config::Settings {
-            compactor_options: None,
-            garbage_collector_options: None,
-            ..Default::default()
-        })
-        .build()
-        .await?;
-    let mut keys = 0u64;
-    let mut bytes = 0u64;
-    let mut scan = db.scan(..).await?;
-    while let Some(kv) = scan.next().await? {
-        keys += 1;
-        bytes += (kv.key.len() + kv.value.len()) as u64;
-    }
-    drop(scan);
-    db.close().await?;
-    Ok(DrillOutcome {
-        restored,
-        keys,
-        bytes,
     })
 }
 

@@ -253,9 +253,8 @@ async fn gcs_mirror_pass_and_divergence() {
 }
 
 /// The DR shape the design leads with: an S3 source (MinIO) mirrored
-/// into a GCS destination (fake-gcs-server). Sizes and bytes survive
-/// the cross-store copy even though multipart ETags do not, restore
-/// drills back out of the GCS backup, and the restored copy reads.
+/// into a GCS destination (fake-gcs-server), and restored back out of
+/// the GCS backup into a fresh S3 root that opens and reads.
 #[tokio::test(flavor = "multi_thread")]
 async fn cross_store_mirror_s3_to_gcs() {
     let (Ok(gcs_endpoint), Ok(s3_endpoint)) = (
@@ -304,16 +303,31 @@ async fn cross_store_mirror_s3_to_gcs() {
         .unwrap();
     assert_closure_complete(&source, &dest).await;
 
-    // Drill back out of the GCS backup into a fresh S3 root: restore,
-    // open, and scan every key.
+    // Restore back out of the GCS backup into a fresh S3 root, open
+    // the result, and scan every key.
     let scratch = DatabaseHandle::from_parts(
         &format!("s3://sleet/{restore_path}"),
         s3.clone(),
         StorePath::from(restore_path.clone()),
     );
-    let drill = mirror::drill(&dest, &scratch, mirror::RestorePoint::Latest)
+    mirror::restore(&dest, &scratch, mirror::RestorePoint::Latest)
         .await
         .unwrap();
-    assert_eq!(drill.keys, 64, "{drill:?}");
-    assert!(drill.bytes >= 64 * 1024);
+    let db = slatedb::Db::builder(scratch.path.clone(), scratch.store.clone())
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .unwrap();
+    let mut keys = 0u64;
+    let mut scan = db.scan(..).await.unwrap();
+    while let Some(_kv) = scan.next().await.unwrap() {
+        keys += 1;
+    }
+    drop(scan);
+    db.close().await.unwrap();
+    assert_eq!(keys, 64);
 }

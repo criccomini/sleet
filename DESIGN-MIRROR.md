@@ -392,14 +392,6 @@ proven by `W`'s commit, and the pass copies or checks every candidate
 re-checking a target's closures after the fact belongs in a SlateDB
 admin command (§11.6).
 
-`sleet mirror drill <root> <db> <target>` is the end-to-end proof:
-restore a point (`--at`, default the latest) into a scratch root
-(`--scratch <url>`, default a fresh local temp directory), open the
-result as an ordinary database, and scan every key, reporting key and
-byte counts. The scratch is removed afterward unless `--keep`;
-restore's refusal of non-empty roots (§7) means cleanup only ever
-deletes what the drill wrote.
-
 ## 11. Future work
 
 ### 11.1 Projected manifests

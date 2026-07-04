@@ -117,16 +117,6 @@ sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1 --at 2026-
 
 `--at` accepts a manifest ID or an RFC 3339 timestamp. A timestamp resolves to the newest restore point at or before that time. The timestamp mapping comes from the backup manifest sequence tracker, which samples at about 60 seconds with the stock SlateDB settings, so timestamp selection has that granularity. Restore never deletes and refuses a non-empty destination.
 
-## Restore drills
-
-The direct check of a backup is a restore drill: restore a point into a scratch root, open it, and scan every key:
-
-```sh
-sleet mirror drill s3://ops/sleet s3://bucket/db backup
-```
-
-The scratch defaults to a local temp directory (`--scratch <url>` picks one, `--keep` retains it) and is removed afterward. Run drills on the schedule your recovery objectives call for.
-
 ## Safety rules
 
 While a target is being mirrored:
