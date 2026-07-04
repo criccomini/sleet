@@ -259,7 +259,8 @@ build its closure, and byte-copy leaves no way to strip the dangling
 entry. Expired entries are harmless: they count nowhere.
 
 Restore points map to wall-clock time by the manifest's sequence
-tracker, so `--at` accepts a manifest id or a timestamp.
+tracker, so `--at` accepts a manifest id or a timestamp; timestamp
+resolution is bounded by the tracker's sampling interval (60s stock).
 
 `sleet mirror restore <root> <backup-url> <dest-url> --at <point>` is a
 one-shot pass with the chosen manifest as `L`, copying its closure to

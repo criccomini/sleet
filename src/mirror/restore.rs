@@ -150,9 +150,11 @@ pub async fn restore(
 }
 
 /// Resolve `--at` to a manifest id. Restore points map to wall-clock
-/// time by the manifest's sequence tracker: a timestamp maps to a
-/// sequence through the latest manifest's tracker, then to the newest
-/// manifest whose recorded state does not pass that sequence.
+/// time by the manifest's sequence tracker: each candidate manifest's
+/// recorded state maps to the newest tracked time at or below it, and
+/// the newest manifest within `--at` wins. The tracker samples one
+/// entry per interval (60s stock), so resolution is bounded by that
+/// granularity.
 async fn resolve_point(
     backup: &DatabaseHandle,
     manifests: &[(u64, object_store::ObjectMeta)],
@@ -179,23 +181,25 @@ async fn resolve_point(
                 .ok_or_else(|| MirrorError::NotADatabase {
                     url: backup.url.clone(),
                 })?;
-            let seq = head
-                .sequence_tracker()
-                .find_seq(*ts, FindOption::RoundDown)
-                .ok_or_else(|| MirrorError::NoRestorePoint {
-                    at: ts.to_rfc3339(),
-                    reason: "the timestamp predates the backup's history".to_string(),
-                })?;
             for (id, _) in manifests.iter().rev() {
-                if let Some(m) = backup.admin.read_manifest(Some(*id)).await?
-                    && m.last_l0_seq() <= seq
-                {
+                let Some(m) = backup.admin.read_manifest(Some(*id)).await? else {
+                    continue;
+                };
+                // A manifest whose state precedes every tracked entry
+                // maps nowhere; skip it rather than guess.
+                let Some(m_ts) = head
+                    .sequence_tracker()
+                    .find_ts(m.last_l0_seq(), FindOption::RoundDown)
+                else {
+                    continue;
+                };
+                if m_ts <= *ts {
                     return Ok(*id);
                 }
             }
             Err(MirrorError::NoRestorePoint {
                 at: ts.to_rfc3339(),
-                reason: "no restore point is old enough for the timestamp".to_string(),
+                reason: "the timestamp predates the backup's tracked history".to_string(),
             })
         }
     }

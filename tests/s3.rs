@@ -238,3 +238,90 @@ async fn s3_mirror_pass_and_divergence_via_minio() {
         "{err:?}"
     );
 }
+
+/// The multipart copy path against real S3 semantics: an SST above
+/// the builtin copier's 8 MiB single-PUT threshold streams through a
+/// multipart upload, and verify's size comparison proves the copy is
+/// byte-exact end to end.
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_multipart_copy_of_a_large_sst_via_minio() {
+    use futures::TryStreamExt;
+    use sleet::config::ResolvedMirrorTarget;
+    use sleet::mirror;
+    use sleet::services::DatabaseHandle;
+
+    let Ok(endpoint) = std::env::var("SLEET_S3_ENDPOINT") else {
+        eprintln!("note: SLEET_S3_ENDPOINT unset; skipping MinIO multipart test");
+        return;
+    };
+    let store = minio_store(&endpoint);
+    let run = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let src_path = format!("multipart-{run}/src");
+    let dst_path = format!("multipart-{run}/dst");
+    let source = DatabaseHandle::from_parts(
+        &format!("s3://sleet/{src_path}"),
+        store.clone(),
+        StorePath::from(src_path.clone()),
+    );
+    let dest = DatabaseHandle::from_parts(
+        &format!("s3://sleet/{dst_path}"),
+        store.clone(),
+        StorePath::from(dst_path.clone()),
+    );
+
+    // One memtable flush of ~12 MiB: a single L0 SST well above the
+    // 8 MiB multipart threshold.
+    let writer = slatedb::Db::builder(source.path.clone(), source.store.clone())
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .unwrap();
+    for key in 0..96 {
+        writer
+            .put(
+                format!("big-{key:04}").as_bytes(),
+                vec![key as u8; 128 * 1024].as_slice(),
+            )
+            .await
+            .unwrap();
+    }
+    writer
+        .flush_with_options(slatedb::config::FlushOptions {
+            flush_type: slatedb::config::FlushType::MemTable,
+        })
+        .await
+        .unwrap();
+    writer.close().await.unwrap();
+
+    let settings = ResolvedMirrorTarget::default();
+    mirror::sync_pass(&source, &dest, "dr", &settings, None)
+        .await
+        .unwrap();
+    mirror::sync_pass(&source, &dest, "dr", &settings, None)
+        .await
+        .unwrap();
+
+    // The threshold was really crossed, and every copied object's size
+    // matches the source's exactly.
+    let src_prefix = StorePath::from(src_path);
+    let objects: Vec<object_store::ObjectMeta> = source
+        .store
+        .list(Some(&src_prefix))
+        .try_collect()
+        .await
+        .unwrap();
+    let largest = objects.iter().map(|m| m.size).max().unwrap();
+    assert!(
+        largest > 8 * 1024 * 1024,
+        "expected an SST above the multipart threshold, largest is {largest}"
+    );
+    let verified = mirror::verify(&source, &dest, None).await.unwrap();
+    assert!(verified.ok(), "{:?}", verified.points);
+}

@@ -1270,13 +1270,14 @@ async fn status_flags_collisions_and_prefixes_emit_filters() {
     );
 }
 
-/// Poll an async condition every 100ms for up to 60s.
+/// Poll an async condition every 100ms for up to 150s (the soak's
+/// post-churn convergence takes a while on slow CI runners).
 async fn poll_until<T, F, Fut>(what: &str, mut check: F) -> T
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Option<T>>,
 {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
     loop {
         if let Some(value) = check().await {
             return value;
@@ -1287,4 +1288,333 @@ where
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+/// §6's cost claim, pinned: a caught-up continuous mirror costs one
+/// source manifest LIST and one WAL tail probe per wakeup, and
+/// touches the destination not at all.
+#[tokio::test(flavor = "multi_thread")]
+async fn caught_up_mirror_costs_one_list_and_one_probe_per_wakeup() {
+    use tokio_util::sync::CancellationToken;
+    let source_store = TestStore::in_memory();
+    let dest_store = TestStore::in_memory();
+    let source = handle(source_store.clone(), "memory:///src", "src");
+    let dest = handle(dest_store.clone(), "memory:///dst", "dst");
+    seed(&source, 2).await;
+    // Converge fully before measuring.
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+
+    let target = mirror::AppliedTarget {
+        name: "dr".into(),
+        destination: "memory:///dst".into(),
+        settings: ResolvedMirrorTarget {
+            poll: Duration::from_millis(50),
+            ..target_settings()
+        },
+    };
+    let token = CancellationToken::new();
+    let task = tokio::spawn({
+        let source = handle(source_store.clone(), "memory:///src", "src");
+        let dest = handle(dest_store.clone(), "memory:///dst", "dst");
+        let target = target.clone();
+        let token = token.clone();
+        async move {
+            let jobs = Arc::new(tokio::sync::Semaphore::new(1));
+            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
+        }
+    });
+
+    // Let the loop's first wakeup run its recovery pass and tail init,
+    // then measure the marginal cost of idle wakeups.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let src_lists = source_store.counters().count(Op::List);
+    let src_gets = source_store.counters().count(Op::Get);
+    let dst_lists = dest_store.counters().count(Op::List);
+    let dst_gets = dest_store.counters().count(Op::Get);
+    let dst_puts = dest_store.counters().count(Op::Put);
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    token.cancel();
+    task.await.unwrap().unwrap();
+
+    let wakeup_lists = source_store.counters().count(Op::List) - src_lists;
+    let wakeup_gets = source_store.counters().count(Op::Get) - src_gets;
+    // Idle backoff doubles the interval, so only a handful of wakeups
+    // land in the window; each costs exactly one LIST and one GET.
+    assert!(
+        (1..=8).contains(&wakeup_lists),
+        "expected a few idle wakeups, saw {wakeup_lists} LISTs"
+    );
+    let diff = wakeup_gets.abs_diff(wakeup_lists);
+    assert!(
+        diff <= 1,
+        "each wakeup is one manifest LIST plus one tail probe GET: \
+         {wakeup_lists} LISTs vs {wakeup_gets} GETs"
+    );
+    assert_eq!(
+        dest_store.counters().count(Op::Put) - dst_puts,
+        0,
+        "an idle mirror never writes the destination"
+    );
+    assert_eq!(
+        (dest_store.counters().count(Op::List) - dst_lists)
+            + (dest_store.counters().count(Op::Get) - dst_gets),
+        0,
+        "an idle mirror never reads the destination (the watermark is cached)"
+    );
+}
+
+/// §7: `--at` accepts a timestamp, mapped through the sequence
+/// tracker to the newest restore point at or before it. The tracker
+/// samples one entry per 60s, so a short test cannot discriminate
+/// close epochs; what it can pin: a current timestamp resolves and
+/// restores, and one before all tracked history refuses cleanly.
+#[tokio::test(flavor = "multi_thread")]
+async fn restore_at_a_timestamp_resolves_and_bounds() {
+    let source = handle(Arc::new(InMemory::new()), "memory:///src", "src");
+    let backup = handle(Arc::new(InMemory::new()), "memory:///bak", "bak");
+    seed(&source, 2).await;
+    mirror::sync_pass(&source, &backup, "backup", &target_settings(), None)
+        .await
+        .unwrap();
+    mirror::sync_pass(&source, &backup, "backup", &target_settings(), None)
+        .await
+        .unwrap();
+
+    // Epoch 2 writes a marker key.
+    let writer = slatedb::Db::builder(source.path.clone(), source.store.clone())
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .unwrap();
+    writer.put(b"epoch2-marker", b"late").await.unwrap();
+    writer
+        .flush_with_options(slatedb::config::FlushOptions {
+            flush_type: slatedb::config::FlushType::MemTable,
+        })
+        .await
+        .unwrap();
+    writer.close().await.unwrap();
+    mirror::sync_pass(&source, &backup, "backup", &target_settings(), None)
+        .await
+        .unwrap();
+    mirror::sync_pass(&source, &backup, "backup", &target_settings(), None)
+        .await
+        .unwrap();
+
+    // A current timestamp resolves within the tracker's granularity
+    // and the restored root opens with the data.
+    let dest = handle(Arc::new(InMemory::new()), "memory:///restored", "restored");
+    let outcome = mirror::restore(&backup, &dest, RestorePoint::Time(chrono::Utc::now()))
+        .await
+        .unwrap();
+    assert!(outcome.manifest_id > 0);
+    let db = slatedb::Db::builder(dest.path.clone(), dest.store.clone())
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .unwrap();
+    assert!(
+        db.get(b"key-0-0").await.unwrap().is_some(),
+        "restored data present"
+    );
+    db.close().await.unwrap();
+
+    // A timestamp before all tracked history refuses cleanly.
+    let empty = handle(Arc::new(InMemory::new()), "memory:///e2", "e2");
+    let err = mirror::restore(
+        &backup,
+        &empty,
+        RestorePoint::Time(chrono::Utc::now() - chrono::Duration::days(365)),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, mirror::MirrorError::NoRestorePoint { .. }));
+
+    // --at parsing: manifest ids, RFC 3339 timestamps, nothing else.
+    assert!(matches!(
+        RestorePoint::parse("42"),
+        Ok(RestorePoint::Manifest(42))
+    ));
+    assert!(matches!(
+        RestorePoint::parse("2026-01-02T03:04:05Z"),
+        Ok(RestorePoint::Time(_))
+    ));
+    assert!(RestorePoint::parse("yesterday-ish").is_err());
+}
+
+/// The production shape (DESIGN-MIRROR §3 core premise): gc, the
+/// compaction coordinator, workers, and the mirror all running
+/// against one database while a writer churns, with retention set on
+/// the target. Compaction rewrites and GC deletions race passes and
+/// the tail; afterward the destination verifies, fails over, and
+/// serves exactly the source's contents.
+#[tokio::test(flavor = "multi_thread")]
+async fn soak_mirror_races_live_compaction_and_gc() {
+    use sleet::daemon::{self, NodeOptions};
+    use sleet::root::FleetRoot;
+    use sleet::{ops, registry};
+    use tokio_util::sync::CancellationToken;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("fleet")).unwrap();
+    std::fs::create_dir_all(dir.path().join("dst")).unwrap();
+    let fleet_url = format!("file://{}/fleet", dir.path().display());
+    let dest_url = format!("file://{}/dst", dir.path().display());
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    let db_url = format!("file://{}", src_dir.display());
+    let source = DatabaseHandle::open(&db_url).unwrap();
+    seed(&source, 2).await;
+
+    let root = FleetRoot::open(&fleet_url).unwrap();
+    root.store()
+        .put(
+            &root.config_path(),
+            "[node]\nheartbeat_interval = \"400ms\"\nheartbeat_timeout = \"2s\"\nconfig_poll = \"800ms\"\n"
+                .into(),
+        )
+        .await
+        .unwrap();
+    ops::register(&root, &db_url).await.unwrap();
+    root.store()
+        .put(
+            &root.database_path(&registry::canonicalize_url(&db_url).unwrap()),
+            format!(
+                "[gc.manifest]\ninterval = \"500ms\"\nmin_age = \"1s\"\n\
+                 [gc.compacted]\ninterval = \"500ms\"\nmin_age = \"1s\"\n\
+                 [gc.wal]\ninterval = \"500ms\"\nmin_age = \"1s\"\n\
+                 [compactor-coordinator]\npoll_interval = \"250ms\"\n\
+                 [compactor-coordinator.scheduler]\nmin_compaction_sources = 2\n\
+                 [compaction-workers]\ncompactions_poll_interval = \"150ms\"\n\
+                 [mirror.targets.dr]\nurl = \"{dest_url}\"\nmode = \"continuous\"\n\
+                 poll = \"200ms\"\nmin_age = \"1s\"\n\
+                 [mirror.targets.dr.retention]\nkeep = \"4s\"\n"
+            )
+            .into(),
+        )
+        .await
+        .unwrap();
+
+    let shutdown = CancellationToken::new();
+    let node = tokio::spawn(daemon::run(
+        root.clone(),
+        NodeOptions {
+            node_id: "n1".into(),
+            max_compaction_jobs: 2,
+            ..NodeOptions::default()
+        },
+        shutdown.clone(),
+    ));
+
+    // The writer churns while every service runs: fresh keys, rolling
+    // overwrites (compaction fodder), and periodic memtable flushes.
+    let writer = slatedb::Db::builder(source.path.clone(), source.store.clone())
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .unwrap();
+    for round in 0..12u8 {
+        for i in 0..40u8 {
+            writer
+                .put(
+                    format!("soak-{round}-{i}").as_bytes(),
+                    vec![round; 256].as_slice(),
+                )
+                .await
+                .unwrap();
+            writer
+                .put(
+                    format!("rolling-{i}").as_bytes(),
+                    vec![round; 128].as_slice(),
+                )
+                .await
+                .unwrap();
+        }
+        writer
+            .flush_with_options(slatedb::config::FlushOptions {
+                flush_type: slatedb::config::FlushType::MemTable,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    writer.close().await.unwrap();
+
+    // Quiesce: compaction commits drain, GC and prune settle, and the
+    // mirror converges to the source's final head.
+    poll_until("mirror converges after the churn", || async {
+        let status = ops::status(&root, false, true).await.unwrap();
+        let m = status.mirrors.first()?;
+        (m.manifests_behind == Some(0) && m.error.is_none()).then_some(())
+    })
+    .await;
+    // Hold convergence across a few more polls (compaction results and
+    // checkpoint churn keep committing briefly after the writer stops).
+    for _ in 0..3 {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        poll_until("mirror re-converges", || async {
+            let status = ops::status(&root, false, true).await.unwrap();
+            (status.mirrors.first()?.manifests_behind == Some(0)).then_some(())
+        })
+        .await;
+    }
+    let verify = ops::mirror_verify(&root, &db_url, "dr").await.unwrap();
+    assert!(verify.ok, "{:#?}", verify.points);
+
+    shutdown.cancel();
+    node.await.unwrap().unwrap();
+
+    // Failover: open both and compare every key and value.
+    let dest = DatabaseHandle::open(&dest_url).unwrap();
+    let contents = |handle: &DatabaseHandle| {
+        let path = handle.path.clone();
+        let store = handle.store.clone();
+        async move {
+            let db = slatedb::Db::builder(path, store)
+                .with_settings(slatedb::config::Settings {
+                    compactor_options: None,
+                    garbage_collector_options: None,
+                    ..Default::default()
+                })
+                .build()
+                .await
+                .unwrap();
+            let mut all = std::collections::BTreeMap::new();
+            let mut it = db.scan(..).await.unwrap();
+            while let Some(kv) = it.next().await.unwrap() {
+                all.insert(kv.key.to_vec(), kv.value.to_vec());
+            }
+            drop(it);
+            db.close().await.unwrap();
+            all
+        }
+    };
+    let source_contents = contents(&source).await;
+    let dest_contents = contents(&dest).await;
+    assert!(
+        source_contents.len() >= 12 * 40,
+        "the soak wrote data: {} keys",
+        source_contents.len()
+    );
+    assert_eq!(
+        source_contents, dest_contents,
+        "the failed-over destination serves exactly the source's contents"
+    );
 }

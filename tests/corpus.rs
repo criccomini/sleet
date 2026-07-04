@@ -107,6 +107,21 @@ fn generate() {
         }
     }
     std::fs::write(dir.join("mirror-target-scores.tsv"), scores).unwrap();
+    // The frozen mirror layout names (DESIGN-MIRROR §3): every existing
+    // target depends on these exact formats.
+    let mut layout = String::new();
+    for (kind, name) in [
+        ("manifest", sleet::mirror::layout::manifest_rel(42)),
+        ("manifest", sleet::mirror::layout::manifest_rel(u64::MAX)),
+        ("wal", sleet::mirror::layout::wal_rel(7)),
+        (
+            "compacted",
+            sleet::mirror::layout::compacted_rel("01J79C21YKR31J2BS1EFXJZ7MR"),
+        ),
+    ] {
+        layout.push_str(&format!("{kind}\t{name}\n"));
+    }
+    std::fs::write(dir.join("mirror-layout.tsv"), layout).unwrap();
 }
 
 fn service_by_name(name: &str) -> Service {
@@ -160,6 +175,35 @@ fn corpus_of_every_release_still_parses() {
                 want,
                 "{dir:?}: the frozen hash changed for {url} {service} {node}"
             );
+        }
+
+        // Releases cut before mirroring have no layout names.
+        if let Ok(lines) = std::fs::read_to_string(dir.join("mirror-layout.tsv")) {
+            use sleet::mirror::layout;
+            for line in lines.lines() {
+                let (kind, name) = line.split_once('\t').unwrap();
+                let (dirname, file) = name.split_once('/').unwrap();
+                let regenerated = match kind {
+                    "manifest" => {
+                        let id = layout::parse_manifest_name(file).unwrap();
+                        layout::manifest_rel(id)
+                    }
+                    "wal" => {
+                        let id = layout::parse_wal_name(file).unwrap();
+                        layout::wal_rel(id)
+                    }
+                    "compacted" => {
+                        let ulid = layout::parse_compacted_name(file).unwrap();
+                        layout::compacted_rel(&ulid)
+                    }
+                    other => panic!("unknown layout kind {other:?} in corpus"),
+                };
+                assert_eq!(
+                    regenerated, name,
+                    "{dir:?}: the frozen {kind} name format changed"
+                );
+                assert_eq!(name, format!("{dirname}/{file}"));
+            }
         }
 
         // Releases cut before mirroring have no triple scores.
