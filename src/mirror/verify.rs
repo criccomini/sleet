@@ -8,9 +8,11 @@
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use object_store::ObjectStoreExt;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use super::MirrorError;
 use super::layout::{self, object_path};
@@ -49,6 +51,93 @@ impl VerifyOutcome {
     pub fn ok(&self) -> bool {
         self.points.iter().all(|p| p.problems.is_empty())
     }
+}
+
+/// Current verify record format version.
+pub const RECORD_VERSION: u32 = 1;
+
+/// Problems a record carries at most; the full list comes from
+/// re-running `sleet mirror verify`.
+const RECORD_PROBLEMS_MAX: usize = 10;
+
+/// One periodic verification outcome: `verify/<db>.<target>.json` at
+/// the fleet root, written by the owning daemon task on the target's
+/// `verify_interval` and read by `sleet status --mirrors`. The record
+/// is observability-only, like a heartbeat body: readers ignore
+/// unknown fields, `version` bumps only on incompatible change, and a
+/// record for a retired target is inert.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(title = "sleet verify record")]
+pub struct VerifyRecord {
+    /// Record format version; bumped only on incompatible change.
+    pub version: u32,
+
+    /// The node that ran the verification.
+    pub node_id: String,
+
+    /// The source database's canonical URL.
+    pub database: String,
+
+    /// The target's name.
+    pub target: String,
+
+    /// The destination root verified.
+    pub destination: String,
+
+    /// When the verification finished.
+    pub verified_at: DateTime<Utc>,
+
+    /// Whether every restore point verified.
+    pub ok: bool,
+
+    /// Restore points checked.
+    pub points: u64,
+
+    /// Objects checked across every restore point's closure.
+    pub objects: u64,
+
+    /// Total problems found.
+    pub problems: u64,
+
+    /// The first few problems.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sample: Vec<String>,
+}
+
+impl VerifyRecord {
+    /// A current-version record for one outcome, stamped `verified_at`
+    /// now.
+    pub fn new(
+        node_id: &str,
+        database: &str,
+        target: &str,
+        destination: &str,
+        outcome: &VerifyOutcome,
+    ) -> Self {
+        let problems: Vec<&String> = outcome.points.iter().flat_map(|p| &p.problems).collect();
+        Self {
+            version: RECORD_VERSION,
+            node_id: node_id.to_string(),
+            database: database.to_string(),
+            target: target.to_string(),
+            destination: destination.to_string(),
+            verified_at: Utc::now(),
+            ok: outcome.ok(),
+            points: outcome.points.len() as u64,
+            objects: outcome.points.iter().map(|p| p.objects).sum(),
+            problems: problems.len() as u64,
+            sample: problems
+                .into_iter()
+                .take(RECORD_PROBLEMS_MAX)
+                .cloned()
+                .collect(),
+        }
+    }
+}
+
+/// The verify record JSON Schema, pretty-printed.
+pub fn record_schema_json() -> String {
+    crate::schema_pretty::<VerifyRecord>()
 }
 
 /// Verify every restore point's closure at the target: each closure

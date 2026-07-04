@@ -94,6 +94,20 @@ pub struct MirrorStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seconds_behind: Option<u64>,
 
+    /// Age of the newest verify record for this `(database, target)`
+    /// under `verify/` at the fleet root; absent when no periodic
+    /// verification has recorded an outcome.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified_age: Option<HumanDuration>,
+
+    /// Whether the recorded verification passed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_ok: Option<bool>,
+
+    /// Problems the recorded verification found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_problems: Option<u64>,
+
     /// Why lag could not be read, if it could not.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,

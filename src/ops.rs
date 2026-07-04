@@ -126,7 +126,7 @@ pub async fn status(
                             .entry(target.destination.clone())
                             .or_default()
                             .push(format!("{url} target {}", target.name));
-                        mirror_statuses.push(mirror_status(url, &target).await);
+                        mirror_statuses.push(mirror_status(root, url, &target).await);
                     }
                 }
                 continue;
@@ -191,9 +191,9 @@ pub async fn status(
 }
 
 /// One `(database, target)`'s lag, from the source and destination
-/// heads. Read failures land in the `error` field rather than failing
-/// the whole status.
-async fn mirror_status(url: &str, target: &AppliedTarget) -> MirrorStatus {
+/// heads, plus the last recorded periodic verification. Read failures
+/// land in the `error` field rather than failing the whole status.
+async fn mirror_status(root: &FleetRoot, url: &str, target: &AppliedTarget) -> MirrorStatus {
     let mut status = MirrorStatus {
         database: url.to_string(),
         target: target.name.clone(),
@@ -203,13 +203,42 @@ async fn mirror_status(url: &str, target: &AppliedTarget) -> MirrorStatus {
         manifests_behind: None,
         wal_behind: None,
         seconds_behind: None,
+        verified_age: None,
+        verify_ok: None,
+        verify_problems: None,
         error: None,
     };
     match mirror_lag(url, target, &mut status).await {
         Ok(()) => {}
         Err(e) => status.error = Some(e.to_string()),
     }
+    if let Some(record) = verify_record(root, url, &target.name).await {
+        let age = (chrono::Utc::now() - record.verified_at)
+            .to_std()
+            .unwrap_or_default();
+        status.verified_age = Some(std::time::Duration::from_secs(age.as_secs()).into());
+        status.verify_ok = Some(record.ok);
+        status.verify_problems = Some(record.problems);
+    }
     status
+}
+
+/// The verify record for one `(database, target)`, if one exists and
+/// parses.
+async fn verify_record(
+    root: &FleetRoot,
+    url: &str,
+    target_name: &str,
+) -> Option<mirror::VerifyRecord> {
+    let bytes = root
+        .store()
+        .get(&root.verify_path(url, target_name))
+        .await
+        .ok()?
+        .bytes()
+        .await
+        .ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 async fn mirror_lag(

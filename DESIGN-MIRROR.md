@@ -338,6 +338,7 @@ poll = "10s"                    # continuous: pass and tail cadence
 # interval = "24h"              # periodic: cadence between passes
 # min_age = "300s"              # prune deletion age floor
 # checkpoint_lifetime = "15m"   # source pin checkpoint TTL
+# verify_interval = "24h"       # periodic re-verification (§10)
 # copy_parallelism = 8          # builtin: concurrent object copies
 ```
 
@@ -402,6 +403,19 @@ a support manifest immutably carries them, its pinned manifest was
 never promised to the target (§7), and they resolve nowhere at the
 source either; restore refuses such points rather than verify
 flagging sanctioned dangles.
+
+With `verify_interval` set on a target, the owning daemon task
+re-runs the existence-and-size check on that cadence (under the
+node's mirror-job cap) and records the outcome at the fleet root as
+`verify/<encoded-db>.<target>.json`: version, node, timestamp, ok,
+counts, and a problem sample (schema:
+`schema/verify-record.schema.json`; readers ignore unknown fields).
+`sleet status --mirrors` reads the record and reports its age,
+verdict, and problem count per `(database, target)`; the record's
+age growing past the interval means verification is not running.
+Records are observability-only and never read by placement or the
+pass; a record for a removed target or database is inert and may be
+deleted freely.
 
 ## 11. Future work
 

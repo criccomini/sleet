@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use sleet::{config, heartbeat, response};
+use sleet::{config, heartbeat, mirror, response};
 
 #[track_caller]
 fn assert_current(file: &str, generated: String) {
@@ -37,4 +37,12 @@ fn cli_schema_is_current() {
 #[test]
 fn heartbeat_schema_is_current() {
     assert_current("heartbeat.schema.json", heartbeat::schema_json());
+}
+
+#[test]
+fn verify_record_schema_is_current() {
+    assert_current(
+        "verify-record.schema.json",
+        mirror::verify::record_schema_json(),
+    );
 }

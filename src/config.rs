@@ -461,6 +461,13 @@ pub struct MirrorTargetOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checkpoint_lifetime: Option<HumanDuration>,
 
+    /// Daemon tasks re-verify the target's restore-point closures
+    /// (existence and size) on this cadence and record the outcome
+    /// under `verify/` at the fleet root for `sleet status --mirrors`.
+    /// Unset disables periodic verification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_interval: Option<HumanDuration>,
+
     /// Builtin copier: concurrent object copies per pass.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_parallelism: Option<u32>,
@@ -567,6 +574,8 @@ pub struct ResolvedMirrorTarget {
     pub min_age: Duration,
     /// Source pin checkpoint lifetime.
     pub checkpoint_lifetime: Duration,
+    /// Daemon tasks: periodic verification cadence; `None` disables it.
+    pub verify_interval: Option<Duration>,
     /// Builtin copier: concurrent object copies.
     pub copy_parallelism: u32,
     /// Restore-point retention; `None` keeps everything.
@@ -585,6 +594,7 @@ impl Default for ResolvedMirrorTarget {
             interval: Duration::from_secs(24 * 60 * 60),
             min_age: Duration::from_secs(300),
             checkpoint_lifetime: Duration::from_secs(15 * 60),
+            verify_interval: None,
             copy_parallelism: 8,
             keep: None,
         }
@@ -833,6 +843,9 @@ impl MirrorTargetOverrides {
         }
         if let Some(v) = self.checkpoint_lifetime {
             r.checkpoint_lifetime = v.0;
+        }
+        if let Some(v) = self.verify_interval {
+            r.verify_interval = Some(v.0);
         }
         if let Some(v) = self.copy_parallelism {
             r.copy_parallelism = v;
@@ -1209,6 +1222,7 @@ fn check_database(o: &DatabaseConfig, at: &str, errs: &mut Vec<String>) {
                 ("interval", t.interval),
                 ("min_age", t.min_age),
                 ("checkpoint_lifetime", t.checkpoint_lifetime),
+                ("verify_interval", t.verify_interval),
             ] {
                 if d.is_some_and(|d| d.0.is_zero()) {
                     errs.push(format!(

@@ -20,18 +20,20 @@ pub mod verify;
 use std::sync::Arc;
 use std::time::Duration;
 
+use object_store::ObjectStoreExt;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::{MirrorMode, ResolvedMirror, ResolvedMirrorTarget};
 use crate::registry;
+use crate::root::FleetRoot;
 use crate::services::DatabaseHandle;
 
 pub use pass::{PassOutcome, sync_pass};
 pub use prune::{PruneReport, prune};
 pub use restore::{RestoreOutcome, RestorePoint, restore};
-pub use verify::{Depth, VerifyOutcome, verify};
+pub use verify::{Depth, VerifyOutcome, VerifyRecord, verify};
 
 /// While a continuous mirror is idle, polling backs off exponentially
 /// from the target's `poll` up to this ceiling.
@@ -164,16 +166,29 @@ fn destination_for(db_url: &str, settings: &ResolvedMirrorTarget) -> Option<Stri
     (destination != db_url).then_some(destination)
 }
 
+/// Where a daemon mirror task records periodic verify outcomes
+/// (DESIGN-MIRROR §10): `verify/<db>.<target>.json` at the fleet root.
+#[derive(Clone)]
+pub struct VerifyReporter {
+    /// The fleet root the record is written under.
+    pub root: FleetRoot,
+    /// The node id stamped into records.
+    pub node_id: String,
+}
+
 /// Run one `(database, target)` mirror assignment until cancelled: the
 /// continuous or periodic loop per the target's mode. `jobs` is the
-/// node-wide `--max-mirror-jobs` cap; a permit is held while a pass or
-/// prune runs, not while polling idle.
+/// node-wide `--max-mirror-jobs` cap; a permit is held while a pass,
+/// prune, or verification runs, not while polling idle. With a
+/// reporter and a `verify_interval`, the task re-verifies the target
+/// on that cadence and records the outcome.
 pub async fn run_mirror(
     source: &DatabaseHandle,
     dest: &DatabaseHandle,
     target: &AppliedTarget,
     jobs: Arc<tokio::sync::Semaphore>,
     rclone: Option<String>,
+    reporter: Option<&VerifyReporter>,
     token: CancellationToken,
 ) -> Result<(), MirrorError> {
     info!(
@@ -185,11 +200,77 @@ pub async fn run_mirror(
     );
     match target.settings.mode {
         MirrorMode::Continuous => {
-            run_continuous(source, dest, target, jobs, rclone.as_deref(), token).await
+            run_continuous(
+                source,
+                dest,
+                target,
+                jobs,
+                rclone.as_deref(),
+                reporter,
+                token,
+            )
+            .await
         }
         MirrorMode::Periodic => {
-            run_periodic(source, dest, target, jobs, rclone.as_deref(), token).await
+            run_periodic(
+                source,
+                dest,
+                target,
+                jobs,
+                rclone.as_deref(),
+                reporter,
+                token,
+            )
+            .await
         }
+    }
+}
+
+/// Verify the target and record the outcome; never fails the mirror
+/// task. Store hiccups and record-write failures log and drop the
+/// record: the record's age is the operator's staleness signal.
+async fn verify_and_record(
+    source: &DatabaseHandle,
+    dest: &DatabaseHandle,
+    target: &AppliedTarget,
+    reporter: &VerifyReporter,
+) {
+    let outcome = match verify(source, dest, target.settings.keep, Depth::Sizes).await {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            warn!(database = %source.url, target = %target.name, "periodic verify failed: {e}");
+            return;
+        }
+    };
+    let record = VerifyRecord::new(
+        &reporter.node_id,
+        &source.url,
+        &target.name,
+        &dest.url,
+        &outcome,
+    );
+    if !record.ok {
+        warn!(
+            database = %source.url,
+            target = %target.name,
+            problems = record.problems,
+            "periodic verify found problems: {:?}",
+            record.sample
+        );
+    }
+    let path = reporter.root.verify_path(&source.url, &target.name);
+    let body = serde_json::to_vec(&record).expect("record serializes");
+    if let Err(e) = reporter.root.store().put(&path, body.into()).await {
+        warn!(database = %source.url, target = %target.name, "verify record write failed: {e}");
+    }
+}
+
+/// Cap a loop's sleep so a due verification is not starved by a long
+/// idle or inter-pass wait.
+fn sleep_until_verify(sleep: Duration, every: Option<Duration>, last: Instant) -> Duration {
+    match every {
+        Some(every) => sleep.min(every.saturating_sub(last.elapsed())),
+        None => sleep,
     }
 }
 
@@ -212,6 +293,7 @@ async fn run_continuous(
     target: &AppliedTarget,
     jobs: Arc<tokio::sync::Semaphore>,
     rclone: Option<&str>,
+    reporter: Option<&VerifyReporter>,
     token: CancellationToken,
 ) -> Result<(), MirrorError> {
     let settings = &target.settings;
@@ -223,9 +305,21 @@ async fn run_continuous(
     let mut watermark: Option<u64> = None;
     let mut tail: Option<pass::Tail> = None;
     let mut last_prune = Instant::now();
+    let verify_every = reporter.and(settings.verify_interval);
+    let mut last_verify = Instant::now();
     loop {
         if token.is_cancelled() {
             return Ok(());
+        }
+        if let (Some(every), Some(reporter)) = (verify_every, reporter)
+            && last_verify.elapsed() >= every
+        {
+            let _permit = tokio::select! {
+                _ = token.cancelled() => return Ok(()),
+                permit = jobs.clone().acquire_owned() => permit.expect("semaphore never closes"),
+            };
+            verify_and_record(source, dest, target, reporter).await;
+            last_verify = Instant::now();
         }
         let mut active = false;
         let source_head = layout::max_manifest_id(source).await?;
@@ -263,7 +357,7 @@ async fn run_continuous(
         };
         tokio::select! {
             _ = token.cancelled() => return Ok(()),
-            _ = tokio::time::sleep(idle) => {}
+            _ = tokio::time::sleep(sleep_until_verify(idle, verify_every, last_verify)) => {}
         }
     }
 }
@@ -274,6 +368,7 @@ async fn run_periodic(
     target: &AppliedTarget,
     jobs: Arc<tokio::sync::Semaphore>,
     rclone: Option<&str>,
+    reporter: Option<&VerifyReporter>,
     token: CancellationToken,
 ) -> Result<(), MirrorError> {
     let settings = &target.settings;
@@ -281,9 +376,21 @@ async fn run_periodic(
     // How often a due-but-idle target re-checks the source; a fresh
     // commit resets the wait to the full interval.
     let check = (settings.interval / 20).clamp(Duration::from_secs(60), Duration::from_secs(3600));
+    let verify_every = reporter.and(settings.verify_interval);
+    let mut last_verify = Instant::now();
     loop {
         if token.is_cancelled() {
             return Ok(());
+        }
+        if let (Some(every), Some(reporter)) = (verify_every, reporter)
+            && last_verify.elapsed() >= every
+        {
+            let _permit = tokio::select! {
+                _ = token.cancelled() => return Ok(()),
+                permit = jobs.clone().acquire_owned() => permit.expect("semaphore never closes"),
+            };
+            verify_and_record(source, dest, target, reporter).await;
+            last_verify = Instant::now();
         }
         // Stateless scheduling: a pass runs when the target's latest
         // manifest's LastModified is older than the interval.
@@ -309,7 +416,7 @@ async fn run_periodic(
         };
         tokio::select! {
             _ = token.cancelled() => return Ok(()),
-            _ = tokio::time::sleep(sleep) => {}
+            _ = tokio::time::sleep(sleep_until_verify(sleep, verify_every, last_verify)) => {}
         }
     }
 }

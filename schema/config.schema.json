@@ -484,6 +484,17 @@
             "string",
             "null"
           ]
+        },
+        "verify_interval": {
+          "description": "Daemon tasks re-verify the target's restore-point closures\n(existence and size) on this cadence and record the outcome\nunder `verify/` at the fleet root for `sleet status --mirrors`.\nUnset disables periodic verification.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false

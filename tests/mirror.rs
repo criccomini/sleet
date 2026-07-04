@@ -948,7 +948,7 @@ async fn continuous_mode_tracks_the_source() {
         let token = token.clone();
         async move {
             let jobs = Arc::new(tokio::sync::Semaphore::new(1));
-            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
+            mirror::run_mirror(&source, &dest, &target, jobs, None, None, token).await
         }
     });
 
@@ -1004,7 +1004,7 @@ async fn periodic_mode_cuts_on_the_interval() {
         let token = token.clone();
         async move {
             let jobs = Arc::new(tokio::sync::Semaphore::new(1));
-            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
+            mirror::run_mirror(&source, &dest, &target, jobs, None, None, token).await
         }
     });
 
@@ -1026,6 +1026,98 @@ async fn periodic_mode_cuts_on_the_interval() {
         .await
         .unwrap();
     assert!(outcome.ok(), "{:?}", outcome.points);
+}
+
+/// §10: with `verify_interval` set and a reporter, the mirror task
+/// re-verifies the target on the cadence and records the outcome at
+/// the fleet root; a deletion behind the mirror's back flips the
+/// record to failing.
+#[tokio::test(flavor = "multi_thread")]
+async fn periodic_verify_records_outcomes_at_the_fleet_root() {
+    use sleet::mirror::{VerifyRecord, VerifyReporter};
+    use sleet::root::FleetRoot;
+    use tokio_util::sync::CancellationToken;
+    let source_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
+    let dest_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
+    let source = handle(source_store.clone(), "memory:///src", "src");
+    seed(&source, 2).await;
+    let root = FleetRoot::from_parts(
+        Arc::new(InMemory::new()),
+        StorePath::from("fleet"),
+        "memory:///fleet",
+    );
+
+    let target = mirror::AppliedTarget {
+        name: "dr".into(),
+        destination: "memory:///dst".into(),
+        settings: ResolvedMirrorTarget {
+            poll: Duration::from_millis(50),
+            verify_interval: Some(Duration::from_millis(100)),
+            ..target_settings()
+        },
+    };
+    let token = CancellationToken::new();
+    let task = tokio::spawn({
+        let source = handle(source_store.clone(), "memory:///src", "src");
+        let dest = handle(dest_store.clone(), "memory:///dst", "dst");
+        let target = target.clone();
+        let token = token.clone();
+        let reporter = VerifyReporter {
+            root: root.clone(),
+            node_id: "n1".into(),
+        };
+        async move {
+            let jobs = Arc::new(tokio::sync::Semaphore::new(1));
+            mirror::run_mirror(&source, &dest, &target, jobs, None, Some(&reporter), token).await
+        }
+    });
+
+    // A passing record appears once the mirror converges.
+    let record_path = root.verify_path("memory:///src", "dr");
+    let read_record = || async {
+        let bytes = root
+            .store()
+            .get(&record_path)
+            .await
+            .ok()?
+            .bytes()
+            .await
+            .ok()?;
+        serde_json::from_slice::<VerifyRecord>(&bytes).ok()
+    };
+    let record = poll_until("passing verify record", || async {
+        read_record().await.filter(|r| r.ok)
+    })
+    .await;
+    assert_eq!(record.node_id, "n1");
+    assert_eq!(record.database, "memory:///src");
+    assert_eq!(record.target, "dr");
+    assert_eq!(record.destination, "memory:///dst");
+    assert!(record.points >= 1 && record.objects >= 1);
+    assert_eq!(record.problems, 0);
+
+    // Delete a referenced SST behind the mirror's back: the caught-up
+    // pass never re-copies it, and the next verification records the
+    // break.
+    let dest = handle(dest_store.clone(), "memory:///dst", "dst");
+    let head = dest.admin.read_manifest(None).await.unwrap().unwrap();
+    let victim = layout::manifest_objects(&head)
+        .compacted
+        .iter()
+        .next()
+        .cloned()
+        .expect("head references an SST");
+    dest.store
+        .delete(&layout::object_path(&dest, &layout::compacted_rel(&victim)))
+        .await
+        .unwrap();
+    poll_until("failing verify record", || async {
+        read_record().await.filter(|r| !r.ok && r.problems > 0)
+    })
+    .await;
+
+    token.cancel();
+    task.await.unwrap().unwrap();
 }
 
 /// §8: the rclone copier drives `rclone copy --files-from` for the
@@ -1090,7 +1182,7 @@ async fn rclone_copier_moves_data_objects() {
     .await
     .unwrap();
     assert_mirrored(&source, &dest).await;
-    let verified = mirror::verify(&source, &dest, None, Depth::Sizes)
+    let verified = mirror::verify(&source, &dest, None, Depth::Bytes)
         .await
         .unwrap();
     assert!(verified.ok(), "{:?}", verified.points);
@@ -1134,7 +1226,8 @@ async fn daemon_mirrors_a_registered_database() {
         .put(
             &root.database_path(&registry::canonicalize_url(&db_url).unwrap()),
             format!(
-                "[mirror.targets.dr]\nurl = \"{dest_url}\"\nmode = \"continuous\"\npoll = \"250ms\"\n"
+                "[mirror.targets.dr]\nurl = \"{dest_url}\"\nmode = \"continuous\"\npoll = \"250ms\"\n\
+                 verify_interval = \"500ms\"\n"
             )
             .into(),
         )
@@ -1191,6 +1284,16 @@ async fn daemon_mirrors_a_registered_database() {
         .await
         .unwrap();
     assert!(verify.ok, "{:?}", verify.points);
+
+    // The daemon's periodic verification records an outcome and
+    // status surfaces it.
+    poll_until("verify record in status", || async {
+        let status = ops::status(&root, false, true).await.unwrap();
+        let m = status.mirrors.first()?;
+        (m.verify_ok == Some(true) && m.verified_age.is_some() && m.verify_problems == Some(0))
+            .then_some(())
+    })
+    .await;
 
     // One-shot sync on a caught-up pair is a clean no-op.
     shutdown.cancel();
@@ -1380,7 +1483,7 @@ async fn caught_up_mirror_costs_one_list_and_one_probe_per_wakeup() {
         let token = token.clone();
         async move {
             let jobs = Arc::new(tokio::sync::Semaphore::new(1));
-            mirror::run_mirror(&source, &dest, &target, jobs, None, token).await
+            mirror::run_mirror(&source, &dest, &target, jobs, None, None, token).await
         }
     });
 
@@ -2195,7 +2298,7 @@ async fn mirror_jobs_semaphore_gates_passes() {
         let target = target.clone();
         let jobs = jobs.clone();
         let token = token.clone();
-        async move { mirror::run_mirror(&source, &dest, &target, jobs, None, token).await }
+        async move { mirror::run_mirror(&source, &dest, &target, jobs, None, None, token).await }
     });
 
     tokio::time::sleep(Duration::from_millis(600)).await;
@@ -2325,7 +2428,7 @@ async fn external_copier_backfills_incrementally() {
         .await
         .unwrap();
     assert_mirrored(&source, &dest).await;
-    let verified = mirror::verify(&source, &dest, None, Depth::Sizes)
+    let verified = mirror::verify(&source, &dest, None, Depth::Bytes)
         .await
         .unwrap();
     assert!(verified.ok(), "{:?}", verified.points);

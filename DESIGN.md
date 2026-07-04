@@ -41,6 +41,7 @@ sleet run s3://ops/sleet/
   sleet.toml               # policy: defaults, timing
   dbs/<db>.toml            # registry: one file per database, overrides only
   nodes/<node>.<services>.json  # liveness + offered services in the name
+  verify/<db>.<target>.json     # mirror verify records (DESIGN-MIRROR §10)
 ```
 
 Each node heartbeats under `nodes/`, computes its assignments by

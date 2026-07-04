@@ -231,6 +231,33 @@
           "format": "uint64",
           "minimum": 0
         },
+        "verified_age": {
+          "description": "Age of the newest verify record for this `(database, target)`\nunder `verify/` at the fleet root; absent when no periodic\nverification has recorded an outcome.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanDuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verify_ok": {
+          "description": "Whether the recorded verification passed.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "verify_problems": {
+          "description": "Problems the recorded verification found.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "wal_behind": {
           "description": "WAL ids the destination is behind.",
           "type": [
