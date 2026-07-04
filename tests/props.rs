@@ -251,3 +251,234 @@ proptest! {
         );
     }
 }
+
+/// A random schedule of source writes, WAL-only flushes, checkpoint
+/// churn, real GC passes, sync passes, aggressive prunes, and tail
+/// steps must always leave a mirror that converges and verifies: the
+/// closure enumeration and both prune guards hold across generated
+/// histories, not just the handcrafted ones. Proptest shrinks any
+/// failure to a minimal schedule.
+#[derive(Clone, Debug)]
+enum MirrorOp {
+    /// Put a batch and flush the memtable (new L0, manifest commit).
+    WriteFlush(u8),
+    /// Put and flush the WAL only (tail material).
+    WalOnly(u8),
+    /// Create a named operator checkpoint.
+    Checkpoint,
+    /// Delete the oldest operator checkpoint, if any.
+    DropCheckpoint,
+    /// One real GC pass over the source with a zero age floor.
+    Gc,
+    /// One sync pass.
+    Sync,
+    /// One prune with retention aged to a millisecond.
+    Prune,
+    /// One WAL tail step.
+    Tail,
+}
+
+fn mirror_op() -> impl Strategy<Value = MirrorOp> {
+    prop_oneof![
+        3 => (0u8..3).prop_map(MirrorOp::WriteFlush),
+        2 => (0u8..3).prop_map(MirrorOp::WalOnly),
+        1 => Just(MirrorOp::Checkpoint),
+        1 => Just(MirrorOp::DropCheckpoint),
+        2 => Just(MirrorOp::Gc),
+        3 => Just(MirrorOp::Sync),
+        2 => Just(MirrorOp::Prune),
+        2 => Just(MirrorOp::Tail),
+    ]
+}
+
+async fn run_mirror_schedule(ops: Vec<MirrorOp>) -> Result<(), String> {
+    use object_store::path::Path as StorePath;
+    use sleet::config::{ResolvedGc, ResolvedMirrorTarget};
+    use sleet::mirror::{self, pass};
+    use sleet::services::{self, DatabaseHandle};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let source = DatabaseHandle::from_parts(
+        "memory:///src",
+        Arc::new(object_store::memory::InMemory::new()),
+        StorePath::from("src"),
+    );
+    let dest = DatabaseHandle::from_parts(
+        "memory:///dst",
+        Arc::new(object_store::memory::InMemory::new()),
+        StorePath::from("dst"),
+    );
+    let settings = ResolvedMirrorTarget {
+        keep: Some(Duration::from_millis(1)),
+        min_age: Duration::ZERO,
+        ..ResolvedMirrorTarget::default()
+    };
+    let mut gc = ResolvedGc::default();
+    for dir in [
+        &mut gc.manifest,
+        &mut gc.wal,
+        &mut gc.compacted,
+        &mut gc.compactions,
+    ] {
+        dir.min_age = Duration::ZERO;
+    }
+    gc.wal_fence.enabled = false;
+    gc.detach.enabled = false;
+
+    let writer = slatedb::Db::builder(source.path.clone(), source.store.clone())
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .map_err(|e| format!("open writer: {e}"))?;
+    let mut batch = 0u32;
+    let mut checkpoints: Vec<uuid::Uuid> = Vec::new();
+    let mut tail: Option<pass::Tail> = None;
+    fn err<E: std::fmt::Display>(what: &'static str) -> impl Fn(E) -> String {
+        move |e| format!("{what}: {e}")
+    }
+
+    for op in &ops {
+        match op {
+            MirrorOp::WriteFlush(n) => {
+                for i in 0..=*n {
+                    writer
+                        .put(format!("k-{batch}-{i}").as_bytes(), vec![*n; 64].as_slice())
+                        .await
+                        .map_err(err("put"))?;
+                }
+                batch += 1;
+                writer
+                    .flush_with_options(slatedb::config::FlushOptions {
+                        flush_type: slatedb::config::FlushType::MemTable,
+                    })
+                    .await
+                    .map_err(err("memtable flush"))?;
+            }
+            MirrorOp::WalOnly(n) => {
+                for i in 0..=*n {
+                    writer
+                        .put(format!("w-{batch}-{i}").as_bytes(), b"wal".as_slice())
+                        .await
+                        .map_err(err("wal put"))?;
+                }
+                batch += 1;
+                writer.flush().await.map_err(err("wal flush"))?;
+            }
+            MirrorOp::Checkpoint => {
+                let result = source
+                    .admin
+                    .create_detached_checkpoint(&slatedb::config::CheckpointOptions {
+                        lifetime: None,
+                        source: None,
+                        name: Some(format!("op-{batch}")),
+                    })
+                    .await
+                    .map_err(err("checkpoint"))?;
+                checkpoints.push(result.id);
+            }
+            MirrorOp::DropCheckpoint => {
+                if !checkpoints.is_empty() {
+                    let id = checkpoints.remove(0);
+                    source
+                        .admin
+                        .delete_checkpoint(id)
+                        .await
+                        .map_err(err("delete checkpoint"))?;
+                }
+            }
+            MirrorOp::Gc => {
+                source
+                    .admin
+                    .run_gc_once(services::gc_options(&gc))
+                    .await
+                    .map_err(err("gc"))?;
+            }
+            MirrorOp::Sync => {
+                let outcome = mirror::sync_pass(&source, &dest, "dr", &settings, None)
+                    .await
+                    .map_err(err("sync"))?;
+                match &mut tail {
+                    Some(t) => t.advance_floor(outcome.next_wal_sst_id),
+                    None => {
+                        tail = Some(
+                            pass::Tail::start(&dest, outcome.next_wal_sst_id)
+                                .await
+                                .map_err(err("tail start"))?,
+                        )
+                    }
+                }
+            }
+            MirrorOp::Prune => {
+                mirror::prune(&source, &dest, "dr", &settings)
+                    .await
+                    .map_err(err("prune"))?;
+            }
+            MirrorOp::Tail => {
+                if let Some(t) = &mut tail {
+                    t.step(&source, &dest).await.map_err(err("tail"))?;
+                }
+            }
+        }
+    }
+    writer.close().await.map_err(err("close"))?;
+
+    // Converge (the unpin dance takes two quiet passes) and check the
+    // oracle: the watermark reaches the head and the whole target
+    // verifies, restore points and closures intact.
+    for _ in 0..3 {
+        mirror::sync_pass(&source, &dest, "dr", &settings, None)
+            .await
+            .map_err(err("converging sync"))?;
+    }
+    let src_head = source
+        .admin
+        .read_manifest(None)
+        .await
+        .map_err(err("src head"))?
+        .ok_or("source has no manifest")?;
+    let dst_head = dest
+        .admin
+        .read_manifest(None)
+        .await
+        .map_err(err("dst head"))?
+        .ok_or("destination has no manifest")?;
+    if src_head.id() != dst_head.id() {
+        return Err(format!(
+            "not converged: source {} target {}",
+            src_head.id(),
+            dst_head.id()
+        ));
+    }
+    let verified = mirror::verify(&source, &dest, None)
+        .await
+        .map_err(err("verify"))?;
+    if !verified.ok() {
+        return Err(format!("verification failed: {:#?}", verified.points));
+    }
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 24,
+        ..ProptestConfig::default()
+    })]
+
+    #[test]
+    fn random_mirror_schedules_converge_and_verify(
+        ops in prop::collection::vec(mirror_op(), 1..14),
+    ) {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = rt.block_on(run_mirror_schedule(ops));
+        prop_assert!(result.is_ok(), "{}", result.unwrap_err());
+    }
+}
