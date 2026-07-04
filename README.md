@@ -213,9 +213,7 @@ Mirror one-shots:
 
 ```sh
 sleet mirror sync s3://ops/sleet s3://app-data/db1 backup
-sleet mirror verify s3://ops/sleet s3://app-data/db1 backup
 sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1
-sleet mirror prefixes --format s3 s3://ops/sleet s3://app-data/db1 dr
 ```
 
 JSON responses are described by
