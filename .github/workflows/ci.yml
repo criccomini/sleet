@@ -120,6 +120,27 @@ jobs:
       - run: cargo test --locked --test mbt
         env:
           SLEET_MBT: 1
+      # The mirror MBT (specs/mirror-mbt.fizz, hand-written at
+      # whole-pass granularity; see its header) needs its own state
+      # space: re-explore, restart the server, run the mirror-gated
+      # test.
+      - name: Serve the mirror state space
+        run: |
+          pkill -f fizzbee-mbt-server || true
+          sleep 2
+          export PARSER_BIN="$HOME/fizzbee/parser/parser_bin"
+          export FIZZBEE_BIN="$HOME/fizzbee/fizzbee"
+          "$HOME/fizzbee/fizz" specs/mirror-mbt.fizz
+          "$HOME/fizzbee-mbt/fizzbee-mbt-server" --states_file specs/out/latest &
+          for _ in $(seq 60); do
+            (exec 3<>/dev/tcp/127.0.0.1/50051) 2>/dev/null && exit 0
+            sleep 1
+          done
+          echo "mbt server never became ready" >&2
+          exit 1
+      - run: cargo test --locked --test mbt mirror
+        env:
+          SLEET_MBT_MIRROR: 1
 
   # Model-check the mirror sync protocol (specs/mirror.fizz) in its
   # two exhaustive configurations (the full budget product does not
@@ -170,6 +191,44 @@ jobs:
               && { echo "simulation seed $seed failed" >&2; exit 1; }
           done
           echo "simulation sweep clean"
+
+  # The GCS semantics test and the cross-store (S3 -> GCS) mirror
+  # test, against fake-gcs-server plus the same MinIO container the
+  # s3 job uses. fake-gcs-server needs command-line flags (-scheme
+  # http), which service containers cannot pass, so a step runs the
+  # container directly. The test creates its bucket itself and
+  # absorbs startup lag; with the endpoints set, unreachable servers
+  # fail rather than skip.
+  gcs:
+    name: test (gcs)
+    runs-on: ubuntu-latest
+    services:
+      minio:
+        image: bitnamilegacy/minio@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          MINIO_DEFAULT_BUCKETS: sleet
+        ports:
+          - 9000:9000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+      # The tustvold fork: upstream fsouza/fake-gcs-server rejects
+      # object_store's XML-API uploads with "invalid uploadType".
+      # The same fork object_store's own CI tests against.
+      - name: Run fake-gcs-server
+        run: |
+          docker run -d --name fake-gcs -p 4443:4443 \
+            tustvold/fake-gcs-server \
+            -scheme http -backend memory -public-host 127.0.0.1:4443
+      - run: cargo test --locked --test gcs
+        env:
+          SLEET_GCS_ENDPOINT: http://127.0.0.1:4443
+          SLEET_S3_ENDPOINT: http://127.0.0.1:9000
 
   # The S3 semantics test, against a MinIO service container. The
   # official minio/minio image needs a `server /data` command, which

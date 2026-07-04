@@ -17,8 +17,10 @@ when the two drift.
 - `cargo test` runs all tests: unit, property, integration, chaos, DST,
   schema drift, CLI snapshots. The MinIO test needs `SLEET_S3_ENDPOINT`
   and skips without it; CI runs MinIO as a service container, and
-  `.github/workflows/ci.yml` names the image to run locally. The MBT
-  test needs `SLEET_MBT` and skips without it.
+  `.github/workflows/ci.yml` names the image to run locally. The GCS
+  and cross-store tests need `SLEET_GCS_ENDPOINT` (fake-gcs-server;
+  the header of `tests/gcs.rs` has the docker command) and skip
+  without it. The MBT test needs `SLEET_MBT` and skips without it.
 - `UPDATE_SCHEMAS=1 cargo test --test schema_sync` regenerates the
   files under `schema/` after changing `src/config.rs`,
   `src/response.rs`, `src/heartbeat.rs`, or the verify record in
@@ -42,6 +44,12 @@ when the two drift.
   `fizzbee-mbt-server --states_file specs/out/latest &`, then
   `SLEET_MBT=1 cargo test --test mbt`. After editing the spec, rebuild
   the derived MBT spec with `UPDATE_SPECS=1 cargo test --test mbt`.
+  The mirror protocol has its own hand-written MBT spec at whole-pass
+  granularity (`specs/mirror-mbt.fizz`; its header explains why it is
+  not derived from `specs/mirror.fizz`): `fizz specs/mirror-mbt.fizz`,
+  restart the server, then `SLEET_MBT_MIRROR=1 cargo test --test mbt
+  mirror`. One gate per run: each test needs its own served state
+  space.
 - `cargo bench` runs the placement and registry-poll scaling benches.
 - Run `cargo fmt && cargo clippy --all-targets` before committing.
 
