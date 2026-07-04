@@ -150,6 +150,7 @@ jobs:
       - name: Model-check the mirror spec
         env:
           GOGC: "50"
+          GOMEMLIMIT: 11GiB
         run: |
           export PARSER_BIN="$HOME/fizzbee/parser/parser_bin"
           export FIZZBEE_BIN="$HOME/fizzbee/fizzbee"

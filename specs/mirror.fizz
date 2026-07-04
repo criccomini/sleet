@@ -21,7 +21,8 @@
 # latest manifest plus at most one chosen survivor, which includes
 # the most aggressive retention as a special case.
 #
-# Checked claims:
+# Checked claims (CI runs the expiry configuration per push and the
+# default configuration when specs/ changes; see ci.yml):
 # - TargetComplete: the completeness invariant (§3): the target's
 #   latest manifest always has its full closure present, in every
 #   state, including mid-commit (this is the ascending-order claim)
