@@ -88,13 +88,7 @@ sleet run s3://ops/sleet --node-id mirror-1 --services mirror --rclone /usr/bin/
 sleet mirror sync s3://ops/sleet s3://bucket/db backup --rclone /usr/bin/rclone
 ```
 
-For `external`, configure replication for data prefixes only. Do not replicate `manifest/`, and do not replicate delete markers. Use the prefix helper to generate provider-shaped filters:
-
-```sh
-sleet mirror prefixes --format s3 s3://ops/sleet s3://bucket/db dr
-sleet mirror prefixes --format sts s3://ops/sleet s3://bucket/db dr
-sleet mirror prefixes --format azure s3://ops/sleet s3://bucket/db dr
-```
+For `external`, configure replication for the database's `wal/` and `compacted/` prefixes only. Do not replicate `manifest/` (Sleet is the only manifest writer at the target), and do not replicate delete markers.
 
 ## Retention and restore
 

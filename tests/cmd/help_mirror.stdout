@@ -1,12 +1,11 @@
-Mirror operations: sync, restore, prefixes
+Mirror operations: sync, restore
 
 Usage: sleet mirror <COMMAND>
 
 Commands:
-  sync      Run a single sync pass for one (database, target), regardless of the target's mode; prunes afterward when retention is set
-  restore   Copy one restore point's closure from a backup into an empty destination root and commit it
-  prefixes  Emit the anchored key-prefix filter lists an external replication service needs for one (database, target)
-  help      Print this message or the help of the given subcommand(s)
+  sync     Run a single sync pass for one (database, target), regardless of the target's mode; prunes afterward when retention is set
+  restore  Copy one restore point's closure from a backup into an empty destination root and commit it
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help  Print help

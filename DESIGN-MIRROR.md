@@ -299,8 +299,7 @@ manifests; the copier moves only `wal/` and `compacted/`.
   configuration), GCS Storage Transfer has anchored
   `includePrefixes`/`excludePrefixes` (1,000 each), Azure
   `prefixMatch` is include-only. The caps also rule external copiers
-  out as fleet-wide defaults (§9). `sleet mirror prefixes <root> <db>
-  <target> --format s3|sts|azure` emits the per-database filter lists.
+  out as fleet-wide defaults (§9).
 
 ## 9. Configuration and placement
 

@@ -30,8 +30,6 @@ pub enum Response {
     MirrorSync(MirrorSyncResponse),
     /// `sleet mirror restore`.
     MirrorRestore(MirrorRestoreResponse),
-    /// `sleet mirror prefixes`.
-    MirrorPrefixes(MirrorPrefixesResponse),
 }
 
 /// The `sleet status` response, derived from the fleet root: node
@@ -231,52 +229,4 @@ pub struct MirrorRestoreResponse {
 
     /// Data bytes copied.
     pub bytes_copied: u64,
-}
-
-/// The `sleet mirror prefixes` response: the anchored key-prefix
-/// filter lists an external replication service needs for one
-/// database's data directories.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[schemars(title = "sleet mirror prefixes response")]
-pub struct MirrorPrefixesResponse {
-    /// The source database's canonical URL.
-    pub database: String,
-
-    /// The target's name.
-    pub target: String,
-
-    /// The destination root.
-    pub destination: String,
-
-    /// Which service's configuration shape is emitted.
-    pub format: PrefixFormat,
-
-    /// The source bucket (or container).
-    pub source_bucket: String,
-
-    /// The destination bucket (or container).
-    pub destination_bucket: String,
-
-    /// Source key prefixes to replicate: the database's `wal/` and
-    /// `compacted/` directories.
-    pub prefixes: Vec<String>,
-
-    /// The same directories under the destination root.
-    pub destination_prefixes: Vec<String>,
-
-    /// A configuration snippet in the service's native shape.
-    pub configuration: serde_json::Value,
-}
-
-/// External replication services `sleet mirror prefixes` can emit
-/// filter lists for.
-#[derive(Clone, Copy, Debug, Serialize, JsonSchema, clap::ValueEnum)]
-#[serde(rename_all = "lowercase")]
-pub enum PrefixFormat {
-    /// S3 bucket replication rules.
-    S3,
-    /// GCS Storage Transfer Service include prefixes.
-    Sts,
-    /// Azure object replication rules.
-    Azure,
 }

@@ -88,7 +88,7 @@ enum Command {
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
     },
-    /// Mirror operations: sync, restore, prefixes.
+    /// Mirror operations: sync, restore.
     Mirror {
         #[command(subcommand)]
         command: MirrorCommand,
@@ -138,22 +138,6 @@ enum MirrorCommand {
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
-    },
-    /// Emit the anchored key-prefix filter lists an external
-    /// replication service needs for one (database, target).
-    Prefixes {
-        /// Fleet root URL, e.g. s3://ops/sleet/.
-        root: String,
-
-        /// Registered database URL.
-        db: String,
-
-        /// Mirror target name.
-        target: String,
-
-        /// Which service's configuration shape to emit.
-        #[arg(long, value_enum)]
-        format: sleet::response::PrefixFormat,
     },
 }
 
@@ -277,21 +261,6 @@ async fn main() -> ExitCode {
                 };
                 match ops::mirror_restore(&backup, &dest, at).await {
                     Ok(response) => emit(&response, format),
-                    Err(e) => fail(e),
-                }
-            }
-            MirrorCommand::Prefixes {
-                root,
-                db,
-                target,
-                format,
-            } => {
-                let root = match FleetRoot::open(&root) {
-                    Ok(root) => root,
-                    Err(e) => return fail(e),
-                };
-                match ops::mirror_prefixes(&root, &db, &target, format).await {
-                    Ok(response) => emit(&response, Format::Text),
                     Err(e) => fail(e),
                 }
             }

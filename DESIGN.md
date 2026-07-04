@@ -289,7 +289,7 @@ poll floors keep a million mostly-idle databases affordable.
 
 A single `sleet` crate with one binary: `sleet run <root>` is the
 long-running daemon; `status`, `register`, and the `mirror` family
-(`sync`, `restore`, `prefixes`) are one-shots. Config types
+(`sync`, `restore`) are one-shots. Config types
 (`sleet.toml`, `dbs/*.toml`) live in `src/config.rs`
 (`schema/config.schema.json`); the heartbeat format lives in
 `src/heartbeat.rs` (`schema/heartbeat.schema.json`). The frozen

@@ -12,9 +12,8 @@ use crate::mirror::{self, AppliedTarget};
 use crate::placement;
 use crate::registry;
 use crate::response::{
-    DatabaseStatus, MirrorPrefixesResponse, MirrorRestoreResponse, MirrorStatus,
-    MirrorSyncResponse, NodeStatus, PrefixFormat, QueueStatus, RegisterResponse, ServicePlacement,
-    StatusResponse,
+    DatabaseStatus, MirrorRestoreResponse, MirrorStatus, MirrorSyncResponse, NodeStatus,
+    QueueStatus, RegisterResponse, ServicePlacement, StatusResponse,
 };
 use crate::root::{ConfigPoller, FleetRoot, HeartbeatEntry, node_view};
 use crate::services::{self, DatabaseHandle};
@@ -372,104 +371,6 @@ pub async fn mirror_restore(
         objects_copied: outcome.copied_objects,
         bytes_copied: outcome.copied_bytes,
     })
-}
-
-/// `sleet mirror prefixes`: the anchored key-prefix filter lists for
-/// configuring external replication over one database's data
-/// directories.
-pub async fn mirror_prefixes(
-    root: &FleetRoot,
-    db_url: &str,
-    target_name: &str,
-    format: PrefixFormat,
-) -> Result<MirrorPrefixesResponse, OpsError> {
-    use crate::mirror::layout::{COMPACTED_DIR, WAL_DIR};
-    let (canonical, target) = applied_target(root, db_url, target_name).await?;
-    let (source_bucket, source_path) = bucket_and_path(&canonical)?;
-    let (dest_bucket, dest_path) = bucket_and_path(&target.destination)?;
-    let dir_prefixes = |path: &str| {
-        [WAL_DIR, COMPACTED_DIR]
-            .iter()
-            .map(|dir| {
-                if path.is_empty() {
-                    format!("{dir}/")
-                } else {
-                    format!("{path}/{dir}/")
-                }
-            })
-            .collect::<Vec<String>>()
-    };
-    let prefixes = dir_prefixes(&source_path);
-    let destination_prefixes = dir_prefixes(&dest_path);
-    let configuration =
-        prefix_configuration(format, target_name, &source_bucket, &dest_bucket, &prefixes);
-    Ok(MirrorPrefixesResponse {
-        database: canonical,
-        target: target.name,
-        destination: target.destination,
-        format,
-        source_bucket,
-        destination_bucket: dest_bucket,
-        prefixes,
-        destination_prefixes,
-        configuration,
-    })
-}
-
-/// A URL's bucket (or container) and root-relative path.
-fn bucket_and_path(url: &str) -> Result<(String, String), OpsError> {
-    let canonical = registry::canonicalize_url(url)?;
-    let parsed = url::Url::parse(&canonical).expect("canonical URL reparses");
-    Ok((
-        parsed.host_str().unwrap_or_default().to_string(),
-        parsed.path().trim_matches('/').to_string(),
-    ))
-}
-
-/// The service-native configuration snippet for one format. These are
-/// skeletons carrying the filter lists; account-specific fields (roles,
-/// rule ids) are left as placeholders.
-fn prefix_configuration(
-    format: PrefixFormat,
-    target_name: &str,
-    source_bucket: &str,
-    dest_bucket: &str,
-    prefixes: &[String],
-) -> serde_json::Value {
-    use serde_json::json;
-    match format {
-        PrefixFormat::S3 => json!({
-            "Rules": prefixes
-                .iter()
-                .enumerate()
-                .map(|(i, prefix)| {
-                    json!({
-                        "ID": format!("sleet-{target_name}-{i}"),
-                        "Status": "Enabled",
-                        "Priority": i + 1,
-                        "Filter": { "Prefix": prefix },
-                        "Destination": { "Bucket": format!("arn:aws:s3:::{dest_bucket}") },
-                        "DeleteMarkerReplication": { "Status": "Disabled" }
-                    })
-                })
-                .collect::<Vec<_>>()
-        }),
-        PrefixFormat::Sts => json!({
-            "transferSpec": {
-                "gcsDataSource": { "bucketName": source_bucket },
-                "gcsDataSink": { "bucketName": dest_bucket },
-                "objectConditions": { "includePrefixes": prefixes }
-            }
-        }),
-        PrefixFormat::Azure => json!({
-            "rules": [{
-                "ruleId": format!("sleet-{target_name}"),
-                "sourceContainer": source_bucket,
-                "destinationContainer": dest_bucket,
-                "filters": { "prefixMatch": prefixes }
-            }]
-        }),
-    }
 }
 
 /// One database's compaction queue depth, read via `slatedb::Admin`.

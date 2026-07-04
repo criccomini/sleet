@@ -1150,11 +1150,9 @@ async fn daemon_mirrors_a_registered_database() {
 }
 
 /// §10: status --mirrors flags destination collisions and databases
-/// with mirror enabled but no applicable target; prefixes emits the
-/// per-database filter lists without touching either store.
+/// with mirror enabled but no applicable target.
 #[tokio::test(flavor = "multi_thread")]
-async fn status_flags_collisions_and_prefixes_emit_filters() {
-    use sleet::response::PrefixFormat;
+async fn status_flags_collisions_and_uncovered_databases() {
     use sleet::root::FleetRoot;
     use sleet::{ops, registry};
 
@@ -1217,52 +1215,6 @@ async fn status_flags_collisions_and_prefixes_emit_filters() {
     // Lag reads fail cleanly for unreachable s3 stores: the error
     // rides in the per-target field, not the whole status.
     assert_eq!(status.mirrors.len(), 2);
-
-    // Prefixes never opens a store: pure config computation.
-    let prefixes = ops::mirror_prefixes(&root, "s3://data/db1", "dr", PrefixFormat::S3)
-        .await
-        .unwrap();
-    assert_eq!(prefixes.source_bucket, "data");
-    assert_eq!(prefixes.destination_bucket, "dr-bucket");
-    assert_eq!(
-        prefixes.prefixes,
-        vec!["db1/wal/".to_string(), "db1/compacted/".to_string()]
-    );
-    assert_eq!(
-        prefixes.destination_prefixes,
-        vec![
-            "one-destination/wal/".to_string(),
-            "one-destination/compacted/".to_string()
-        ]
-    );
-    let rules = prefixes.configuration["Rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 2);
-    assert_eq!(rules[0]["Filter"]["Prefix"], "db1/wal/");
-    assert_eq!(
-        rules[0]["DeleteMarkerReplication"]["Status"], "Disabled",
-        "propagated deletes could remove referenced objects"
-    );
-
-    let sts = ops::mirror_prefixes(&root, "s3://data/db1", "dr", PrefixFormat::Sts)
-        .await
-        .unwrap();
-    assert_eq!(
-        sts.configuration["transferSpec"]["objectConditions"]["includePrefixes"]
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
-    let azure = ops::mirror_prefixes(&root, "s3://data/db1", "dr", PrefixFormat::Azure)
-        .await
-        .unwrap();
-    assert_eq!(
-        azure.configuration["rules"][0]["filters"]["prefixMatch"]
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
 }
 
 /// Poll an async condition every 100ms for up to 150s (the soak's

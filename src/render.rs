@@ -12,8 +12,7 @@ use std::io::{self, Write};
 
 use crate::config::Service;
 use crate::response::{
-    MirrorPrefixesResponse, MirrorRestoreResponse, MirrorSyncResponse, RegisterResponse,
-    StatusResponse,
+    MirrorRestoreResponse, MirrorSyncResponse, RegisterResponse, StatusResponse,
 };
 
 /// Human-readable rendering of a response.
@@ -215,18 +214,6 @@ impl Render for MirrorRestoreResponse {
             self.manifests_committed,
             self.objects_copied,
             self.bytes_copied
-        )
-    }
-}
-
-impl Render for MirrorPrefixesResponse {
-    fn render(&self, w: &mut dyn Write) -> io::Result<()> {
-        // The payload is the service-native configuration snippet;
-        // the filter lists ride inside it.
-        writeln!(
-            w,
-            "{}",
-            serde_json::to_string_pretty(&self.configuration).expect("configuration serializes")
         )
     }
 }
