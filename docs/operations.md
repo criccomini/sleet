@@ -41,6 +41,14 @@ sleet run s3://ops/sleet \
 
 `--max-compaction-jobs` caps how many databases compact on one node at the same time. `--max-mirror-jobs` caps concurrent mirror copy or prune jobs on one node. Both default to the machine's available parallelism.
 
+## Logs
+
+Sleet logs through Rust's `tracing` filter. If `RUST_LOG` is unset, the default filter is `sleet=info,warn`.
+
+```sh
+RUST_LOG=sleet=debug,object_store=warn sleet run s3://ops/sleet --node-id sleet-1
+```
+
 ## Register and unregister databases
 
 Register with the CLI:
@@ -154,5 +162,4 @@ The main recurring object-store operations are:
 - per-database service polls based on config
 - extra status reads when `--compactions` or `--mirrors` is used
 
-Mostly idle compaction workers back off polling up to five minutes. Continuous mirrors also back off while caught up.
-
+Mostly idle compaction workers back off polling up to five minutes. Continuous mirrors also back off while caught up, capped at five minutes unless the configured `poll` is larger.

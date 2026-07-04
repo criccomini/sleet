@@ -131,7 +131,7 @@ sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1
 sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1 --at 42
 ```
 
-`--at` accepts a manifest ID or RFC 3339 timestamp. If omitted, Sleet restores the backup's latest manifest.
+`--at` accepts a manifest ID or RFC 3339 timestamp. A timestamp resolves to the newest restore point at or before that time. The mapping uses the backup manifest sequence tracker, which samples at about 60 seconds with the stock SlateDB settings. If omitted, Sleet restores the backup's latest manifest.
 
 ## `sleet mirror prefixes`
 
@@ -158,4 +158,3 @@ sleet mirror prefixes --format s3 s3://ops/sleet s3://bucket/db dr
 ## JSON outputs
 
 One-shot commands that accept `--format json` emit responses defined in [schema/cli.schema.json](../schema/cli.schema.json). Use the schema for automation instead of scraping text output.
-

@@ -54,7 +54,7 @@ Each node computes ownership locally from:
 - the live node set from `nodes/`
 - the services each live node offers
 
-Sleet uses rendezvous hashing. For `gc` and `compactor-coordinator`, the top-ranked live node owns the `(database, service)` pair. For `compaction-workers`, the top `count` nodes poll the database's compaction queue. For mirroring, ownership is per `(database, target)` pair.
+Sleet uses rendezvous hashing. For `gc` and `compactor-coordinator`, the top-ranked live node owns the `(database, service)` pair. For `compaction-workers`, the top `count` nodes poll the database's compaction queue. For mirroring, ownership is per `(database, mirror, target)` triple.
 
 Adding or removing a node moves only the assignments affected by that node's rank. No node writes the result back to storage.
 
@@ -130,4 +130,3 @@ Database work scales with database count and configured poll intervals. Worker p
 - [DESIGN-MIRROR.md](../DESIGN-MIRROR.md) describes mirror invariants and restore semantics.
 - [src/placement.rs](../src/placement.rs) contains the frozen rendezvous hash.
 - [src/heartbeat.rs](../src/heartbeat.rs) defines heartbeat naming and JSON schema generation.
-

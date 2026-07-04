@@ -96,6 +96,7 @@ The generated schema is the field reference. These defaults are the values opera
 | Config and registry poll | `60s` |
 | GC directory interval | `60s` |
 | GC directory minimum age | `300s` |
+| GC clone-detach pass | enabled, `60s` interval |
 | WAL fence GC | dry-run by default |
 | Compaction worker count | `1` node per database |
 | Worker idle poll ceiling | backs off up to `300s` |
@@ -103,7 +104,10 @@ The generated schema is the field reference. These defaults are the values opera
 | Mirror poll | `10s` |
 | Mirror periodic interval | `24h` |
 | Mirror copy parallelism | `8` |
+| Mirror source pin checkpoint | `15m` lifetime |
 | Mirror retention | unset, so nothing is pruned |
+
+Most GC blocks configure a resource directory with `enabled`, `interval`, `min_age`, and `dry_run`. The clone-detach pass is the exception: `[gc.detach]` has only `enabled` and `interval`, runs by default, and has no `min_age` field.
 
 ## Validation rules
 
@@ -140,4 +144,3 @@ Use the checked-in schemas for tooling:
 - [schema/cli.schema.json](../schema/cli.schema.json) for `--format json` responses.
 
 The schemas are generated from Rust types and drift-checked by tests.
-

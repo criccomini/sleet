@@ -82,7 +82,7 @@ sleet run "$SLEET_ROOT" \
   --max-compaction-jobs 16
 ```
 
-Node IDs must be unique within the fleet and must use only letters, numbers, `_`, and `-`.
+Node IDs must be unique within the fleet and must be 1 to 128 characters of letters, numbers, `_`, and `-`.
 
 ## Check status
 
@@ -124,4 +124,3 @@ See [Configuration](configuration.md) for layering, defaults, and per-database o
 - Use [Operations](operations.md) to plan node roles, capacity, and failover behavior.
 - Use [Mirroring](mirroring.md) to configure disaster recovery, backups, or migration targets.
 - Use [Development](development.md) if you are changing Sleet itself.
-

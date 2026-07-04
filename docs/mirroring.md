@@ -42,6 +42,8 @@ s3://dr-bucket/mirrors/tenant1/db1
 
 Without `source_prefix`, `url` is the exact destination for one database.
 
+Mirror sources must be ordinary SlateDB roots. Sleet refuses sources that are clones (`external_dbs` is set) or that use a separate WAL object store.
+
 Per-database files can opt out or add targets:
 
 ```toml
@@ -68,6 +70,8 @@ One-shot sync runs the same pass regardless of target mode:
 ```sh
 sleet mirror sync s3://ops/sleet s3://bucket/db backup
 ```
+
+When a sync pass has data to copy, Sleet creates a detached source checkpoint named `sleet-mirror:<target-name>`. While it exists, source GC preserves the objects needed by the pass. The checkpoint lives for `checkpoint_lifetime` (`15m` by default), and Sleet refreshes it at half-life while copying. Sleet deletes the checkpoint after the pass; source GC removes an expired leftover, which may appear in checkpoint listings until then.
 
 ## Copiers
 
@@ -113,7 +117,7 @@ sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1 --at 42
 sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1 --at 2026-07-03T12:00:00Z
 ```
 
-`--at` accepts a manifest ID or an RFC 3339 timestamp. Restore never deletes and refuses a non-empty destination.
+`--at` accepts a manifest ID or an RFC 3339 timestamp. A timestamp resolves to the newest restore point at or before that time. The timestamp mapping comes from the backup manifest sequence tracker, which samples at about 60 seconds with the stock SlateDB settings, so timestamp selection has that granularity. Restore never deletes and refuses a non-empty destination.
 
 ## Verification
 
@@ -145,4 +149,3 @@ A mirror target is kept as a valid SlateDB database at committed manifests. Tail
 
 - [DESIGN-MIRROR.md](../DESIGN-MIRROR.md) describes the sync pass, pruning, verification, and future promotion command.
 - [src/mirror/](../src/mirror) contains the implementation.
-
