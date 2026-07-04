@@ -121,4 +121,3 @@ See [Configuration](configuration.md) for layering, defaults, and per-database o
 
 - Use [Operations](operations.md) to plan node roles, capacity, and failover behavior.
 - Use [Mirroring](mirroring.md) to configure disaster recovery, backups, or migration targets.
-- Use [Development](development.md) if you are changing Sleet itself.

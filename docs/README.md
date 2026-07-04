@@ -12,7 +12,6 @@ This documentation is written for operators, application teams, and maintainers.
 | Run nodes, check status, and change capacity | [Operations](operations.md) |
 | Configure DR, backups, or replica targets | [Mirroring](mirroring.md) |
 | Check command syntax and JSON outputs | [CLI reference](cli.md) |
-| Work on the codebase or specs | [Development](development.md) |
 
 ## Core idea
 
@@ -38,4 +37,3 @@ The docs link to these source files when they are the better reference:
 - [schema/config.schema.json](../schema/config.schema.json), [schema/heartbeat.schema.json](../schema/heartbeat.schema.json), and [schema/cli.schema.json](../schema/cli.schema.json) for generated schemas.
 
 The schemas are generated from Rust types and checked by tests, so they are the most precise field reference.
-
