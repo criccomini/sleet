@@ -33,7 +33,7 @@
 #   source's head (the pin/unpin manifest churn terminates through
 #   the pinless path) and it stays there.
 options:
-  max_actions: 60
+  max_actions: 48
   max_concurrent_actions: 1
 deadlock_detection: false
 liveness: strict

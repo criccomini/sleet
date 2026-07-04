@@ -136,7 +136,17 @@ jobs:
           mkdir -p "$HOME/fizzbee"
           curl -sSfL https://github.com/fizzbee-io/fizzbee/releases/download/v0.5.1/fizzbee-v0.5.1-linux_x86.tar.gz \
             | tar xz --strip-components=1 -C "$HOME/fizzbee"
+      # The exhaustive runs peak at several GB of Go heap; swap plus a
+      # low GOGC keep the 16 GB runner from OOM-killing the agent.
+      - name: Add swap for the exhaustive runs
+        run: |
+          sudo fallocate -l 12G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
       - name: Model-check the mirror spec
+        env:
+          GOGC: "50"
         run: |
           export PARSER_BIN="$HOME/fizzbee/parser/parser_bin"
           export FIZZBEE_BIN="$HOME/fizzbee/fizzbee"
