@@ -2,8 +2,6 @@
 
 Sleet configuration is layered. Fleet-wide policy lives in `sleet.toml`; each registered database may override fields in its own `dbs/<db>.toml` file.
 
-Related pages: [Getting started](getting-started.md), [Architecture](architecture.md), [Operations](operations.md), [Mirroring](mirroring.md).
-
 ## File locations
 
 ```text

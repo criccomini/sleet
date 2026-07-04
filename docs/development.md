@@ -2,8 +2,6 @@
 
 This page is for contributors changing Sleet code, schemas, or specs.
 
-Related pages: [Architecture](architecture.md), [Configuration](configuration.md), [Mirroring](mirroring.md), [CLI reference](cli.md).
-
 ## Project layout
 
 | Path | Purpose |

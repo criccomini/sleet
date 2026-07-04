@@ -2,8 +2,6 @@
 
 The mirror service copies a SlateDB database to another object-store root. Sleet copies immutable data objects and commits manifests at the target as the atomic step.
 
-Related pages: [Configuration](configuration.md), [Operations](operations.md), [Architecture](architecture.md), [CLI reference](cli.md).
-
 ## Use cases
 
 Mirroring supports four operator workflows:

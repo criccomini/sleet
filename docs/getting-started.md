@@ -2,8 +2,6 @@
 
 This guide starts one Sleet node against one registered SlateDB database. It assumes you already have a database root in object storage.
 
-Related pages: [Configuration](configuration.md), [Operations](operations.md), [CLI reference](cli.md).
-
 ## Build the binary
 
 From the repository root:

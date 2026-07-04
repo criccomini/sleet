@@ -2,8 +2,6 @@
 
 Sleet has one long-running command, `run`, and one-shot operator commands for registration, status, and mirrors.
 
-Related pages: [Getting started](getting-started.md), [Operations](operations.md), [Mirroring](mirroring.md), [Configuration](configuration.md).
-
 ## Command overview
 
 ```text

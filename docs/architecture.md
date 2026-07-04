@@ -2,8 +2,6 @@
 
 Sleet is an object-store coordinated control plane for SlateDB background services. It is not a proxy. Readers and writers still open SlateDB databases directly.
 
-Related pages: [Getting started](getting-started.md), [Configuration](configuration.md), [Operations](operations.md), [Mirroring](mirroring.md).
-
 ## Model
 
 ```mermaid

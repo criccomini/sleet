@@ -2,8 +2,6 @@
 
 This page covers the day-to-day work of running Sleet nodes: starting them, scaling capacity, checking status, and changing the registry.
 
-Related pages: [Getting started](getting-started.md), [Configuration](configuration.md), [Architecture](architecture.md), [CLI reference](cli.md).
-
 ## Run nodes
 
 Start each node with a unique ID:
