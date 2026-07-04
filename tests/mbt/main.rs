@@ -22,8 +22,15 @@
 //! The MBT run is gated on `SLEET_MBT`: unset skips (the tools aren't
 //! everywhere); set, a missing server or runner is a failure, not a
 //! skip. The drift test below always runs.
+//!
+//! `mirror` is the same pipeline for the mirror sync protocol, from
+//! the hand-written specs/mirror-mbt.fizz (see its header), gated on
+//! `SLEET_MBT_MIRROR`. The two gates are separate because each test
+//! needs its own served state space: explore the matching spec,
+//! restart fizzbee-mbt-server, and set exactly one gate per run.
 
 mod adapters;
+mod mirror;
 mod test;
 mod traits;
 

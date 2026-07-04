@@ -1,0 +1,246 @@
+---
+# Model-based testing spec for the mirror sync protocol
+# (DESIGN-MIRROR.md §4 and §7): the same protocol mirror.fizz
+# verifies, remodeled at the granularity the public API exposes so
+# tests/mbt/mirror.rs can replay explored action sequences against
+# the real code. A whole sync pass (sleet::mirror::sync_pass) and a
+# whole prune (mirror::prune_at) are single deterministic actions
+# whose returns encode the decisions the real outcome must
+# reproduce: caught-up versus commit, manifests committed, data
+# copied or not, manifests kept and deleted. Manifest counts compare
+# exactly because closures only ever contain heads and pinned heads,
+# so the extra manifests real slatedb commits (epoch bumps, WAL id
+# bumps) never enter one.
+#
+# Hand-written, not derived from mirror.fizz: the phase actions
+# there exist to expose mid-commit states no public API reaches.
+# Mid-pass interleavings (pin expiry, GC racing a copy, partial
+# commits) are mirror.fizz's job at the model level and the chaos
+# suite's on the real code. Determinism is load-bearing here: every
+# action must return exactly what the adapter computes from the real
+# outcome, so nothing uses oneof.
+#
+# Explore, serve, replay (CI: the mbt job):
+#   fizz specs/mirror-mbt.fizz
+#   fizzbee-mbt-server --states_file specs/out/latest &
+#   SLEET_MBT_MIRROR=1 cargo test --test mbt mirror
+options:
+  max_actions: 8
+  max_concurrent_actions: 1
+deadlock_detection: false
+---
+
+# Churn budgets: enough for every protocol decision to be reachable
+# (seeding, incremental data passes, checkpoint-only passes,
+# caught-up passes, prunes that delete and prunes that keep all)
+# while the explored graph stays small enough to serve.
+WRITES = 2
+OP_CREATES = 1
+OP_DELETES = 1
+GCS = 2
+PASSES = 4
+PRUNES = 1
+
+# The one-level closure ids of a source head: itself plus what its
+# entries pin, where still present (§3). At this granularity every
+# entry in a source head's list is live: pin entries exist only
+# inside Pass, and operator checkpoints are eternal.
+atomic func closure_ids(store, head):
+    ids = [head]
+    for e in store[head].cps:
+        if e.pin != head and (e.pin in store) and (e.pin not in ids):
+            ids.append(e.pin)
+    return sorted(ids)
+
+atomic func closure_objects(store, head):
+    objs = set()
+    ids = closure_ids(store, head)
+    for i in ids:
+        for o in store[i].objects:
+            objs.add(o)
+    return objs
+
+# §4 step 3: what W's commit proved present. W's own objects, plus
+# the objects of manifests pinned by checkpoints live in both W and
+# the adopted head.
+atomic func proven_objects(l):
+    proven = set()
+    if dst_head != None:
+        for o in dst_m[dst_head].objects:
+            proven.add(o)
+        lcps = [x.cp for x in src_m[l].cps]
+        for e in dst_m[dst_head].cps:
+            if (e.cp in lcps) and (e.pin in src_m):
+                for o in src_m[e.pin].objects:
+                    proven.add(o)
+    return proven
+
+# The closure manifests a commit must land: everything not already
+# proven present (W itself and the manifests pinned by checkpoints
+# live in both). Matches pass.rs's present_manifests, and so the
+# real PassOutcome.manifests_committed.
+atomic func commit_ids(l):
+    present = []
+    if dst_head != None:
+        present.append(dst_head)
+        lcps = [x.cp for x in src_m[l].cps]
+        for e in dst_m[dst_head].cps:
+            if (e.cp in lcps) and (e.pin in src_m):
+                present.append(e.pin)
+    ids = closure_ids(src_m, l)
+    return [i for i in ids if i not in present]
+
+action Init:
+    # Genesis mirrors the harness: one manifest, one object (the
+    # seeded write).
+    src_m = {0: struct(objects=set([0]), cps=set())}
+    src_head = 0
+    next_m = 1
+    next_o = 1
+    next_cp = 0
+    dst_m = {}
+    dst_head = None
+    op_cps = []
+    writes_left = WRITES
+    op_creates_left = OP_CREATES
+    op_deletes_left = OP_DELETES
+    gcs_left = GCS
+    passes_left = PASSES
+    prunes_left = PRUNES
+
+# One writer flush: a new source manifest referencing a fresh
+# object; entries carry forward. The harness opens a real writer,
+# puts a batch, flushes the memtable, and closes. The extra
+# manifests slatedb commits around that (epoch bump, WAL id bump)
+# never enter a closure, so counts stay aligned.
+atomic action WriterCommit:
+    require writes_left > 0
+    writes_left = writes_left - 1
+    base = src_m[src_head]
+    objs = set()
+    for o in base.objects:
+        objs.add(o)
+    objs.add(next_o)
+    next_o = next_o + 1
+    src_head = next_m
+    next_m = next_m + 1
+    src_m[src_head] = struct(objects=objs, cps=base.cps)
+    return "committed"
+
+# An operator creates an eternal named checkpoint: it pins the
+# manifest its own creation commits (§5).
+atomic action OperatorCheckpoint:
+    require op_creates_left > 0
+    op_creates_left = op_creates_left - 1
+    base = src_m[src_head]
+    cps = set()
+    for e in base.cps:
+        cps.add(e)
+    cid = next_cp
+    next_cp = next_cp + 1
+    newid = next_m
+    next_m = next_m + 1
+    cps.add(struct(cp=cid, pin=newid, eternal=True))
+    op_cps = op_cps + [cid]
+    src_head = newid
+    src_m[src_head] = struct(objects=base.objects, cps=cps)
+    return "created"
+
+# The operator deletes the oldest one again: newer source manifests
+# drop the entry; manifests already committed to the target still
+# carry it (§7).
+atomic action DeleteOperatorCheckpoint:
+    require op_deletes_left > 0 and len(op_cps) > 0
+    op_deletes_left = op_deletes_left - 1
+    victim = op_cps[0]
+    op_cps = op_cps[1:]
+    base = src_m[src_head]
+    cps = set()
+    for e in base.cps:
+        if e.cp != victim:
+            cps.add(e)
+    src_head = next_m
+    next_m = next_m + 1
+    src_m[src_head] = struct(objects=base.objects, cps=cps)
+    return "deleted"
+
+# One source GC pass: keep the latest closure's manifests, delete
+# the rest (old heads, intermediates). Without a compactor nothing
+# retires data objects, so only manifests go.
+atomic action GcSweep:
+    require gcs_left > 0
+    gcs_left = gcs_left - 1
+    keep = closure_ids(src_m, src_head)
+    m2 = {}
+    for i in keep:
+        m2[i] = src_m[i]
+    src_m = m2
+    return "swept"
+
+# One whole sync pass (§4): watermark, diff, pin when data must
+# copy, ascending commit, unpin. The return encodes the decisions
+# the real sync_pass must reproduce.
+atomic action Pass:
+    require passes_left > 0
+    passes_left = passes_left - 1
+    if dst_head == src_head:
+        return "caught-up"
+    proven = proven_objects(src_head)
+    cl = closure_objects(src_m, src_head)
+    cand = [o for o in cl if o not in proven]
+    if len(cand) == 0:
+        # A checkpoint-only change: commit without a pin, no data.
+        ids = commit_ids(src_head)
+        for i in ids:
+            dst_m[i] = src_m[i]
+        dst_head = src_head
+        return "commit:" + str(len(ids)) + ":nodata"
+    # Pin (§4 step 4): the checkpoint pins the manifest its own
+    # creation commits, and the pass adopts that manifest as L,
+    # exactly as mirror.fizz's PassPin does.
+    base = src_m[src_head]
+    cps = set()
+    for e in base.cps:
+        cps.add(e)
+    pin_cp = next_cp
+    next_cp = next_cp + 1
+    l = next_m
+    next_m = next_m + 1
+    cps.add(struct(cp=pin_cp, pin=l, eternal=False))
+    src_m[l] = struct(objects=base.objects, cps=cps)
+    src_head = l
+    # Copy the candidates, commit the adopted head's closure
+    # ascending, L last.
+    ids = commit_ids(l)
+    for i in ids:
+        dst_m[i] = src_m[i]
+    dst_head = l
+    # Unpin: one more source manifest without the entry (§4 step 6).
+    cps2 = set()
+    for e in src_m[l].cps:
+        if e.cp != pin_cp:
+            cps2.add(e)
+    src_head = next_m
+    next_m = next_m + 1
+    src_m[src_head] = struct(objects=base.objects, cps=cps2)
+    return "commit:" + str(len(ids)) + ":data"
+
+# One whole prune (§7) with every age lapsed (the harness injects a
+# far-future now): restore points shrink to the latest manifest, pin
+# entries read expired, operator checkpoints stay live. Keep the
+# latest plus what its eternal entries pin; delete the rest.
+atomic action Prune:
+    require prunes_left > 0
+    prunes_left = prunes_left - 1
+    if dst_head == None:
+        return "empty"
+    keep = [dst_head]
+    for e in dst_m[dst_head].cps:
+        if e.eternal and (e.pin in dst_m) and (e.pin not in keep):
+            keep.append(e.pin)
+    deleted = len(dst_m) - len(keep)
+    m2 = {}
+    for i in keep:
+        m2[i] = dst_m[i]
+    dst_m = m2
+    return "deleted:" + str(deleted) + ":kept:" + str(len(keep))
