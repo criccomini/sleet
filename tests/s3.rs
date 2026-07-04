@@ -186,7 +186,9 @@ async fn s3_mirror_pass_and_divergence_via_minio() {
     let src_head = source.admin.read_manifest(None).await.unwrap().unwrap();
     let dst_head = dest.admin.read_manifest(None).await.unwrap().unwrap();
     assert_eq!(src_head.id(), dst_head.id());
-    let verified = mirror::verify(&source, &dest, None).await.unwrap();
+    let verified = mirror::verify(&source, &dest, None, mirror::Depth::Bytes)
+        .await
+        .unwrap();
     assert!(verified.ok(), "{:?}", verified.points);
 
     // A forked destination: a real writer opens the target and commits
@@ -322,6 +324,8 @@ async fn s3_multipart_copy_of_a_large_sst_via_minio() {
         largest > 8 * 1024 * 1024,
         "expected an SST above the multipart threshold, largest is {largest}"
     );
-    let verified = mirror::verify(&source, &dest, None).await.unwrap();
+    let verified = mirror::verify(&source, &dest, None, mirror::Depth::Bytes)
+        .await
+        .unwrap();
     assert!(verified.ok(), "{:?}", verified.points);
 }

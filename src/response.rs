@@ -226,6 +226,9 @@ pub struct MirrorVerifyResponse {
     /// The destination root.
     pub destination: String,
 
+    /// Whether bytes were compared (`--deep`), not just sizes.
+    pub deep: bool,
+
     /// Whether every restore point verified.
     pub ok: bool,
 

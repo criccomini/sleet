@@ -327,6 +327,10 @@
           "description": "The source database's canonical URL.",
           "type": "string"
         },
+        "deep": {
+          "description": "Whether bytes were compared (`--deep`), not just sizes.",
+          "type": "boolean"
+        },
         "destination": {
           "description": "The destination root.",
           "type": "string"
@@ -351,6 +355,7 @@
         "database",
         "target",
         "destination",
+        "deep",
         "ok",
         "points"
       ]

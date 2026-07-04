@@ -10,7 +10,7 @@ use object_store::ObjectStoreExt;
 use object_store::memory::InMemory;
 use object_store::path::Path as StorePath;
 use sleet::config::{CopierKind, ResolvedMirrorTarget};
-use sleet::mirror::{self, RestorePoint, layout, pass};
+use sleet::mirror::{self, Depth, RestorePoint, layout, pass};
 use sleet::root::Clock;
 use sleet::services::DatabaseHandle;
 use sleet::testing::{Op, TestClock, TestStore};
@@ -551,7 +551,8 @@ async fn prune_honors_the_pin_floor() {
 }
 
 /// §10: verify passes on an intact target, then catches a data-object
-/// deletion and a size mismatch.
+/// deletion, a size mismatch, and (at Depth::Bytes only) a same-size
+/// corruption.
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_catches_missing_and_mismatched_objects() {
     let source = handle(Arc::new(InMemory::new()), "memory:///src", "src");
@@ -561,7 +562,9 @@ async fn verify_catches_missing_and_mismatched_objects() {
         .await
         .unwrap();
 
-    let outcome = mirror::verify(&source, &dest, None).await.unwrap();
+    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(outcome.ok(), "{:?}", outcome.points);
 
     // Delete one referenced SST behind the mirror's back.
@@ -577,7 +580,9 @@ async fn verify_catches_missing_and_mismatched_objects() {
         .delete(&layout::object_path(&dest, &victim_rel))
         .await
         .unwrap();
-    let outcome = mirror::verify(&source, &dest, None).await.unwrap();
+    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(!outcome.ok());
     assert!(
         outcome
@@ -594,7 +599,9 @@ async fn verify_catches_missing_and_mismatched_objects() {
         .put(&layout::object_path(&dest, &victim_rel), "short".into())
         .await
         .unwrap();
-    let outcome = mirror::verify(&source, &dest, None).await.unwrap();
+    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(!outcome.ok());
     assert!(
         outcome
@@ -602,6 +609,46 @@ async fn verify_catches_missing_and_mismatched_objects() {
             .iter()
             .flat_map(|p| &p.problems)
             .any(|p| p.contains("size mismatch")),
+        "{:?}",
+        outcome.points
+    );
+
+    // Same-size corruption: flip one byte. Sizes cannot see it; bytes
+    // report the offset.
+    let bytes = source
+        .store
+        .get(&layout::object_path(&source, &victim_rel))
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    let mut corrupt = bytes.to_vec();
+    let mid = corrupt.len() / 2;
+    corrupt[mid] ^= 0xff;
+    dest.store
+        .put(&layout::object_path(&dest, &victim_rel), corrupt.into())
+        .await
+        .unwrap();
+    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
+        .await
+        .unwrap();
+    assert!(
+        outcome.ok(),
+        "sizes miss the corruption: {:?}",
+        outcome.points
+    );
+    let outcome = mirror::verify(&source, &dest, None, Depth::Bytes)
+        .await
+        .unwrap();
+    assert!(!outcome.ok());
+    assert!(
+        outcome
+            .points
+            .iter()
+            .flat_map(|p| &p.problems)
+            .any(|p| p.contains(&victim_rel)
+                && p.contains(&format!("content mismatch at byte {mid}"))),
         "{:?}",
         outcome.points
     );
@@ -864,7 +911,9 @@ async fn faulted_passes_converge_after_healing() {
             .unwrap();
     }
     assert_mirrored(&source, &dest).await;
-    let outcome = mirror::verify(&source, &dest, None).await.unwrap();
+    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(outcome.ok(), "{:?}", outcome.points);
     // Expired or deleted pins only; a healed fleet leaves none live
     // past their lifetime.
@@ -973,7 +1022,9 @@ async fn periodic_mode_cuts_on_the_interval() {
     task.await.unwrap().unwrap();
 
     // The cut is a valid point: its closure verifies.
-    let outcome = mirror::verify(&source, &dest, None).await.unwrap();
+    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(outcome.ok(), "{:?}", outcome.points);
 }
 
@@ -1039,7 +1090,9 @@ async fn rclone_copier_moves_data_objects() {
     .await
     .unwrap();
     assert_mirrored(&source, &dest).await;
-    let verified = mirror::verify(&source, &dest, None).await.unwrap();
+    let verified = mirror::verify(&source, &dest, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(verified.ok(), "{:?}", verified.points);
 }
 
@@ -1134,7 +1187,9 @@ async fn daemon_mirrors_a_registered_database() {
     .await;
 
     // Verify agrees, through the ops layer.
-    let verify = ops::mirror_verify(&root, &db_url, "dr").await.unwrap();
+    let verify = ops::mirror_verify(&root, &db_url, "dr", Depth::Sizes)
+        .await
+        .unwrap();
     assert!(verify.ok, "{:?}", verify.points);
 
     // One-shot sync on a caught-up pair is a clean no-op.
@@ -1148,7 +1203,7 @@ async fn daemon_mirrors_a_registered_database() {
         .await
         .unwrap_err();
     assert!(matches!(err, ops::OpsError::NoSuchTarget { .. }));
-    let err = ops::mirror_verify(&root, "file:///not/registered", "dr")
+    let err = ops::mirror_verify(&root, "file:///not/registered", "dr", Depth::Sizes)
         .await
         .unwrap_err();
     assert!(matches!(err, ops::OpsError::NotRegistered { .. }));
@@ -1575,7 +1630,9 @@ async fn soak_mirror_races_live_compaction_and_gc() {
         })
         .await;
     }
-    let verify = ops::mirror_verify(&root, &db_url, "dr").await.unwrap();
+    let verify = ops::mirror_verify(&root, &db_url, "dr", Depth::Bytes)
+        .await
+        .unwrap();
     assert!(verify.ok, "{:#?}", verify.points);
 
     shutdown.cancel();
@@ -2004,7 +2061,9 @@ async fn two_targets_run_and_disable_stops_one() {
     let backup = DatabaseHandle::open(&backup_url).unwrap();
     let frozen = backup.admin.read_manifest(None).await.unwrap().unwrap();
     assert_eq!(frozen.id(), backup_head_at_disable, "left at the watermark");
-    let verify = mirror::verify(&source, &backup, None).await.unwrap();
+    let verify = mirror::verify(&source, &backup, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(verify.ok(), "{:?}", verify.points);
 }
 
@@ -2100,7 +2159,9 @@ async fn broken_target_backs_off_without_hurting_others() {
     // And the healthy database's other services never wobbled: its
     // destination verifies while the fleet stays live.
     let good_dest = DatabaseHandle::open(&good_dst).unwrap();
-    let verify = mirror::verify(&good, &good_dest, None).await.unwrap();
+    let verify = mirror::verify(&good, &good_dest, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(verify.ok(), "{:?}", verify.points);
 
     shutdown.cancel();
@@ -2264,7 +2325,9 @@ async fn external_copier_backfills_incrementally() {
         .await
         .unwrap();
     assert_mirrored(&source, &dest).await;
-    let verified = mirror::verify(&source, &dest, None).await.unwrap();
+    let verified = mirror::verify(&source, &dest, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(verified.ok(), "{:?}", verified.points);
 }
 
@@ -2291,10 +2354,17 @@ async fn verify_scopes_restore_points_to_the_keep_window() {
         .await
         .unwrap();
 
-    let all = mirror::verify(&source, &dest, None).await.unwrap();
-    let windowed = mirror::verify(&source, &dest, Some(Duration::from_millis(1000)))
+    let all = mirror::verify(&source, &dest, None, Depth::Sizes)
         .await
         .unwrap();
+    let windowed = mirror::verify(
+        &source,
+        &dest,
+        Some(Duration::from_millis(1000)),
+        Depth::Sizes,
+    )
+    .await
+    .unwrap();
     assert!(all.ok() && windowed.ok());
     assert!(
         windowed.points.len() < all.points.len(),
@@ -2340,7 +2410,9 @@ async fn verify_skips_source_retired_checkpoint_dangles() {
         .await
         .unwrap();
 
-    let outcome = mirror::verify(&source, &dest, None).await.unwrap();
+    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(
         outcome.ok(),
         "sanctioned dangle flagged: {:#?}",
@@ -2356,7 +2428,9 @@ async fn verify_skips_source_retired_checkpoint_dangles() {
         ))
         .await
         .unwrap();
-    let outcome = mirror::verify(&source, &dest, None).await.unwrap();
+    let outcome = mirror::verify(&source, &dest, None, Depth::Sizes)
+        .await
+        .unwrap();
     assert!(
         !outcome.ok(),
         "a live checkpoint's missing support must fail verification"

@@ -227,16 +227,17 @@ impl Render for MirrorVerifyResponse {
             }
         }
         writeln!(w)?;
+        let deep = if self.deep { " (deep)" } else { "" };
         if self.ok {
             writeln!(
                 w,
-                "{} target {} verifies at {}",
+                "{} target {} verifies at {}{deep}",
                 self.database, self.target, self.destination
             )
         } else {
             writeln!(
                 w,
-                "{} target {} FAILS verification at {}",
+                "{} target {} FAILS verification at {}{deep}",
                 self.database, self.target, self.destination
             )
         }

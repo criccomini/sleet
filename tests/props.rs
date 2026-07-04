@@ -454,7 +454,7 @@ async fn run_mirror_schedule(ops: Vec<MirrorOp>) -> Result<(), String> {
             dst_head.id()
         ));
     }
-    let verified = mirror::verify(&source, &dest, None)
+    let verified = mirror::verify(&source, &dest, None, mirror::Depth::Bytes)
         .await
         .map_err(err("verify"))?;
     if !verified.ok() {

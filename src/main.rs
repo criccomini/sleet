@@ -130,6 +130,11 @@ enum MirrorCommand {
         /// Mirror target name.
         target: String,
 
+        /// Also re-read every closure object from both stores and
+        /// compare bytes, where the source still holds the object.
+        #[arg(long)]
+        deep: bool,
+
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
@@ -277,13 +282,19 @@ async fn main() -> ExitCode {
                 root,
                 db,
                 target,
+                deep,
                 format,
             } => {
                 let root = match FleetRoot::open(&root) {
                     Ok(root) => root,
                     Err(e) => return fail(e),
                 };
-                match ops::mirror_verify(&root, &db, &target).await {
+                let depth = if deep {
+                    sleet::mirror::Depth::Bytes
+                } else {
+                    sleet::mirror::Depth::Sizes
+                };
+                match ops::mirror_verify(&root, &db, &target, depth).await {
                     Ok(response) => {
                         let ok = response.ok;
                         let code = emit(&response, format);

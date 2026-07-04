@@ -13,6 +13,9 @@ Arguments:
           Mirror target name
 
 Options:
+      --deep
+          Also re-read every closure object from both stores and compare bytes, where the source still holds the object
+
       --format <FORMAT>
           Output format
 

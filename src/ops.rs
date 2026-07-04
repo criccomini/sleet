@@ -355,20 +355,22 @@ pub async fn mirror_sync(
 }
 
 /// `sleet mirror verify`: existence and size for every restore point's
-/// closure at the destination.
+/// closure at the destination; `Depth::Bytes` also compares content.
 pub async fn mirror_verify(
     root: &FleetRoot,
     db_url: &str,
     target_name: &str,
+    depth: mirror::Depth,
 ) -> Result<MirrorVerifyResponse, OpsError> {
     let (canonical, target) = applied_target(root, db_url, target_name).await?;
     let source = DatabaseHandle::open(&canonical)?;
     let dest = DatabaseHandle::open(&target.destination)?;
-    let outcome = mirror::verify(&source, &dest, target.settings.keep).await?;
+    let outcome = mirror::verify(&source, &dest, target.settings.keep, depth).await?;
     Ok(MirrorVerifyResponse {
         database: canonical,
         target: target.name,
         destination: target.destination,
+        deep: depth == mirror::Depth::Bytes,
         ok: outcome.ok(),
         points: outcome
             .points

@@ -2,16 +2,29 @@
 //! closure by induction, and a deletion outside prune silently breaks
 //! it, so `sleet mirror verify` re-checks existence and size for every
 //! restore point's closure. Sizes rather than ETags: multipart ETags do
-//! not survive cross-store copies.
+//! not survive cross-store copies. `Depth::Bytes` re-reads both stores
+//! and compares content, catching same-size corruption sizes cannot.
 
 use std::collections::BTreeMap;
 
+use bytes::Bytes;
 use chrono::Utc;
+use futures::StreamExt;
 use object_store::ObjectStoreExt;
 
 use super::MirrorError;
 use super::layout::{self, object_path};
 use crate::services::DatabaseHandle;
+
+/// How deeply each closure object is checked against the source.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Depth {
+    /// Existence at the target, size against the source.
+    #[default]
+    Sizes,
+    /// Sizes, plus a re-read of both stores comparing bytes.
+    Bytes,
+}
 
 /// One restore point's verification result.
 #[derive(Clone, Debug)]
@@ -40,13 +53,14 @@ impl VerifyOutcome {
 
 /// Verify every restore point's closure at the target: each closure
 /// manifest and data object must exist, and where the source still has
-/// the same object, the sizes must match. `keep` bounds which manifests
-/// count as restore points; without retention every target manifest is
-/// one.
+/// the same object, the sizes (and at `Depth::Bytes` the contents)
+/// must match. `keep` bounds which manifests count as restore points;
+/// without retention every target manifest is one.
 pub async fn verify(
     source: &DatabaseHandle,
     dest: &DatabaseHandle,
     keep: Option<std::time::Duration>,
+    depth: Depth,
 ) -> Result<VerifyOutcome, MirrorError> {
     let now = Utc::now();
     let manifests = layout::list_manifests(dest).await?;
@@ -97,9 +111,9 @@ pub async fn verify(
         .map(|(id, meta)| (id, meta.size))
         .collect();
 
-    // Source sizes, HEADed once per unique object; None caches "gone
-    // at the source", which skips the size comparison.
-    let mut source_sizes: BTreeMap<String, Option<u64>> = BTreeMap::new();
+    // Source comparisons, made once per unique object; restore points
+    // share support, so repeats serve from the cache.
+    let mut compared: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     let mut outcome = VerifyOutcome::default();
     let mut decoded: BTreeMap<u64, Option<slatedb::VersionedManifest>> = BTreeMap::new();
@@ -132,7 +146,16 @@ pub async fn verify(
                 point.problems.push(format!("{rel}: missing at the target"));
                 continue;
             };
-            check_size(source, &rel, target_size, &mut source_sizes, &mut point).await;
+            compare(
+                source,
+                dest,
+                &rel,
+                target_size,
+                depth,
+                &mut compared,
+                &mut point,
+            )
+            .await;
             let Some(manifest) = read_cached(dest, member, &mut decoded).await? else {
                 point.problems.push(format!("{rel}: unreadable"));
                 continue;
@@ -144,7 +167,7 @@ pub async fn verify(
                 match compacted.get(ulid) {
                     None => point.problems.push(format!("{rel}: missing at the target")),
                     Some(&size) => {
-                        check_size(source, &rel, size, &mut source_sizes, &mut point).await;
+                        compare(source, dest, &rel, size, depth, &mut compared, &mut point).await;
                     }
                 }
             }
@@ -154,7 +177,7 @@ pub async fn verify(
                 match wals.get(wal) {
                     None => point.problems.push(format!("{rel}: missing at the target")),
                     Some(&size) => {
-                        check_size(source, &rel, size, &mut source_sizes, &mut point).await;
+                        compare(source, dest, &rel, size, depth, &mut compared, &mut point).await;
                     }
                 }
             }
@@ -166,28 +189,101 @@ pub async fn verify(
     Ok(outcome)
 }
 
-/// Compare one object's target size against the source, where the
-/// source still has it.
-async fn check_size(
+/// Compare one object's target copy against the source, where the
+/// source still has it: sizes always, bytes at `Depth::Bytes`. Cached
+/// per name; restore points share support objects.
+async fn compare(
     source: &DatabaseHandle,
+    dest: &DatabaseHandle,
     rel: &str,
     target_size: u64,
-    cache: &mut BTreeMap<String, Option<u64>>,
+    depth: Depth,
+    cache: &mut BTreeMap<String, Vec<String>>,
     point: &mut VerifiedPoint,
 ) {
     if !cache.contains_key(rel) {
-        let size = match source.store.head(&object_path(source, rel)).await {
-            Ok(meta) => Some(meta.size),
-            Err(_) => None,
-        };
-        cache.insert(rel.to_string(), size);
+        let problems = source_problems(source, dest, rel, target_size, depth).await;
+        cache.insert(rel.to_string(), problems);
     }
-    if let Some(Some(source_size)) = cache.get(rel)
-        && *source_size != target_size
-    {
-        point.problems.push(format!(
+    point
+        .problems
+        .extend(cache.get(rel).cloned().unwrap_or_default());
+}
+
+/// The problems one target object shows against the source. A source
+/// that no longer holds the object (GC took it; the target is the only
+/// copy) compares clean, matching what a commit could have proven.
+async fn source_problems(
+    source: &DatabaseHandle,
+    dest: &DatabaseHandle,
+    rel: &str,
+    target_size: u64,
+    depth: Depth,
+) -> Vec<String> {
+    let source_size = match source.store.head(&object_path(source, rel)).await {
+        Ok(meta) => meta.size,
+        Err(_) => return Vec::new(),
+    };
+    if source_size != target_size {
+        return vec![format!(
             "{rel}: size mismatch (source {source_size}, target {target_size})"
-        ));
+        )];
+    }
+    if depth == Depth::Sizes {
+        return Vec::new();
+    }
+    match first_difference(source, dest, rel).await {
+        Ok(None) => Vec::new(),
+        Ok(Some(offset)) => vec![format!("{rel}: content mismatch at byte {offset}")],
+        Err(e) => vec![format!("{rel}: unreadable for byte comparison: {e}")],
+    }
+}
+
+/// The first offset where the source and target bytes of `rel` differ.
+/// Source read failures end the comparison with no finding (the object
+/// left the source mid-check, same as the shallow path); target read
+/// failures are the caller's problem to report.
+async fn first_difference(
+    source: &DatabaseHandle,
+    dest: &DatabaseHandle,
+    rel: &str,
+) -> Result<Option<u64>, MirrorError> {
+    let src = match source.store.get(&object_path(source, rel)).await {
+        Ok(get) => get,
+        Err(_) => return Ok(None),
+    };
+    let dst = dest.store.get(&object_path(dest, rel)).await?;
+    let mut a = src.into_stream();
+    let mut b = dst.into_stream();
+    let mut ahead = Bytes::new();
+    let mut bhead = Bytes::new();
+    let mut offset = 0u64;
+    loop {
+        while ahead.is_empty() {
+            match a.next().await {
+                Some(Ok(chunk)) => ahead = chunk,
+                Some(Err(_)) => return Ok(None),
+                None => break,
+            }
+        }
+        while bhead.is_empty() {
+            match b.next().await {
+                Some(chunk) => bhead = chunk?,
+                None => break,
+            }
+        }
+        match (ahead.is_empty(), bhead.is_empty()) {
+            (true, true) => return Ok(None),
+            (true, false) | (false, true) => return Ok(Some(offset)),
+            (false, false) => {}
+        }
+        let n = ahead.len().min(bhead.len());
+        if let Some(i) = ahead[..n].iter().zip(&bhead[..n]).position(|(x, y)| x != y) {
+            return Ok(Some(offset + i as u64));
+        }
+        offset += n as u64;
+        ahead = ahead.slice(n..);
+        bhead = bhead.slice(n..);
     }
 }
 

@@ -392,6 +392,11 @@ proven by `W`'s commit, and the pass copies or checks every candidate
 `sleet mirror verify <root> <db> <target>` re-checks on demand:
 existence and size for every restore point's closure. Sizes rather
 than ETags: multipart ETags do not survive cross-store copies.
+`--deep` re-reads every closure object from both stores and compares
+bytes, reporting the first differing offset. Either way an object the
+source has since garbage-collected checks by target existence only:
+the target holds the only copy, which the commit that promised it
+already proved.
 Entries of checkpoints already retired at the source are skipped:
 a support manifest immutably carries them, its pinned manifest was
 never promised to the target (§7), and they resolve nowhere at the
