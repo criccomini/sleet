@@ -123,9 +123,27 @@ Verify checks every restore point's closure at the target:
 
 ```sh
 sleet mirror verify s3://ops/sleet s3://bucket/db backup
+sleet mirror verify s3://ops/sleet s3://bucket/db backup --deep
 ```
 
-It checks existence and size. It does not rely on ETags, since multipart ETags do not survive every cross-store copy path.
+It checks existence and size. It does not rely on ETags, since multipart ETags do not survive every cross-store copy path. `--deep` also re-reads every closure object from both stores and compares bytes, catching same-size corruption at the cost of reading all the data once from each side.
+
+Set `verify_interval` on a target to have the owning daemon task re-run the existence-and-size check on a cadence:
+
+```toml
+[mirror.targets.backup]
+verify_interval = "24h"
+```
+
+Each run records its outcome at the fleet root (`verify/<db>.<target>.json`), and `sleet status --mirrors` shows the record's age, verdict, and problem count in the `VERIFIED` column. A record whose age keeps growing past the interval means verification is not running.
+
+The strongest check is a restore drill: restore a point into a scratch root, open it, and scan every key:
+
+```sh
+sleet mirror drill s3://ops/sleet s3://bucket/db backup
+```
+
+The scratch defaults to a local temp directory (`--scratch <url>` picks one, `--keep` retains it) and is removed afterward. Run drills on the schedule your recovery objectives call for.
 
 ## Safety rules
 

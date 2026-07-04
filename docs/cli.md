@@ -114,7 +114,10 @@ Checks every restore point's closure at the mirror destination. The command exit
 
 ```sh
 sleet mirror verify s3://ops/sleet s3://bucket/db backup
+sleet mirror verify s3://ops/sleet s3://bucket/db backup --deep
 ```
+
+`--deep` also re-reads every closure object from both stores and compares bytes, catching same-size corruption the default existence-and-size check cannot. It reads every object once from each side, so cost scales with data size.
 
 ## `sleet mirror restore`
 
@@ -130,6 +133,21 @@ sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1 --at 42
 ```
 
 `--at` accepts a manifest ID or RFC 3339 timestamp. A timestamp resolves to the newest restore point at or before that time. The mapping uses the backup manifest sequence tracker, which samples at about 60 seconds with the stock SlateDB settings. If omitted, Sleet restores the backup's latest manifest.
+
+## `sleet mirror drill`
+
+```sh
+sleet mirror drill [OPTIONS] <ROOT> <DB> <TARGET>
+```
+
+Proves a backup restores end to end: restores a point from the target's destination into a scratch root, opens the result as a database, scans every key, and reports key and byte counts.
+
+```sh
+sleet mirror drill s3://ops/sleet s3://bucket/db backup
+sleet mirror drill s3://ops/sleet s3://bucket/db backup --at 42 --scratch s3://scratch/drill
+```
+
+`--at` works as in `restore`. `--scratch` names an empty root to restore into; without it, Sleet uses a fresh local temp directory. The scratch is removed afterward unless `--keep`. A non-empty scratch is refused and its contents are never touched.
 
 ## `sleet mirror prefixes`
 
