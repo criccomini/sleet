@@ -32,7 +32,7 @@ use crate::services::DatabaseHandle;
 
 pub use pass::{PassOutcome, sync_pass};
 pub use prune::{PruneReport, prune};
-pub use restore::{RestoreOutcome, RestorePoint, restore};
+pub use restore::{DrillOutcome, RestoreOutcome, RestorePoint, drill, restore};
 pub use verify::{Depth, VerifyOutcome, VerifyRecord, verify};
 
 /// While a continuous mirror is idle, polling backs off exponentially

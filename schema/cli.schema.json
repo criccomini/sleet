@@ -24,6 +24,10 @@
       "$ref": "#/$defs/MirrorRestoreResponse"
     },
     {
+      "description": "`sleet mirror drill`.",
+      "$ref": "#/$defs/MirrorDrillResponse"
+    },
+    {
       "description": "`sleet mirror prefixes`.",
       "$ref": "#/$defs/MirrorPrefixesResponse"
     }
@@ -65,6 +69,82 @@
       "description": "A duration in humantime form, e.g. \"10s\", \"5m\", \"1h 30m\".",
       "type": "string",
       "pattern": "^([0-9]+ *[a-zµ]+ *)+$"
+    },
+    "MirrorDrillResponse": {
+      "title": "sleet mirror drill response",
+      "description": "The `sleet mirror drill` response: a restore point restored into a\nscratch root, opened, and fully scanned.",
+      "type": "object",
+      "properties": {
+        "backup": {
+          "description": "The destination root drilled (the backup).",
+          "type": "string"
+        },
+        "bytes": {
+          "description": "Key and value bytes the full scan read back.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "bytes_copied": {
+          "description": "Data bytes copied into the scratch.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "database": {
+          "description": "The source database's canonical URL.",
+          "type": "string"
+        },
+        "kept": {
+          "description": "Whether the scratch was kept (`--keep`) rather than removed.",
+          "type": "boolean"
+        },
+        "keys": {
+          "description": "Keys the full scan read back.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "manifest_id": {
+          "description": "The restore point committed as the scratch's head.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "manifests_committed": {
+          "description": "Manifests committed into the scratch.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "objects_copied": {
+          "description": "Data objects copied into the scratch.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "scratch": {
+          "description": "The scratch root restored into.",
+          "type": "string"
+        },
+        "target": {
+          "description": "The target's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "database",
+        "target",
+        "backup",
+        "scratch",
+        "kept",
+        "manifest_id",
+        "manifests_committed",
+        "objects_copied",
+        "bytes_copied",
+        "keys",
+        "bytes"
+      ]
     },
     "MirrorPrefixesResponse": {
       "title": "sleet mirror prefixes response",

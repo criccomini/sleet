@@ -404,6 +404,14 @@ never promised to the target (§7), and they resolve nowhere at the
 source either; restore refuses such points rather than verify
 flagging sanctioned dangles.
 
+`sleet mirror drill <root> <db> <target>` is the end-to-end proof:
+restore a point (`--at`, default the latest) into a scratch root
+(`--scratch <url>`, default a fresh local temp directory), open the
+result as an ordinary database, and scan every key, reporting key and
+byte counts. The scratch is removed afterward unless `--keep`;
+restore's refusal of non-empty roots (§7) means cleanup only ever
+deletes what the drill wrote.
+
 With `verify_interval` set on a target, the owning daemon task
 re-runs the existence-and-size check on that cadence (under the
 node's mirror-job cap) and records the outcome at the fleet root as

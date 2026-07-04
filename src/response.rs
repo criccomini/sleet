@@ -32,6 +32,8 @@ pub enum Response {
     MirrorVerify(MirrorVerifyResponse),
     /// `sleet mirror restore`.
     MirrorRestore(MirrorRestoreResponse),
+    /// `sleet mirror drill`.
+    MirrorDrill(MirrorDrillResponse),
     /// `sleet mirror prefixes`.
     MirrorPrefixes(MirrorPrefixesResponse),
 }
@@ -285,6 +287,45 @@ pub struct MirrorRestoreResponse {
 
     /// Data bytes copied.
     pub bytes_copied: u64,
+}
+
+/// The `sleet mirror drill` response: a restore point restored into a
+/// scratch root, opened, and fully scanned.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[schemars(title = "sleet mirror drill response")]
+pub struct MirrorDrillResponse {
+    /// The source database's canonical URL.
+    pub database: String,
+
+    /// The target's name.
+    pub target: String,
+
+    /// The destination root drilled (the backup).
+    pub backup: String,
+
+    /// The scratch root restored into.
+    pub scratch: String,
+
+    /// Whether the scratch was kept (`--keep`) rather than removed.
+    pub kept: bool,
+
+    /// The restore point committed as the scratch's head.
+    pub manifest_id: u64,
+
+    /// Manifests committed into the scratch.
+    pub manifests_committed: u64,
+
+    /// Data objects copied into the scratch.
+    pub objects_copied: u64,
+
+    /// Data bytes copied into the scratch.
+    pub bytes_copied: u64,
+
+    /// Keys the full scan read back.
+    pub keys: u64,
+
+    /// Key and value bytes the full scan read back.
+    pub bytes: u64,
 }
 
 /// The `sleet mirror prefixes` response: the anchored key-prefix

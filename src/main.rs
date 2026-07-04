@@ -88,7 +88,7 @@ enum Command {
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
     },
-    /// Mirror operations: sync, verify, restore, prefixes.
+    /// Mirror operations: sync, verify, restore, drill, prefixes.
     Mirror {
         #[command(subcommand)]
         command: MirrorCommand,
@@ -155,6 +155,37 @@ enum MirrorCommand {
         /// Default: the backup's latest manifest.
         #[arg(long)]
         at: Option<String>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value = "text")]
+        format: Format,
+    },
+    /// Restore drill: restore a point from the target's destination
+    /// into a scratch root, open it, and scan every key. Proves the
+    /// backup restores end to end.
+    Drill {
+        /// Fleet root URL, e.g. s3://ops/sleet/.
+        root: String,
+
+        /// Registered database URL.
+        db: String,
+
+        /// Mirror target name.
+        target: String,
+
+        /// The restore point: a manifest id or an RFC 3339 timestamp.
+        /// Default: the backup's latest manifest.
+        #[arg(long)]
+        at: Option<String>,
+
+        /// Empty scratch root URL to restore into. Default: a fresh
+        /// local temp directory.
+        #[arg(long)]
+        scratch: Option<String>,
+
+        /// Keep the scratch root instead of removing it.
+        #[arg(long)]
+        keep: bool,
 
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
@@ -322,6 +353,32 @@ async fn main() -> ExitCode {
                     Err(e) => return fail(e),
                 };
                 match ops::mirror_restore(&backup, &dest, at).await {
+                    Ok(response) => emit(&response, format),
+                    Err(e) => fail(e),
+                }
+            }
+            MirrorCommand::Drill {
+                root,
+                db,
+                target,
+                at,
+                scratch,
+                keep,
+                format,
+            } => {
+                let root = match FleetRoot::open(&root) {
+                    Ok(root) => root,
+                    Err(e) => return fail(e),
+                };
+                let at = match at
+                    .as_deref()
+                    .map(sleet::mirror::RestorePoint::parse)
+                    .transpose()
+                {
+                    Ok(at) => at.unwrap_or(sleet::mirror::RestorePoint::Latest),
+                    Err(e) => return fail(e),
+                };
+                match ops::mirror_drill(&root, &db, &target, at, scratch.as_deref(), keep).await {
                     Ok(response) => emit(&response, format),
                     Err(e) => fail(e),
                 }

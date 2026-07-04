@@ -1,0 +1,35 @@
+Restore drill: restore a point from the target's destination into a scratch root, open it, and scan every key. Proves the backup restores end to end
+
+Usage: sleet mirror drill [OPTIONS] <ROOT> <DB> <TARGET>
+
+Arguments:
+  <ROOT>
+          Fleet root URL, e.g. s3://ops/sleet/
+
+  <DB>
+          Registered database URL
+
+  <TARGET>
+          Mirror target name
+
+Options:
+      --at <AT>
+          The restore point: a manifest id or an RFC 3339 timestamp. Default: the backup's latest manifest
+
+      --scratch <SCRATCH>
+          Empty scratch root URL to restore into. Default: a fresh local temp directory
+
+      --keep
+          Keep the scratch root instead of removing it
+
+      --format <FORMAT>
+          Output format
+
+          Possible values:
+          - text: Human-readable text
+          - json: JSON matching the subcommand's response schema
+          
+          [default: text]
+
+  -h, --help
+          Print help (see a summary with '-h')

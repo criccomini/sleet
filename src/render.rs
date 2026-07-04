@@ -12,8 +12,8 @@ use std::io::{self, Write};
 
 use crate::config::Service;
 use crate::response::{
-    MirrorPrefixesResponse, MirrorRestoreResponse, MirrorStatus, MirrorSyncResponse,
-    MirrorVerifyResponse, RegisterResponse, StatusResponse,
+    MirrorDrillResponse, MirrorPrefixesResponse, MirrorRestoreResponse, MirrorStatus,
+    MirrorSyncResponse, MirrorVerifyResponse, RegisterResponse, StatusResponse,
 };
 
 /// Human-readable rendering of a response.
@@ -266,6 +266,29 @@ impl Render for MirrorRestoreResponse {
             self.objects_copied,
             self.bytes_copied
         )
+    }
+}
+
+impl Render for MirrorDrillResponse {
+    fn render(&self, w: &mut dyn Write) -> io::Result<()> {
+        writeln!(
+            w,
+            "drilled {} target {}: manifest {} restored from {} \
+             ({} manifests, {} objects, {} bytes)",
+            self.database,
+            self.target,
+            self.manifest_id,
+            self.backup,
+            self.manifests_committed,
+            self.objects_copied,
+            self.bytes_copied
+        )?;
+        writeln!(w, "scanned {} keys, {} bytes", self.keys, self.bytes)?;
+        if self.kept {
+            writeln!(w, "scratch kept at {}", self.scratch)
+        } else {
+            writeln!(w, "scratch {} removed", self.scratch)
+        }
     }
 }
 

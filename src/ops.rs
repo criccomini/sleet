@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use futures::TryStreamExt;
 use object_store::{ObjectStoreExt, PutMode, PutOptions, PutPayload};
 
 use crate::config::Service;
@@ -12,8 +13,8 @@ use crate::mirror::{self, AppliedTarget};
 use crate::placement;
 use crate::registry;
 use crate::response::{
-    DatabaseStatus, MirrorPrefixesResponse, MirrorRestoreResponse, MirrorStatus,
-    MirrorSyncResponse, MirrorVerifyResponse, NodeStatus, PrefixFormat, QueueStatus,
+    DatabaseStatus, MirrorDrillResponse, MirrorPrefixesResponse, MirrorRestoreResponse,
+    MirrorStatus, MirrorSyncResponse, MirrorVerifyResponse, NodeStatus, PrefixFormat, QueueStatus,
     RegisterResponse, RestorePointStatus, ServicePlacement, StatusResponse,
 };
 use crate::root::{ConfigPoller, FleetRoot, HeartbeatEntry, node_view};
@@ -48,6 +49,9 @@ pub enum OpsError {
     /// The mirror operation failed.
     #[error(transparent)]
     Mirror(#[from] mirror::MirrorError),
+    /// The drill's scratch root could not be created or removed.
+    #[error("drill scratch root: {0}")]
+    Scratch(String),
 }
 
 /// Register a database: canonicalize its URL and create-only PUT its
@@ -430,6 +434,85 @@ pub async fn mirror_restore(
         manifests_committed: outcome.manifests_committed,
         objects_copied: outcome.copied_objects,
         bytes_copied: outcome.copied_bytes,
+    })
+}
+
+/// `sleet mirror drill`: restore one restore point from the target's
+/// destination into a scratch root, open it, and scan every key. The
+/// scratch is the operator's URL or a fresh local temp directory, and
+/// is removed afterward unless `keep`; restore refuses non-empty
+/// roots, so cleanup only ever deletes what the drill wrote.
+pub async fn mirror_drill(
+    root: &FleetRoot,
+    db_url: &str,
+    target_name: &str,
+    at: mirror::RestorePoint,
+    scratch: Option<&str>,
+    keep: bool,
+) -> Result<MirrorDrillResponse, OpsError> {
+    let (canonical, target) = applied_target(root, db_url, target_name).await?;
+    let backup = DatabaseHandle::open(&target.destination)?;
+    let (scratch_url, temp) = match scratch {
+        Some(url) => (registry::canonicalize_url(url)?, None),
+        None => {
+            let dir = std::env::temp_dir().join(format!(
+                "sleet-drill-{}-{:x}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).map_err(|e| OpsError::Scratch(e.to_string()))?;
+            (format!("file://{}", dir.display()), Some(dir))
+        }
+    };
+    let scratch_db = DatabaseHandle::open(&scratch_url)?;
+    let outcome = mirror::drill(&backup, &scratch_db, at).await;
+    // Clean up (or keep) the scratch whether or not the drill passed.
+    // A refused non-empty scratch was never written to and holds
+    // someone else's objects; leave it alone. A temp dir is ours
+    // either way.
+    let wrote = !matches!(
+        outcome,
+        Err(mirror::MirrorError::DestinationNotEmpty { .. })
+    );
+    if !keep {
+        match temp {
+            Some(dir) => {
+                std::fs::remove_dir_all(&dir).map_err(|e| OpsError::Scratch(e.to_string()))?;
+            }
+            None if wrote => {
+                let metas: Vec<object_store::ObjectMeta> = scratch_db
+                    .store
+                    .list(Some(&scratch_db.path))
+                    .try_collect()
+                    .await
+                    .map_err(mirror::MirrorError::from)?;
+                for meta in metas {
+                    scratch_db
+                        .store
+                        .delete(&meta.location)
+                        .await
+                        .map_err(mirror::MirrorError::from)?;
+                }
+            }
+            None => {}
+        }
+    }
+    let outcome = outcome?;
+    Ok(MirrorDrillResponse {
+        database: canonical,
+        target: target.name,
+        backup: target.destination,
+        scratch: scratch_url,
+        kept: keep,
+        manifest_id: outcome.restored.manifest_id,
+        manifests_committed: outcome.restored.manifests_committed,
+        objects_copied: outcome.restored.copied_objects,
+        bytes_copied: outcome.restored.copied_bytes,
+        keys: outcome.keys,
+        bytes: outcome.bytes,
     })
 }
 

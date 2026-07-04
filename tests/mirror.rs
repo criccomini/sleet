@@ -718,6 +718,97 @@ async fn restore_rebuilds_a_point_and_refuses_nonempty_roots() {
     assert!(matches!(err, mirror::MirrorError::NoRestorePoint { .. }));
 }
 
+/// §10: the drill restores the latest point into a scratch root, opens
+/// it, scans every key, and removes the scratch; `--keep` retains it,
+/// and a non-empty scratch is refused without touching its contents.
+#[tokio::test(flavor = "multi_thread")]
+async fn drill_restores_scans_and_cleans_up() {
+    use sleet::root::FleetRoot;
+    use sleet::{ops, registry};
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("fleet")).unwrap();
+    std::fs::create_dir_all(dir.path().join("dst")).unwrap();
+    let fleet_url = format!("file://{}/fleet", dir.path().display());
+    let dest_url = format!("file://{}/dst", dir.path().display());
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    let db_url = format!("file://{}", src_dir.display());
+    let source = DatabaseHandle::open(&db_url).unwrap();
+    seed(&source, 2).await;
+
+    let root = FleetRoot::open(&fleet_url).unwrap();
+    ops::register(&root, &db_url).await.unwrap();
+    root.store()
+        .put(
+            &root.database_path(&registry::canonicalize_url(&db_url).unwrap()),
+            format!("[mirror.targets.dr]\nurl = \"{dest_url}\"\n").into(),
+        )
+        .await
+        .unwrap();
+    ops::mirror_sync(&root, &db_url, "dr", None).await.unwrap();
+
+    // Default scratch: restored, scanned, removed.
+    let drill = ops::mirror_drill(&root, &db_url, "dr", RestorePoint::Latest, None, false)
+        .await
+        .unwrap();
+    assert_eq!(drill.keys, 64, "{drill:?}");
+    assert!(drill.bytes > 0);
+    assert!(drill.manifests_committed >= 1 && drill.objects_copied >= 1);
+    assert!(!drill.kept);
+    let scratch_path = drill
+        .scratch
+        .strip_prefix("file://")
+        .expect("default scratch is local");
+    assert!(
+        !std::path::Path::new(scratch_path).exists(),
+        "scratch removed: {}",
+        drill.scratch
+    );
+
+    // --keep with an explicit scratch: retained and openable.
+    let keep_dir = dir.path().join("scratch");
+    std::fs::create_dir_all(&keep_dir).unwrap();
+    let scratch_url = format!("file://{}", keep_dir.display());
+    let drill = ops::mirror_drill(
+        &root,
+        &db_url,
+        "dr",
+        RestorePoint::Latest,
+        Some(&scratch_url),
+        true,
+    )
+    .await
+    .unwrap();
+    assert!(drill.kept);
+    assert_eq!(drill.keys, 64);
+    let kept = DatabaseHandle::open(&scratch_url).unwrap();
+    assert!(
+        kept.admin.read_manifest(None).await.unwrap().is_some(),
+        "scratch kept"
+    );
+
+    // Re-drilling into the kept (non-empty) scratch is refused, and
+    // even without --keep the refused scratch's contents survive.
+    let err = ops::mirror_drill(
+        &root,
+        &db_url,
+        "dr",
+        RestorePoint::Latest,
+        Some(&scratch_url),
+        false,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        ops::OpsError::Mirror(mirror::MirrorError::DestinationNotEmpty { .. })
+    ));
+    assert!(
+        kept.admin.read_manifest(None).await.unwrap().is_some(),
+        "refused scratch untouched"
+    );
+}
+
 /// §3/§11.5: failover is opening the target as an ordinary database.
 /// The first writer replays the copied WAL tail exactly like one
 /// recovering from a crash, so even unflushed tailed writes survive.
