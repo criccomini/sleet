@@ -11,9 +11,12 @@
 #
 # Scope: manifests are abstract records (an object set plus a
 # checkpoint-entry set); objects stand for compacted and WAL SSTs
-# alike, so the WAL tail and copier variants are not distinguished.
-# One mirror task (racing tasks commit identical bytes and are
-# covered by integration tests); `keep` and `min_age` are temporal,
+# alike, so the WAL tail and copier variants are not distinguished,
+# and the candidate list copies in one step (immutable objects, order
+# independent; the per-object interleavings are covered by the Rust
+# integration tests). One mirror task (racing tasks commit identical
+# bytes and are covered by integration tests); `keep` and `min_age`
+# are temporal,
 # so the pruner instead nondeterministically ages out all but the
 # latest manifest plus at most one chosen survivor, which includes
 # the most aggressive retention as a special case.
@@ -250,16 +253,21 @@ atomic fair action PassPin:
     pending = cand
     phase = Phase.COPY
 
-# Copy one candidate. An object gone from the source means the world
-# moved past this pass (the pin lapsed and GC won): restart, deleting
-# the pin, which commits one more source manifest.
+# Copy the candidate list. Copies are order-independent PUTs of
+# immutable objects, so they collapse to one step; the races that
+# matter (GC, prune, expiry against a pass holding staged copies)
+# land between this step and the commits. An object gone from the
+# source means the world moved past this pass (the pin lapsed and GC
+# won): restart, deleting the pin, which commits one more source
+# manifest.
 atomic fair action PassCopy:
     require phase == Phase.COPY and len(pending) > 0
-    o = oneof pending
-    if o in src_objs:
-        dst_objs.add(o)
-        staged.add(o)
-        pending.discard(o)
+    vanished = [o for o in pending if o not in src_objs]
+    if len(vanished) == 0:
+        for o in pending:
+            dst_objs.add(o)
+            staged.add(o)
+        pending = set()
     else:
         base = src_m[src_head]
         cps = set()
