@@ -392,6 +392,11 @@ proven by `W`'s commit, and the pass copies or checks every candidate
 `sleet mirror verify <root> <db> <target>` re-checks on demand:
 existence and size for every restore point's closure. Sizes rather
 than ETags: multipart ETags do not survive cross-store copies.
+Entries of checkpoints already retired at the source are skipped:
+a support manifest immutably carries them, its pinned manifest was
+never promised to the target (§7), and they resolve nowhere at the
+source either; restore refuses such points rather than verify
+flagging sanctioned dangles.
 
 ## 11. Future work
 

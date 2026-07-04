@@ -107,6 +107,9 @@ struct Faults {
     always: HashMap<Op, bool>,
     /// Fail any op with this probability, from a seeded xorshift.
     probability: Option<(f64, u64)>,
+    /// Sleep this long before each call of an op (async methods only;
+    /// list streams are not delayed).
+    latency: HashMap<Op, std::time::Duration>,
 }
 
 /// An `ObjectStore` decorator with counters, deterministic faults, and
@@ -174,9 +177,24 @@ impl TestStore {
         self.faults.lock().expect("faults").probability = Some((p, seed.max(1)));
     }
 
+    /// Sleep `by` before every call of `op`, so tests can hold an
+    /// operation in flight (e.g. a copy that outlives a pin lifetime).
+    pub fn set_latency(&self, op: Op, by: std::time::Duration) {
+        self.faults.lock().expect("faults").latency.insert(op, by);
+    }
+
     /// Clear all fault injection.
     pub fn heal(&self) {
         *self.faults.lock().expect("faults") = Faults::default();
+    }
+
+    fn latency(&self, op: Op) -> Option<std::time::Duration> {
+        self.faults
+            .lock()
+            .expect("faults")
+            .latency
+            .get(&op)
+            .copied()
     }
 
     fn check(&self, op: Op) -> Result<(), object_store::Error> {
@@ -262,6 +280,9 @@ impl ObjectStore for TestStore {
         opts: PutOptions,
     ) -> object_store::Result<PutResult> {
         self.check(Op::Put)?;
+        if let Some(by) = self.latency(Op::Put) {
+            tokio::time::sleep(by).await;
+        }
         let result = self.inner.put_opts(location, payload, opts).await?;
         self.stamp(location);
         Ok(result)
@@ -284,6 +305,9 @@ impl ObjectStore for TestStore {
         options: GetOptions,
     ) -> object_store::Result<GetResult> {
         self.check(Op::Get)?;
+        if let Some(by) = self.latency(Op::Get) {
+            tokio::time::sleep(by).await;
+        }
         let mut result = self.inner.get_opts(location, options).await?;
         result.meta = self.restamp(result.meta);
         Ok(result)

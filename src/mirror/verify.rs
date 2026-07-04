@@ -53,6 +53,22 @@ pub async fn verify(
     let Some(&(latest, _)) = manifests.last() else {
         return Ok(VerifyOutcome::default());
     };
+    // Checkpoints already retired at the source resolve nowhere at the
+    // source either (§4): a target manifest committed as closure
+    // support immutably carries such entries, their pinned manifests
+    // were never promised to the target, and restore refuses those
+    // points (§7). Verify judges an entry only while its checkpoint
+    // still exists at the source; expiry is handled separately.
+    let source_head =
+        source
+            .admin
+            .read_manifest(None)
+            .await?
+            .ok_or_else(|| MirrorError::NotADatabase {
+                url: source.url.clone(),
+            })?;
+    let source_cps: std::collections::BTreeSet<uuid::Uuid> =
+        source_head.checkpoints().iter().map(|cp| cp.id).collect();
     let by_id: BTreeMap<u64, u64> = manifests
         .iter()
         .map(|(id, meta)| (*id, meta.size))
@@ -93,14 +109,17 @@ pub async fn verify(
             objects: 0,
             problems: Vec::new(),
         };
-        // The restore point's closure: itself plus what its live
-        // checkpoints pin, one level.
+        // The restore point's closure: itself plus what its live,
+        // still-source-known checkpoints pin, one level.
         let mut members = vec![id];
         match read_cached(dest, id, &mut decoded).await? {
             None => point.problems.push(format!("manifest {id} is unreadable")),
             Some(manifest) => {
                 for cp in manifest.checkpoints() {
-                    if layout::checkpoint_live(cp, now) && cp.manifest_id != id {
+                    if layout::checkpoint_live(cp, now)
+                        && source_cps.contains(&cp.id)
+                        && cp.manifest_id != id
+                    {
                         members.push(cp.manifest_id);
                     }
                 }

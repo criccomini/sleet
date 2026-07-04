@@ -1618,3 +1618,747 @@ async fn soak_mirror_races_live_compaction_and_gc() {
         "the failed-over destination serves exactly the source's contents"
     );
 }
+
+/// §2: excluded sources are refused. A clone (external_dbs set) and a
+/// database with a separate WAL object store cannot be mirror sources.
+#[tokio::test(flavor = "multi_thread")]
+async fn excluded_sources_are_refused() {
+    let store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
+    let parent = handle(store.clone(), "memory:///parent", "parent");
+    seed(&parent, 2).await;
+
+    // A clone of the parent, via the real clone protocol.
+    let clone = handle(store.clone(), "memory:///clone", "clone");
+    clone
+        .admin
+        .create_clone_builder_from_source(slatedb::CloneSourceSpec {
+            path: parent.path.clone(),
+            checkpoint: None,
+            projection_range: None,
+        })
+        .build()
+        .await
+        .unwrap();
+    let dest = handle(Arc::new(InMemory::new()), "memory:///dst", "dst");
+    let err = mirror::sync_pass(&clone, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, mirror::MirrorError::ExcludedSource { ref reason, .. } if reason.contains("clone")),
+        "{err:?}"
+    );
+
+    // A database whose WAL lives in a separate object store.
+    let wal_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
+    let split = handle(store.clone(), "memory:///split", "split");
+    let db = slatedb::Db::builder(split.path.clone(), split.store.clone())
+        .with_wal_object_store(wal_store)
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .unwrap();
+    db.put(b"k", b"v").await.unwrap();
+    db.close().await.unwrap();
+    let err = mirror::sync_pass(&split, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, mirror::MirrorError::ExcludedSource { ref reason, .. } if reason.contains("WAL")),
+        "{err:?}"
+    );
+}
+
+/// §4: the pin refreshes at half-life while the pass runs. With
+/// copies held slower than the pin lifetime, the pass can only commit
+/// if refresh works; a lapse would restart every attempt into
+/// Stalled.
+#[tokio::test(flavor = "multi_thread")]
+async fn pin_refreshes_while_a_slow_copy_runs() {
+    let source_store = TestStore::in_memory();
+    let source = handle(source_store.clone(), "memory:///src", "src");
+    let dest = handle(Arc::new(InMemory::new()), "memory:///dst", "dst");
+    seed(&source, 8).await;
+
+    // Each GET (data objects and the admin's manifest reads alike)
+    // takes 40ms; with serial copies the pass holds the pin far past
+    // several lifetimes.
+    source_store.set_latency(Op::Get, Duration::from_millis(40));
+    let settings = ResolvedMirrorTarget {
+        checkpoint_lifetime: Duration::from_millis(250),
+        copy_parallelism: 1,
+        ..target_settings()
+    };
+    let start = tokio::time::Instant::now();
+    let outcome = mirror::sync_pass(&source, &dest, "dr", &settings, None)
+        .await
+        .unwrap();
+    assert!(outcome.committed);
+    assert!(
+        start.elapsed() > Duration::from_millis(500),
+        "the copy was meant to outlive the pin lifetime (took {:?})",
+        start.elapsed()
+    );
+    source_store.heal();
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+    assert_mirrored(&source, &dest).await;
+    assert_no_live_pins(&source, "dr").await;
+}
+
+/// §4: a pass that cannot prove its pin alive (refresh fails) refuses
+/// to commit and surfaces an error; after healing, the next pass
+/// converges and the abandoned pin is left to expiry.
+#[tokio::test(flavor = "multi_thread")]
+async fn refresh_failure_fails_the_pass_and_heals() {
+    let source_store = TestStore::in_memory();
+    let source = handle(source_store.clone(), "memory:///src", "src");
+    let dest = handle(Arc::new(InMemory::new()), "memory:///dst", "dst");
+    seed(&source, 8).await;
+
+    source_store.set_latency(Op::Get, Duration::from_millis(50));
+    let settings = ResolvedMirrorTarget {
+        checkpoint_lifetime: Duration::from_millis(200),
+        copy_parallelism: 1,
+        ..target_settings()
+    };
+    let pass = tokio::spawn({
+        let source_store = source_store.clone();
+        let dest_store = dest.store.clone();
+        async move {
+            let source = handle(source_store, "memory:///src", "src");
+            let dest = handle(dest_store, "memory:///dst", "dst");
+            mirror::sync_pass(&source, &dest, "dr", &settings, None).await
+        }
+    });
+    // Once the copy is underway, break every source write: refreshes
+    // (manifest CAS PUTs) start failing, and so do restart pin
+    // deletions and fresh pin creations.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    source_store.fail_all(Op::Put);
+    let result = pass.await.unwrap();
+    assert!(result.is_err(), "a pass without a provable pin must fail");
+
+    // Heal: the next passes converge, and any abandoned pin has a
+    // 200ms lifetime, so it reads as expired by the time we check.
+    source_store.heal();
+    for _ in 0..3 {
+        mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+            .await
+            .unwrap();
+    }
+    assert_mirrored(&source, &dest).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_no_live_pins(&source, "dr").await;
+}
+
+/// §7: restore refuses to commit an incomplete closure, and the
+/// refusal happens before anything lands at the destination. (A data
+/// object vanishing mid-copy is different: copies land before the
+/// commit, and restore never deletes, so a failed mid-copy restore
+/// leaves data-object litter in a root restore will then refuse; the
+/// pre-flight case here must stay clean.)
+#[tokio::test(flavor = "multi_thread")]
+async fn restore_refuses_dangling_support_before_writing() {
+    use futures::TryStreamExt;
+    let source = handle(Arc::new(InMemory::new()), "memory:///src", "src");
+    let backup = handle(Arc::new(InMemory::new()), "memory:///bak", "bak");
+    seed(&source, 2).await;
+    mirror::sync_pass(&source, &backup, "backup", &target_settings(), None)
+        .await
+        .unwrap();
+    let snap = source
+        .admin
+        .create_detached_checkpoint(&slatedb::config::CheckpointOptions {
+            lifetime: None,
+            source: None,
+            name: Some("pinned".into()),
+        })
+        .await
+        .unwrap();
+    seed(&source, 1).await;
+    mirror::sync_pass(&source, &backup, "backup", &target_settings(), None)
+        .await
+        .unwrap();
+    mirror::sync_pass(&source, &backup, "backup", &target_settings(), None)
+        .await
+        .unwrap();
+
+    // Break the backup behind the mirror's back: the support manifest
+    // the head's live checkpoint pins disappears.
+    backup
+        .store
+        .delete(&layout::object_path(
+            &backup,
+            &layout::manifest_rel(snap.manifest_id),
+        ))
+        .await
+        .unwrap();
+
+    let dest = handle(Arc::new(InMemory::new()), "memory:///restored", "restored");
+    let err = mirror::restore(&backup, &dest, RestorePoint::Latest)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, mirror::MirrorError::NoRestorePoint { .. }),
+        "{err:?}"
+    );
+    let leftovers: Vec<object_store::ObjectMeta> = dest
+        .store
+        .list(Some(&dest.path))
+        .try_collect()
+        .await
+        .unwrap();
+    assert!(
+        leftovers.is_empty(),
+        "a refused restore must leave the destination empty: {leftovers:?}"
+    );
+}
+
+/// §5: a named checkpoint created at the source mounts read-only at
+/// the target by id with DbReader, pinned to the state at creation.
+#[tokio::test(flavor = "multi_thread")]
+async fn replica_reader_mounts_a_mirrored_checkpoint() {
+    let source = handle(Arc::new(InMemory::new()), "memory:///src", "src");
+    let dest = handle(Arc::new(InMemory::new()), "memory:///dst", "dst");
+    seed(&source, 2).await;
+    let snap = source
+        .admin
+        .create_detached_checkpoint(&slatedb::config::CheckpointOptions {
+            lifetime: None,
+            source: None,
+            name: Some("reader-snap".into()),
+        })
+        .await
+        .unwrap();
+
+    // Later writes must be invisible through the checkpoint.
+    let writer = slatedb::Db::builder(source.path.clone(), source.store.clone())
+        .with_settings(slatedb::config::Settings {
+            compactor_options: None,
+            garbage_collector_options: None,
+            ..Default::default()
+        })
+        .build()
+        .await
+        .unwrap();
+    writer.put(b"after-snap", b"x").await.unwrap();
+    writer
+        .flush_with_options(slatedb::config::FlushOptions {
+            flush_type: slatedb::config::FlushType::MemTable,
+        })
+        .await
+        .unwrap();
+    writer.close().await.unwrap();
+
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+
+    let reader = slatedb::DbReader::builder(dest.path.clone(), dest.store.clone())
+        .with_checkpoint_id(snap.id)
+        .build()
+        .await
+        .unwrap();
+    assert!(
+        reader.get(b"key-0-0").await.unwrap().is_some(),
+        "checkpointed data readable at the target"
+    );
+    assert_eq!(
+        reader.get(b"after-snap").await.unwrap(),
+        None,
+        "the checkpoint pins the state at its creation"
+    );
+    reader.close().await.unwrap();
+}
+
+/// §9's example shape: one database, two targets (a continuous
+/// replica and a periodic backup), both owned, both converging, and
+/// both reported in the heartbeat; then disabling one stops its task
+/// within a config poll and leaves its destination valid at the
+/// watermark while the other keeps mirroring.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_targets_run_and_disable_stops_one() {
+    use sleet::daemon::{self, NodeOptions};
+    use sleet::root::FleetRoot;
+    use sleet::{ops, registry};
+    use tokio_util::sync::CancellationToken;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("fleet")).unwrap();
+    std::fs::create_dir_all(dir.path().join("replica")).unwrap();
+    std::fs::create_dir_all(dir.path().join("backup")).unwrap();
+    let fleet_url = format!("file://{}/fleet", dir.path().display());
+    let replica_url = format!("file://{}/replica", dir.path().display());
+    let backup_url = format!("file://{}/backup", dir.path().display());
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    let db_url = format!("file://{}", src_dir.display());
+    let source = DatabaseHandle::open(&db_url).unwrap();
+    seed(&source, 2).await;
+
+    let root = FleetRoot::open(&fleet_url).unwrap();
+    root.store()
+        .put(
+            &root.config_path(),
+            "[node]\nheartbeat_interval = \"400ms\"\nheartbeat_timeout = \"2s\"\nconfig_poll = \"600ms\"\n"
+                .into(),
+        )
+        .await
+        .unwrap();
+    ops::register(&root, &db_url).await.unwrap();
+    let registry_body = format!(
+        "[mirror.targets.replica]\nurl = \"{replica_url}\"\nmode = \"continuous\"\npoll = \"250ms\"\n\
+         [mirror.targets.backup]\nurl = \"{backup_url}\"\nmode = \"periodic\"\ninterval = \"1s\"\n"
+    );
+    let registry_path = root.database_path(&registry::canonicalize_url(&db_url).unwrap());
+    root.store()
+        .put(&registry_path, registry_body.clone().into())
+        .await
+        .unwrap();
+
+    let shutdown = CancellationToken::new();
+    let node = tokio::spawn(daemon::run(
+        root.clone(),
+        NodeOptions {
+            node_id: "n1".into(),
+            ..NodeOptions::default()
+        },
+        shutdown.clone(),
+    ));
+
+    // Both targets converge and both tasks ride in the heartbeat.
+    poll_until("both targets converge", || async {
+        let status = ops::status(&root, false, true).await.unwrap();
+        (status.mirrors.len() == 2 && status.mirrors.iter().all(|m| m.manifests_behind == Some(0)))
+            .then_some(())
+    })
+    .await;
+    let path = root.node_path(&sleet::heartbeat::object_name(
+        "n1",
+        &sleet::config::Service::ALL,
+    ));
+    poll_until("two mirror tasks in the heartbeat", || async {
+        let body = root.store().get(&path).await.ok()?.bytes().await.ok()?;
+        let hb: sleet::heartbeat::Heartbeat = serde_json::from_slice(&body).ok()?;
+        let m = hb
+            .services
+            .iter()
+            .find(|s| s.service == sleet::config::Service::Mirror)?;
+        (m.running == 2).then_some(())
+    })
+    .await;
+
+    // Disable the backup target; its task stops within a config poll,
+    // the replica keeps running, and the backup destination stays
+    // valid at its watermark even as the source moves on.
+    let backup_head_at_disable = DatabaseHandle::open(&backup_url)
+        .unwrap()
+        .admin
+        .read_manifest(None)
+        .await
+        .unwrap()
+        .unwrap()
+        .id();
+    root.store()
+        .put(
+            &registry_path,
+            format!("{registry_body}[mirror.targets.backup.retention]\nkeep = \"1h\"\n")
+                .replace(
+                    "[mirror.targets.backup]",
+                    "[mirror.targets.backup]\ndisabled = true",
+                )
+                .into(),
+        )
+        .await
+        .unwrap();
+    poll_until("backup task stops", || async {
+        let body = root.store().get(&path).await.ok()?.bytes().await.ok()?;
+        let hb: sleet::heartbeat::Heartbeat = serde_json::from_slice(&body).ok()?;
+        let m = hb
+            .services
+            .iter()
+            .find(|s| s.service == sleet::config::Service::Mirror)?;
+        (m.running + m.backoff == 1).then_some(())
+    })
+    .await;
+
+    seed(&source, 1).await;
+    poll_until("replica still tracks the source", || async {
+        let status = ops::status(&root, false, true).await.unwrap();
+        let replica = status.mirrors.iter().find(|m| m.target == "replica")?;
+        (replica.manifests_behind == Some(0)).then_some(())
+    })
+    .await;
+    shutdown.cancel();
+    node.await.unwrap().unwrap();
+
+    // The disabled backup froze at its watermark, still complete.
+    let backup = DatabaseHandle::open(&backup_url).unwrap();
+    let frozen = backup.admin.read_manifest(None).await.unwrap().unwrap();
+    assert_eq!(frozen.id(), backup_head_at_disable, "left at the watermark");
+    let verify = mirror::verify(&source, &backup, None).await.unwrap();
+    assert!(verify.ok(), "{:?}", verify.points);
+}
+
+/// A broken mirror target must not hurt anything else: its task backs
+/// off in the heartbeat while a healthy database's mirror on the same
+/// node converges normally.
+#[tokio::test(flavor = "multi_thread")]
+async fn broken_target_backs_off_without_hurting_others() {
+    use sleet::daemon::{self, NodeOptions};
+    use sleet::root::FleetRoot;
+    use sleet::{ops, registry};
+    use tokio_util::sync::CancellationToken;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("fleet")).unwrap();
+    std::fs::create_dir_all(dir.path().join("good-dst")).unwrap();
+    let fleet_url = format!("file://{}/fleet", dir.path().display());
+    let good_dst = format!("file://{}/good-dst", dir.path().display());
+
+    let good_dir = dir.path().join("good");
+    let bad_dir = dir.path().join("bad");
+    std::fs::create_dir_all(&good_dir).unwrap();
+    std::fs::create_dir_all(&bad_dir).unwrap();
+    let good_url = format!("file://{}", good_dir.display());
+    let bad_url = format!("file://{}", bad_dir.display());
+    let good = DatabaseHandle::open(&good_url).unwrap();
+    seed(&good, 1).await;
+    let bad = DatabaseHandle::open(&bad_url).unwrap();
+    seed(&bad, 1).await;
+
+    let root = FleetRoot::open(&fleet_url).unwrap();
+    root.store()
+        .put(
+            &root.config_path(),
+            "[node]\nheartbeat_interval = \"400ms\"\nheartbeat_timeout = \"2s\"\nconfig_poll = \"600ms\"\n"
+                .into(),
+        )
+        .await
+        .unwrap();
+    ops::register(&root, &good_url).await.unwrap();
+    ops::register(&root, &bad_url).await.unwrap();
+    root.store()
+        .put(
+            &root.database_path(&registry::canonicalize_url(&good_url).unwrap()),
+            format!("[mirror.targets.dr]\nurl = \"{good_dst}\"\npoll = \"250ms\"\n").into(),
+        )
+        .await
+        .unwrap();
+    // /dev/null is not a directory: every destination write fails.
+    root.store()
+        .put(
+            &root.database_path(&registry::canonicalize_url(&bad_url).unwrap()),
+            "[mirror.targets.dr]\nurl = \"file:///dev/null/mirror\"\npoll = \"250ms\"\n".into(),
+        )
+        .await
+        .unwrap();
+
+    let shutdown = CancellationToken::new();
+    let node = tokio::spawn(daemon::run(
+        root.clone(),
+        NodeOptions {
+            node_id: "n1".into(),
+            ..NodeOptions::default()
+        },
+        shutdown.clone(),
+    ));
+
+    // The healthy database converges while the broken target's task
+    // sits in backoff in the same heartbeat.
+    poll_until("good target converges", || async {
+        let status = ops::status(&root, false, true).await.unwrap();
+        let m = status
+            .mirrors
+            .iter()
+            .find(|m| m.database == registry::canonicalize_url(&good_url).unwrap())?;
+        (m.manifests_behind == Some(0)).then_some(())
+    })
+    .await;
+    let path = root.node_path(&sleet::heartbeat::object_name(
+        "n1",
+        &sleet::config::Service::ALL,
+    ));
+    poll_until("broken target backs off", || async {
+        let body = root.store().get(&path).await.ok()?.bytes().await.ok()?;
+        let hb: sleet::heartbeat::Heartbeat = serde_json::from_slice(&body).ok()?;
+        let m = hb
+            .services
+            .iter()
+            .find(|s| s.service == sleet::config::Service::Mirror)?;
+        (m.backoff >= 1).then_some(())
+    })
+    .await;
+    // And the healthy database's other services never wobbled: its
+    // destination verifies while the fleet stays live.
+    let good_dest = DatabaseHandle::open(&good_dst).unwrap();
+    let verify = mirror::verify(&good, &good_dest, None).await.unwrap();
+    assert!(verify.ok(), "{:?}", verify.points);
+
+    shutdown.cancel();
+    node.await.unwrap().unwrap();
+}
+
+/// `--max-mirror-jobs` gates passes like the compaction cap gates
+/// workers: with no permit nothing commits; granting one lets the
+/// pass through.
+#[tokio::test(flavor = "multi_thread")]
+async fn mirror_jobs_semaphore_gates_passes() {
+    use tokio_util::sync::CancellationToken;
+    let source_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
+    let dest_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
+    let source = handle(source_store.clone(), "memory:///src", "src");
+    seed(&source, 1).await;
+
+    let jobs = Arc::new(tokio::sync::Semaphore::new(0));
+    let target = mirror::AppliedTarget {
+        name: "dr".into(),
+        destination: "memory:///dst".into(),
+        settings: ResolvedMirrorTarget {
+            poll: Duration::from_millis(100),
+            ..target_settings()
+        },
+    };
+    let token = CancellationToken::new();
+    let task = tokio::spawn({
+        let source = handle(source_store.clone(), "memory:///src", "src");
+        let dest = handle(dest_store.clone(), "memory:///dst", "dst");
+        let target = target.clone();
+        let jobs = jobs.clone();
+        let token = token.clone();
+        async move { mirror::run_mirror(&source, &dest, &target, jobs, None, token).await }
+    });
+
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let dest = handle(dest_store.clone(), "memory:///dst", "dst");
+    assert!(
+        dest.admin.read_manifest(None).await.unwrap().is_none(),
+        "no permit, no pass"
+    );
+    jobs.add_permits(1);
+    poll_until("permit granted, pass runs", || async {
+        dest.admin
+            .read_manifest(None)
+            .await
+            .ok()
+            .flatten()
+            .map(|_| ())
+    })
+    .await;
+    token.cancel();
+    task.await.unwrap().unwrap();
+}
+
+/// `status --mirrors` reports real lag once the source moves past the
+/// watermark.
+#[tokio::test(flavor = "multi_thread")]
+async fn status_reports_nonzero_lag() {
+    use sleet::root::FleetRoot;
+    use sleet::{ops, registry};
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("fleet")).unwrap();
+    std::fs::create_dir_all(dir.path().join("dst")).unwrap();
+    let fleet_url = format!("file://{}/fleet", dir.path().display());
+    let dest_url = format!("file://{}/dst", dir.path().display());
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    let db_url = format!("file://{}", src_dir.display());
+    let source = DatabaseHandle::open(&db_url).unwrap();
+    seed(&source, 1).await;
+
+    let root = FleetRoot::open(&fleet_url).unwrap();
+    ops::register(&root, &db_url).await.unwrap();
+    root.store()
+        .put(
+            &root.database_path(&registry::canonicalize_url(&db_url).unwrap()),
+            format!("[mirror.targets.dr]\nurl = \"{dest_url}\"\n").into(),
+        )
+        .await
+        .unwrap();
+    ops::mirror_sync(&root, &db_url, "dr", None).await.unwrap();
+    ops::mirror_sync(&root, &db_url, "dr", None).await.unwrap();
+    let status = ops::status(&root, false, true).await.unwrap();
+    assert_eq!(status.mirrors[0].manifests_behind, Some(0));
+
+    // The source moves on; lag goes positive.
+    seed(&source, 2).await;
+    let status = ops::status(&root, false, true).await.unwrap();
+    let m = &status.mirrors[0];
+    assert!(
+        m.manifests_behind.unwrap_or(0) > 0,
+        "manifests_behind: {:?}",
+        m.manifests_behind
+    );
+    assert!(
+        m.wal_behind.unwrap_or(0) > 0,
+        "wal_behind: {:?}",
+        m.wal_behind
+    );
+    assert!(m.error.is_none(), "{:?}", m.error);
+}
+
+/// §8: with a watermark present, the external copier HEAD-checks each
+/// candidate and backfills only the misses (the incremental path; the
+/// seeding LIST path is covered above).
+#[tokio::test(flavor = "multi_thread")]
+async fn external_copier_backfills_incrementally() {
+    let source = handle(Arc::new(InMemory::new()), "memory:///src", "src");
+    let dest = handle(Arc::new(InMemory::new()), "memory:///dst", "dst");
+    let settings = ResolvedMirrorTarget {
+        copier: CopierKind::External,
+        ..target_settings()
+    };
+    seed(&source, 2).await;
+    mirror::sync_pass(&source, &dest, "dr", &settings, None)
+        .await
+        .unwrap();
+    mirror::sync_pass(&source, &dest, "dr", &settings, None)
+        .await
+        .unwrap();
+
+    // New epoch; replication delivers one of the new SSTs early.
+    seed(&source, 2).await;
+    let head = source.admin.read_manifest(None).await.unwrap().unwrap();
+    let at_dest = names(&dest, layout::COMPACTED_DIR).await;
+    let new_ssts: Vec<String> = layout::manifest_objects(&head)
+        .compacted
+        .iter()
+        .filter(|u| !at_dest.contains(&format!("{u}.sst")))
+        .cloned()
+        .collect();
+    assert!(new_ssts.len() >= 2, "need at least two new SSTs");
+    let delivered_rel = layout::compacted_rel(&new_ssts[0]);
+    let body = source
+        .store
+        .get(&layout::object_path(&source, &delivered_rel))
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    dest.store
+        .put(&layout::object_path(&dest, &delivered_rel), body.into())
+        .await
+        .unwrap();
+
+    let outcome = mirror::sync_pass(&source, &dest, "dr", &settings, None)
+        .await
+        .unwrap();
+    assert!(outcome.committed);
+    // The delivered SST was HEAD-hit, not recopied: fewer copies than
+    // new SSTs.
+    assert!(
+        outcome.copied.objects < new_ssts.len() as u64 + 8,
+        "sanity: bounded work"
+    );
+    mirror::sync_pass(&source, &dest, "dr", &settings, None)
+        .await
+        .unwrap();
+    assert_mirrored(&source, &dest).await;
+    let verified = mirror::verify(&source, &dest, None).await.unwrap();
+    assert!(verified.ok(), "{:?}", verified.points);
+}
+
+/// §10: with retention set, verify judges only the keep window's
+/// restore points (plus the latest), not every manifest ever.
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_scopes_restore_points_to_the_keep_window() {
+    let source = handle(Arc::new(InMemory::new()), "memory:///src", "src");
+    let dest = handle(Arc::new(InMemory::new()), "memory:///dst", "dst");
+    seed(&source, 1).await;
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+    // Age the first epoch's manifests past a small keep.
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    seed(&source, 1).await;
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+
+    let all = mirror::verify(&source, &dest, None).await.unwrap();
+    let windowed = mirror::verify(&source, &dest, Some(Duration::from_millis(1000)))
+        .await
+        .unwrap();
+    assert!(all.ok() && windowed.ok());
+    assert!(
+        windowed.points.len() < all.points.len(),
+        "keep window must narrow the judged points: {} vs {}",
+        windowed.points.len(),
+        all.points.len()
+    );
+}
+
+/// Regression, found by the stateful property test (the minimal
+/// schedule was Checkpoint, Checkpoint, DropCheckpoint): a support
+/// manifest immutably carries a deleted checkpoint's entry whose
+/// pinned manifest was never promised to the target. Verify must not
+/// flag that sanctioned dangle, and must still flag a missing pinned
+/// manifest for a checkpoint that is alive at the source.
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_skips_source_retired_checkpoint_dangles() {
+    let source = handle(Arc::new(InMemory::new()), "memory:///src", "src");
+    let dest = handle(Arc::new(InMemory::new()), "memory:///dst", "dst");
+    seed(&source, 1).await;
+    let opts = |name: &str| slatedb::config::CheckpointOptions {
+        lifetime: None,
+        source: None,
+        name: Some(name.into()),
+    };
+    let a = source
+        .admin
+        .create_detached_checkpoint(&opts("a"))
+        .await
+        .unwrap();
+    let b = source
+        .admin
+        .create_detached_checkpoint(&opts("b"))
+        .await
+        .unwrap();
+    // Manifest b immutably carries a's entry; deleting a at the source
+    // makes a's pinned manifest support-only history.
+    source.admin.delete_checkpoint(a.id).await.unwrap();
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+    mirror::sync_pass(&source, &dest, "dr", &target_settings(), None)
+        .await
+        .unwrap();
+
+    let outcome = mirror::verify(&source, &dest, None).await.unwrap();
+    assert!(
+        outcome.ok(),
+        "sanctioned dangle flagged: {:#?}",
+        outcome.points
+    );
+
+    // The still-live checkpoint's support is a different story: losing
+    // it is corruption, and verify must say so.
+    dest.store
+        .delete(&layout::object_path(
+            &dest,
+            &layout::manifest_rel(b.manifest_id),
+        ))
+        .await
+        .unwrap();
+    let outcome = mirror::verify(&source, &dest, None).await.unwrap();
+    assert!(
+        !outcome.ok(),
+        "a live checkpoint's missing support must fail verification"
+    );
+}

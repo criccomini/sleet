@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 2f8164f5615a3bcae6f93ea1e4c1662c8ec53c3075838c4c2f79d54b9883c84d # shrinks to fleet_count = None, db_count = None, fleet_services = None, db_services = None, db_min_age = None
+cc e2df82f12666823d4729a1ba0525fb0190248f8e47d3bf8edcd3547fb6a98c3d # shrinks to ops = [Checkpoint, Checkpoint, DropCheckpoint]
