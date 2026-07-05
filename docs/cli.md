@@ -107,14 +107,14 @@ Use `--rclone <PATH>` when the target uses `copier = "rclone"`.
 ## `sleet mirror restore`
 
 ```sh
-sleet mirror restore [OPTIONS] <ROOT> <BACKUP> <DEST>
+sleet mirror restore [OPTIONS] <BACKUP> <DEST>
 ```
 
 Copies one restore point from a backup root into an empty destination root.
 
 ```sh
-sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1
-sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1 --at 42
+sleet mirror restore gs://backups/db1 s3://restore/db1
+sleet mirror restore gs://backups/db1 s3://restore/db1 --at 42
 ```
 
 `--at` accepts a manifest ID or RFC 3339 timestamp. A timestamp resolves to the newest restore point at or before that time. The mapping uses the backup manifest sequence tracker, which samples at about 60 seconds with the stock SlateDB settings. If omitted, Sleet restores the backup's latest manifest.

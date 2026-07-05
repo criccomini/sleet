@@ -1,11 +1,8 @@
 Copy one restore point's closure from a backup into an empty destination root and commit it
 
-Usage: sleet mirror restore [OPTIONS] <ROOT> <BACKUP> <DEST>
+Usage: sleet mirror restore [OPTIONS] <BACKUP> <DEST>
 
 Arguments:
-  <ROOT>
-          Fleet root URL, e.g. s3://ops/sleet/
-
   <BACKUP>
           Backup root URL (a mirror destination)
 

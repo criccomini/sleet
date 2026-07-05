@@ -121,9 +121,6 @@ enum MirrorCommand {
     /// Copy one restore point's closure from a backup into an empty
     /// destination root and commit it.
     Restore {
-        /// Fleet root URL, e.g. s3://ops/sleet/.
-        root: String,
-
         /// Backup root URL (a mirror destination).
         backup: String,
 
@@ -242,15 +239,11 @@ async fn main() -> ExitCode {
                 }
             }
             MirrorCommand::Restore {
-                root,
                 backup,
                 dest,
                 at,
                 format,
             } => {
-                if let Err(e) = FleetRoot::open(&root) {
-                    return fail(e);
-                }
                 let at = match at
                     .as_deref()
                     .map(sleet::mirror::RestorePoint::parse)

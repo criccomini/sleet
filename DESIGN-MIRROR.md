@@ -262,7 +262,7 @@ Restore points map to wall-clock time by the manifest's sequence
 tracker, so `--at` accepts a manifest id or a timestamp; timestamp
 resolution is bounded by the tracker's sampling interval (60s stock).
 
-`sleet mirror restore <root> <backup-url> <dest-url> --at <point>` is a
+`sleet mirror restore <backup-url> <dest-url> --at <point>` is a
 one-shot pass with the chosen manifest as `L`, copying its closure to
 the destination and committing it. `--at` must name a restore point:
 a support manifest's own live entries may dangle, and restore fails

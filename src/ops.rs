@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use futures::StreamExt;
 use object_store::{ObjectStoreExt, PutMode, PutOptions, PutPayload};
 
 use crate::config::Service;
@@ -94,7 +95,7 @@ pub async fn status(
     let live = node_view(&entries, timeout);
 
     let mut databases = Vec::new();
-    let mut mirror_statuses = Vec::new();
+    let mut mirror_probes: Vec<(String, AppliedTarget)> = Vec::new();
     let mut destinations: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut unoffered: HashSet<Service> = HashSet::new();
     for (url, db) in &state.databases {
@@ -125,7 +126,7 @@ pub async fn status(
                             .entry(target.destination.clone())
                             .or_default()
                             .push(format!("{url} target {}", target.name));
-                        mirror_statuses.push(mirror_status(url, &target).await);
+                        mirror_probes.push((url.clone(), target));
                     }
                 }
                 continue;
@@ -143,22 +144,44 @@ pub async fn status(
                 nodes: owners.into_iter().map(String::from).collect(),
             });
         }
-        let queue = if compactions {
-            match queue_status(url).await {
-                Ok(queue) => Some(queue),
-                Err(e) => {
-                    warnings.push(format!("failed to read compactions for {url}: {e}"));
-                    None
-                }
-            }
-        } else {
-            None
-        };
         databases.push(DatabaseStatus {
             url: url.clone(),
             services: placements,
-            queue,
+            queue: None,
         });
+    }
+
+    // Store probes fan out with bounded concurrency and a per-probe
+    // timeout; `buffered` keeps results in registry order. Failures
+    // ride per entry (the mirror `error` field, a queue warning),
+    // never failing the whole status.
+    let mirror_statuses: Vec<MirrorStatus> = futures::stream::iter(&mirror_probes)
+        .map(|(url, target)| mirror_status(url, target))
+        .buffered(STATUS_PROBE_CONCURRENCY)
+        .collect()
+        .await;
+    if compactions {
+        let queues: Vec<Result<QueueStatus, String>> = futures::stream::iter(&databases)
+            .map(|db| async {
+                match tokio::time::timeout(STATUS_PROBE_TIMEOUT, queue_status(&db.url)).await {
+                    Ok(result) => result,
+                    Err(_) => Err(format!(
+                        "timed out after {}s",
+                        STATUS_PROBE_TIMEOUT.as_secs()
+                    )),
+                }
+            })
+            .buffered(STATUS_PROBE_CONCURRENCY)
+            .collect()
+            .await;
+        for (db, queue) in databases.iter_mut().zip(queues) {
+            match queue {
+                Ok(queue) => db.queue = Some(queue),
+                Err(e) => {
+                    warnings.push(format!("failed to read compactions for {}: {e}", db.url));
+                }
+            }
+        }
     }
     for (destination, sources) in destinations {
         if sources.len() > 1 {
@@ -189,9 +212,17 @@ pub async fn status(
     })
 }
 
+/// Concurrent store probes per `sleet status` invocation.
+const STATUS_PROBE_CONCURRENCY: usize = 16;
+
+/// The deadline for one status probe (a mirror pair's lag reads, a
+/// database's `.compactions` read); a hung store must not hang the
+/// whole status.
+const STATUS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// One `(database, target)`'s lag, from the source and destination
-/// heads. Read failures land in the `error` field rather than failing
-/// the whole status.
+/// heads. Read failures and timeouts land in the `error` field rather
+/// than failing the whole status.
 async fn mirror_status(url: &str, target: &AppliedTarget) -> MirrorStatus {
     let mut status = MirrorStatus {
         database: url.to_string(),
@@ -204,9 +235,15 @@ async fn mirror_status(url: &str, target: &AppliedTarget) -> MirrorStatus {
         seconds_behind: None,
         error: None,
     };
-    match mirror_lag(url, target, &mut status).await {
-        Ok(()) => {}
-        Err(e) => status.error = Some(e.to_string()),
+    match tokio::time::timeout(STATUS_PROBE_TIMEOUT, mirror_lag(url, target, &mut status)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => status.error = Some(e.to_string()),
+        Err(_) => {
+            status.error = Some(format!(
+                "lag read timed out after {}s",
+                STATUS_PROBE_TIMEOUT.as_secs()
+            ));
+        }
     }
     status
 }

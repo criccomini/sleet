@@ -104,9 +104,9 @@ Sleet keeps the latest restore point and restore points younger than `keep`, plu
 Restore copies one restore point into an empty destination root:
 
 ```sh
-sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1
-sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1 --at 42
-sleet mirror restore s3://ops/sleet gs://backups/db1 s3://restore/db1 --at 2026-07-03T12:00:00Z
+sleet mirror restore gs://backups/db1 s3://restore/db1
+sleet mirror restore gs://backups/db1 s3://restore/db1 --at 42
+sleet mirror restore gs://backups/db1 s3://restore/db1 --at 2026-07-03T12:00:00Z
 ```
 
 `--at` accepts a manifest ID or an RFC 3339 timestamp. A timestamp resolves to the newest restore point at or before that time. The timestamp mapping comes from the backup manifest sequence tracker, which samples at about 60 seconds with the stock SlateDB settings, so timestamp selection has that granularity. Restore never deletes and refuses a non-empty destination.
