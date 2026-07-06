@@ -15,6 +15,8 @@
 # Checked claims:
 # - CurrentHolderNeverFenced: fencing is ordered; the newest acquirer
 #   is never itself fenced.
+# - OnlyAliveNodesRun: only nodes that are actually alive ever run
+#   anything.
 # - DoubleRunReachable: the design's stated worst case (a transient
 #   double-run) is actually explored, not vacuously absent.
 # - Converged (eventually always): after churn stops, every database
