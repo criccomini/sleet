@@ -198,7 +198,7 @@ pub fn checkpoint_live(cp: &Checkpoint, now: DateTime<Utc>) -> bool {
     cp.expire_time.is_none_or(|t| t > now)
 }
 
-/// Refuse excluded sources (DESIGN-MIRROR §2): clones and databases
+/// Refuse excluded sources (RFC 0002 §2): clones and databases
 /// with a separate WAL object store.
 pub fn check_source(url: &str, m: &VersionedManifest) -> Result<(), MirrorError> {
     if !m.external_dbs().is_empty() {
@@ -243,7 +243,7 @@ impl ManifestCache {
     }
 }
 
-/// The closure of one head manifest (DESIGN-MIRROR §3): the head's own
+/// The closure of one head manifest (RFC 0002 §3): the head's own
 /// data objects plus, for each live checkpoint in its list, the pinned
 /// manifest and that manifest's data objects. One level only.
 pub struct Closure {

@@ -107,7 +107,7 @@ fn generate() {
         }
     }
     std::fs::write(dir.join("mirror-target-scores.tsv"), scores).unwrap();
-    // The frozen mirror layout names (DESIGN-MIRROR §3): every existing
+    // The frozen mirror layout names (RFC 0002 §3): every existing
     // target depends on these exact formats.
     let mut layout = String::new();
     for (kind, name) in [

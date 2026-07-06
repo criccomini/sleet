@@ -1,5 +1,5 @@
 ---
-# sleet's mirror sync protocol (DESIGN-MIRROR.md, §3-§4 and §7): a
+# sleet's mirror sync protocol (RFC 0002 §3-§4 and §7): a
 # single mirror task runs the sync pass (watermark, diff against the
 # watermark's closure, pin checkpoint, copy, ascending commit, unpin)
 # while a source writer appends manifests, source GC deletes whatever

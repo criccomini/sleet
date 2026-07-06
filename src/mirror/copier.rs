@@ -1,4 +1,4 @@
-//! Data-object copiers (DESIGN-MIRROR §8). `copier` selects who moves
+//! Data-object copiers (RFC 0002 §8). `copier` selects who moves
 //! `wal/` and `compacted/` objects; sleet always commits manifests
 //! itself, so no copier ever touches `manifest/`.
 

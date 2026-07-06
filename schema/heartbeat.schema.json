@@ -57,7 +57,7 @@
           "const": "compaction-workers"
         },
         {
-          "description": "Mirroring to per-database targets (DESIGN-MIRROR.md).",
+          "description": "Mirroring to per-database targets (RFC 0002).",
           "type": "string",
           "const": "mirror"
         }

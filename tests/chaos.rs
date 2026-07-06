@@ -164,7 +164,7 @@ async fn skewed_reader_takes_over_everything_safely() {
     cluster.shutdown().await;
 }
 
-/// DESIGN-MIRROR §3's completeness invariant, checked on the real code
+/// RFC 0002 §3's completeness invariant, checked on the real code
 /// at the model checker's granularity: after every successful mutation
 /// of the destination store (each manifest PUT of an ascending commit,
 /// each prune DELETE), the destination's latest manifest must hold its

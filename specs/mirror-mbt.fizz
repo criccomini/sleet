@@ -1,6 +1,6 @@
 ---
 # Model-based testing spec for the mirror sync protocol
-# (DESIGN-MIRROR.md §4 and §7): the same protocol mirror.fizz
+# (RFC 0002 §4 and §7): the same protocol mirror.fizz
 # verifies, remodeled at the granularity the public API exposes so
 # tests/mbt/mirror.rs can replay explored action sequences against
 # the real code. A whole sync pass (sleet::mirror::sync_pass) and a

@@ -1,4 +1,4 @@
-//! The mirror service (DESIGN-MIRROR.md): replicate a SlateDB database
+//! The mirror service (RFC 0002): replicate a SlateDB database
 //! into another object-store root by copying its immutable objects to
 //! the same relative names and committing manifests as the atomic
 //! step.
@@ -57,7 +57,7 @@ pub enum MirrorError {
         /// The URL read.
         url: String,
     },
-    /// The source cannot be mirrored (DESIGN-MIRROR §2).
+    /// The source cannot be mirrored (RFC 0002 §2).
     #[error("{url} cannot be a mirror source: {reason}")]
     ExcludedSource {
         /// The source URL.
@@ -120,7 +120,7 @@ pub struct AppliedTarget {
 }
 
 /// The enabled targets that apply to a database, with their computed
-/// destinations (DESIGN-MIRROR §9). A target with `source_prefix` maps
+/// destinations (RFC 0002 §9). A target with `source_prefix` maps
 /// every database under the prefix; one without is an exact
 /// destination. A database no target applies to does not mirror.
 pub fn applied_targets(db_url: &str, mirror: &ResolvedMirror) -> Vec<AppliedTarget> {

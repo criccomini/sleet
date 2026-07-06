@@ -137,7 +137,7 @@ pub enum Service {
     CompactorCoordinator,
     /// Compaction workers (RFC-0025).
     CompactionWorkers,
-    /// Mirroring to per-database targets (DESIGN-MIRROR.md).
+    /// Mirroring to per-database targets (RFC 0002).
     Mirror,
 }
 

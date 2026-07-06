@@ -1,4 +1,4 @@
-//! Restore-point retention (DESIGN-MIRROR §7): the only deletion that
+//! Restore-point retention (RFC 0002 §7): the only deletion that
 //! may run against a target.
 //!
 //! With `retention.keep` set the pruner keeps two tiers: restore points

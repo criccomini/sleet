@@ -1,4 +1,4 @@
-//! The sync pass (DESIGN-MIRROR §4): watermark, read, diff, pin and
+//! The sync pass (RFC 0002 §4): watermark, read, diff, pin and
 //! copy, commit, unpin, plus the continuous-mode WAL tail (§4 step 7).
 //!
 //! The pass syncs the target's watermark `W` directly to the source's

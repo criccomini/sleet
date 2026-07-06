@@ -17,7 +17,7 @@ Options:
           - gc:                    Garbage collection
           - compactor-coordinator: Standalone compaction coordinator (RFC-0025)
           - compaction-workers:    Compaction workers (RFC-0025)
-          - mirror:                Mirroring to per-database targets (DESIGN-MIRROR.md)
+          - mirror:                Mirroring to per-database targets (RFC 0002)
           
           [default: gc,compactor-coordinator,compaction-workers,mirror]
 

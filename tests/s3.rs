@@ -121,7 +121,7 @@ async fn s3_semantics_via_minio() {
 /// The completeness oracle: the destination's latest manifest holds
 /// its own objects and, for every live checkpoint entry whose
 /// checkpoint still exists at the source, the pinned manifest and its
-/// objects (DESIGN-MIRROR §3).
+/// objects (RFC 0002 §3).
 async fn assert_closure_complete(
     source: &sleet::services::DatabaseHandle,
     dest: &sleet::services::DatabaseHandle,

@@ -1,7 +1,7 @@
 //! `sleet` is a fleet manager for [SlateDB](https://slatedb.io)
 //! databases: it runs their background services (garbage collection,
 //! compaction coordination, and compaction execution) outside the
-//! writer process. See DESIGN.md for the design.
+//! writer process. See rfcs/ for the design.
 //!
 //! `daemon` is the long-running node loop: it heartbeats, polls the
 //! registry (`registry`) under a fleet root (`root`), computes

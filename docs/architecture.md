@@ -120,11 +120,11 @@ Coordination cost scales mostly with node count:
 - each node LISTs `dbs/` every `config_poll`
 - assignments are computed in memory
 
-Database work scales with database count and configured poll intervals. Worker polling backs off while a database is idle. At very large registry sizes, `dbs/` LIST cardinality becomes the pressure point; [DESIGN.md](../DESIGN.md) tracks inventory-based discovery as future work.
+Database work scales with database count and configured poll intervals. Worker polling backs off while a database is idle. At very large registry sizes, `dbs/` LIST cardinality becomes the pressure point; [RFC 0001](../rfcs/0001-design.md) tracks an inventory-backed registry as future work.
 
 ## Deeper reference
 
-- [DESIGN.md](../DESIGN.md) describes coordination, failure handling, scaling, and crate layout.
-- [DESIGN-MIRROR.md](../DESIGN-MIRROR.md) describes mirror invariants and restore semantics.
+- [RFC 0001](../rfcs/0001-design.md) describes coordination, failure handling, and scaling.
+- [RFC 0002](../rfcs/0002-mirroring.md) describes mirror invariants and restore semantics.
 - [src/placement.rs](../src/placement.rs) contains the frozen rendezvous hash.
 - [src/heartbeat.rs](../src/heartbeat.rs) defines heartbeat naming and JSON schema generation.

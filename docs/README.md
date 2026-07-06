@@ -31,8 +31,8 @@ Each `sleet run` process points at the same root. Nodes write heartbeats, read t
 The docs link to these source files when they are the better reference:
 
 - [README.md](../README.md) for the shortest project summary.
-- [DESIGN.md](../DESIGN.md) for the coordination design.
-- [DESIGN-MIRROR.md](../DESIGN-MIRROR.md) for mirror internals.
+- [RFC 0001](../rfcs/0001-design.md) for the coordination design.
+- [RFC 0002](../rfcs/0002-mirroring.md) for mirror internals.
 - [examples/sleet.toml](../examples/sleet.toml) and [examples/db.toml](../examples/db.toml) for complete config examples.
 - [schema/config.schema.json](../schema/config.schema.json), [schema/heartbeat.schema.json](../schema/heartbeat.schema.json), and [schema/cli.schema.json](../schema/cli.schema.json) for generated schemas.
 

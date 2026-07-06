@@ -36,7 +36,7 @@ count = 2                              # worker nodes per database
 max_sst_size = 268435456               # 256 MiB
 max_subcompactions = 4
 
-# Mirror targets (DESIGN-MIRROR.md). Fleet-wide targets apply to every
+# Mirror targets (RFC 0002). Fleet-wide targets apply to every
 # database a target's scope covers; dbs/<db>.toml overrides per field,
 # matched by target name. Databases under s3://user-data mirror to the
 # DR bucket at the same relative path.

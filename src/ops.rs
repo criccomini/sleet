@@ -191,7 +191,7 @@ pub async fn status(
             ));
         }
         // A destination can never itself be a registered database
-        // (DESIGN-MIRROR §2): sleet services at the destination would
+        // (RFC 0002 §2): sleet services at the destination would
         // violate the mirror's single-writer invariant.
         if state.databases.contains_key(&destination) {
             warnings.push(format!(

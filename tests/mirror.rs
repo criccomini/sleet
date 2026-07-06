@@ -1,5 +1,5 @@
 //! Mirror integration tests against real SlateDB databases: the sync
-//! pass invariants (DESIGN-MIRROR §3-4), the WAL tail, retention and
+//! pass invariants (RFC 0002 §3-4), the WAL tail, retention and
 //! both prune guards (§7), copiers (§8), restore, and failover by
 //! opening the target as an ordinary database (§3).
 
@@ -1402,7 +1402,7 @@ async fn restore_at_a_timestamp_resolves_and_bounds() {
     assert!(RestorePoint::parse("yesterday-ish").is_err());
 }
 
-/// The production shape (DESIGN-MIRROR §3 core premise): gc, the
+/// The production shape (RFC 0002 §3 core premise): gc, the
 /// compaction coordinator, workers, and the mirror all running
 /// against one database while a writer churns, with retention set on
 /// the target. Compaction rewrites and GC deletions race passes and

@@ -131,7 +131,7 @@ fn run_id() -> u128 {
 /// The completeness oracle: the destination's latest manifest holds
 /// its own objects and, for every live checkpoint entry whose
 /// checkpoint still exists at the source, the pinned manifest and its
-/// objects (DESIGN-MIRROR §3).
+/// objects (RFC 0002 §3).
 async fn assert_closure_complete(source: &DatabaseHandle, dest: &DatabaseHandle) {
     use sleet::mirror::layout;
     let head = dest

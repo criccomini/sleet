@@ -5,9 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `sleet` is a fleet manager for [SlateDB](https://slatedb.io) databases.
-`DESIGN.md` is the design source of truth (`DESIGN-MIRROR.md` for the
-mirror service); read them before making changes
-and keep them consistent when the design evolves. The fleet config format
+The RFCs under `rfcs/` are the design source of truth
+(`rfcs/0001-design.md` for coordination, `rfcs/0002-mirroring.md` for
+the mirror service); read them before making changes and keep them
+current when the design evolves. The fleet config format
 (`sleet.toml` and `dbs/<db>.toml`) is defined by the serde structs in
 `src/config.rs`, which generate `schema/config.schema.json`; a test fails
 when the two drift.
@@ -52,7 +53,7 @@ when the two drift.
 - `cargo bench` runs the placement and registry-poll scaling benches.
 - Run `cargo fmt && cargo clippy --all-targets` before committing.
 
-## Architecture (from DESIGN.md)
+## Architecture (from the RFCs)
 
 - A single Rust crate, one `sleet` binary: `sleet run <root>` is the
   long-running daemon; other subcommands are one-shot operator tools.
@@ -74,7 +75,7 @@ when the two drift.
 - Per-database services wrap SlateDB primitives via `slatedb::Admin`:
   garbage collection, standalone compaction coordinators (RFC-0025),
   compaction workers (top-`count` ranked nodes poll `.compactions` with
-  idle backoff), and mirroring (DESIGN-MIRROR.md: byte-copy a
+  idle backoff), and mirroring (`rfcs/0002-mirroring.md`: byte-copy a
   database's manifest closure to per-target destination roots,
   committing manifests with create-if-absent; placement is per
   `(database, mirror, target)` triple; `src/mirror/`).

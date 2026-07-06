@@ -46,9 +46,6 @@ captured in:
 - [RFC 0001: Sleet fleet coordination](rfcs/0001-design.md)
 - [RFC 0002: Mirroring](rfcs/0002-mirroring.md)
 
-The older design notes remain in [DESIGN.md](DESIGN.md) and
-[DESIGN-MIRROR.md](DESIGN-MIRROR.md).
-
 ## Quick start
 
 Build the binary:

@@ -291,7 +291,7 @@ fn mirror_op() -> impl Strategy<Value = MirrorOp> {
     ]
 }
 
-/// The completeness oracle (DESIGN-MIRROR §3): the destination's
+/// The completeness oracle (RFC 0002 §3): the destination's
 /// latest manifest holds its own objects and, for every live
 /// checkpoint entry whose checkpoint still exists at the source, the
 /// pinned manifest and its objects. Returns the first problem found.

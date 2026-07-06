@@ -1,11 +1,12 @@
 ---
-# sleet's coordination protocol (DESIGN.md, Assignment and failover):
-# nodes heartbeat to shared storage; each reader judges liveness from
-# heartbeat freshness (always counting itself live); ownership
-# of each database is the top of a frozen ranking over the reader's
-# live view; coordinators fence predecessors on acquisition (the
-# compactor_epoch abstraction: `holder` is the current epoch owner,
-# and a newly acquired holder fences whoever else is running).
+# sleet's coordination protocol (RFC 0001: Placement, Failure
+# behavior, Coordinator fencing): nodes heartbeat to shared storage;
+# each reader judges liveness from heartbeat freshness (always
+# counting itself live); ownership of each database is the top of a
+# frozen ranking over the reader's live view; coordinators fence
+# predecessors on acquisition (the compactor_epoch abstraction:
+# `holder` is the current epoch owner, and a newly acquired holder
+# fences whoever else is running).
 #
 # Scope: only top-1 placement (gc, coordinator) is modeled. Compaction
 # workers place on the top `count` nodes, but execution there is gated

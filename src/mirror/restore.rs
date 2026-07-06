@@ -1,4 +1,4 @@
-//! `sleet mirror restore` (DESIGN-MIRROR §7): a one-shot pass with a
+//! `sleet mirror restore` (RFC 0002 §7): a one-shot pass with a
 //! chosen restore point as `L`, copying its closure to an empty
 //! destination and committing it. The destination is then an ordinary
 //! database at that point.

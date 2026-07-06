@@ -125,9 +125,9 @@ Sleet refuses a destination whose manifest history is ahead of the source. That 
 
 ## Reader note
 
-A mirror target is kept as a valid SlateDB database at committed manifests. Tailing it as a live read replica depends on SlateDB reader support that does not write checkpoints at the target. The detailed design tracks that in [DESIGN-MIRROR.md](../DESIGN-MIRROR.md#112-checkpoint-free-reader-slatedb-contribution).
+A mirror target is kept as a valid SlateDB database at committed manifests. Tailing it as a live read replica depends on SlateDB reader support that does not write checkpoints at the target. The detailed design tracks that in [RFC 0002](../rfcs/0002-mirroring.md#112-checkpoint-free-reader-slatedb-contribution).
 
 ## Deeper reference
 
-- [DESIGN-MIRROR.md](../DESIGN-MIRROR.md) describes the sync pass, pruning, and future promotion command.
+- [RFC 0002](../rfcs/0002-mirroring.md) describes the sync pass, pruning, and future promotion command.
 - [src/mirror/](../src/mirror) contains the implementation.
