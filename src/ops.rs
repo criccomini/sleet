@@ -229,7 +229,7 @@ async fn mirror_status(url: &str, target: &AppliedTarget) -> MirrorStatus {
         target: target.name.clone(),
         destination: target.destination.clone(),
         source_manifest_id: None,
-        target_manifest_id: None,
+        dest_manifest_id: None,
         manifests_behind: None,
         wal_behind: None,
         seconds_behind: None,
@@ -279,7 +279,7 @@ async fn mirror_lag(
         status.manifests_behind = Some(source_head.id());
         return Ok(());
     };
-    status.target_manifest_id = Some(dest_head.id());
+    status.dest_manifest_id = Some(dest_head.id());
     status.manifests_behind = Some(source_head.id().saturating_sub(dest_head.id()));
     let source_wal = layout::list_wals(&source).await?.last().map(|(id, _)| *id);
     let dest_wal = layout::list_wals(&dest).await?.last().map(|(id, _)| *id);

@@ -75,7 +75,7 @@ pub struct MirrorStatus {
 
     /// The destination's latest manifest id (the watermark).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_manifest_id: Option<u64>,
+    pub dest_manifest_id: Option<u64>,
 
     /// Manifests the destination is behind.
     #[serde(skip_serializing_if = "Option::is_none")]

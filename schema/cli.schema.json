@@ -113,6 +113,15 @@
           "description": "The source database's canonical URL.",
           "type": "string"
         },
+        "dest_manifest_id": {
+          "description": "The destination's latest manifest id (the watermark).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "destination": {
           "description": "The destination root the target maps this database to.",
           "type": "string"
@@ -154,15 +163,6 @@
         "target": {
           "description": "The target's name.",
           "type": "string"
-        },
-        "target_manifest_id": {
-          "description": "The destination's latest manifest id (the watermark).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
         },
         "wal_behind": {
           "description": "WAL ids the destination is behind.",

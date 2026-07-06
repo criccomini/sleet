@@ -68,14 +68,14 @@ pub enum MirrorError {
     /// The destination's history is ahead of the source's: something
     /// else has been committing manifests there.
     #[error(
-        "destination {destination} has diverged: its manifest {target_id} is ahead of the \
+        "destination {destination} has diverged: its manifest {dest_id} is ahead of the \
          source's {source_id}; it is not a mirror of this source"
     )]
     Diverged {
         /// The destination root.
         destination: String,
         /// The destination's latest manifest id.
-        target_id: u64,
+        dest_id: u64,
         /// The source's latest manifest id.
         source_id: u64,
     },

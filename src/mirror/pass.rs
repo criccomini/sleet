@@ -133,7 +133,7 @@ async fn pass_once(
         if w.id() > head.id() {
             return Err(MirrorError::Diverged {
                 destination: dest.url.clone(),
-                target_id: w.id(),
+                dest_id: w.id(),
                 source_id: head.id(),
             }
             .into());
@@ -365,7 +365,7 @@ async fn commit(
                 if existing != bytes {
                     return Err(MirrorError::Diverged {
                         destination: dest.url.clone(),
-                        target_id: id,
+                        dest_id: id,
                         source_id: head.id(),
                     }
                     .into());

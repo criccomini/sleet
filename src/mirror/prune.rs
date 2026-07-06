@@ -110,14 +110,14 @@ pub async fn prune_at(
 
     // Support, judged per restore point: the manifests each one's live
     // checkpoints pin. One level, matching the closure.
-    let target_ids: BTreeSet<u64> = manifests.iter().map(|(id, _)| *id).collect();
+    let dest_ids: BTreeSet<u64> = manifests.iter().map(|(id, _)| *id).collect();
     let mut kept: BTreeSet<u64> = BTreeSet::new();
     let mut decoded: BTreeMap<u64, slatedb::VersionedManifest> = BTreeMap::new();
     for &id in &restore_points {
         // A restore point is kept whether or not it decodes: deleting
         // an unreadable latest manifest would destroy the watermark.
         kept.insert(id);
-        let Some(manifest) = read_target_manifest(dest, id, &mut decoded).await? else {
+        let Some(manifest) = read_dest_manifest(dest, id, &mut decoded).await? else {
             continue;
         };
         let pins: Vec<u64> = manifest
@@ -130,7 +130,7 @@ pub async fn prune_at(
             // Support manifests are kept for their objects; their own
             // checkpoint entries may dangle, so a missing pinned
             // manifest is skipped, not chased.
-            if target_ids.contains(&pinned) {
+            if dest_ids.contains(&pinned) {
                 kept.insert(pinned);
             }
         }
@@ -143,7 +143,7 @@ pub async fn prune_at(
     let mut kept_objects = ManifestObjects::default();
     let mut kept_decoded = true;
     for &id in kept.clone().iter() {
-        match read_target_manifest(dest, id, &mut decoded).await? {
+        match read_dest_manifest(dest, id, &mut decoded).await? {
             Some(manifest) => kept_objects.extend(&layout::manifest_objects(manifest)),
             None => {
                 warn!(
@@ -156,7 +156,7 @@ pub async fn prune_at(
         }
     }
     // The WAL tail above the latest manifest is never pruned.
-    let tail_floor = read_target_manifest(dest, latest, &mut decoded)
+    let tail_floor = read_dest_manifest(dest, latest, &mut decoded)
         .await?
         .map(|m| m.next_wal_sst_id())
         .unwrap_or(0);
@@ -264,9 +264,9 @@ async fn source_closure(source: &DatabaseHandle) -> Result<ManifestObjects, Mirr
     Ok(objects)
 }
 
-/// Read and cache one target manifest; `None` when it is unreadable
-/// (deleted between the LIST and the read).
-async fn read_target_manifest<'a>(
+/// Read and cache one destination manifest; `None` when it is
+/// unreadable (deleted between the LIST and the read).
+async fn read_dest_manifest<'a>(
     dest: &DatabaseHandle,
     id: u64,
     cache: &'a mut BTreeMap<u64, slatedb::VersionedManifest>,
