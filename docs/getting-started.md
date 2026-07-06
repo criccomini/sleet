@@ -81,8 +81,7 @@ run for that database. To run a smaller node, pass a service list:
 ```sh
 sleet run s3://ops/sleet \
   --node-id compact-1 \
-  --services compaction-workers \
-  --max-compaction-jobs 16
+  --services compaction-workers
 ```
 
 Node IDs must be unique within the fleet and must be 1 to 128 characters of

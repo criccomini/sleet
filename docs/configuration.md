@@ -108,7 +108,6 @@ operators usually need first:
 | GC clone-detach pass         | enabled, `60s` interval     |
 | WAL fence GC                 | dry-run by default          |
 | Compaction worker count      | `1` node per database       |
-| Worker idle poll ceiling     | backs off up to `300s`      |
 | Mirror mode                  | `continuous`                |
 | Mirror poll                  | `10s`                       |
 | Mirror periodic interval     | `24h`                       |

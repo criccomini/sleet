@@ -85,8 +85,7 @@ Run specialized pools with `--services`:
 ```sh
 target/release/sleet run s3://ops/sleet \
   --node-id worker-1 \
-  --services compaction-workers \
-  --max-compaction-jobs 16
+  --services compaction-workers
 ```
 
 ## Registering databases
@@ -229,7 +228,6 @@ Node-local flags:
 | --- | --- |
 | `--node-id` | unique identity inside the fleet |
 | `--services` | offered service list |
-| `--max-compaction-jobs` | databases compacting on one node |
 | `--max-mirror-jobs` | mirror jobs on one node |
 | `--rclone` | rclone binary used by rclone mirror targets |
 

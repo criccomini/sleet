@@ -74,8 +74,8 @@ when the two drift.
   the shared tree.
 - Per-database services wrap SlateDB primitives via `slatedb::Admin`:
   garbage collection, standalone compaction coordinators (RFC-0025),
-  compaction workers (top-`count` ranked nodes poll `.compactions` with
-  idle backoff), and mirroring (`rfcs/0002-mirroring.md`: byte-copy a
+  compaction workers (top-`count` ranked nodes poll `.compactions`),
+  and mirroring (`rfcs/0002-mirroring.md`: byte-copy a
   database's manifest closure to per-target destination roots,
   committing manifests with create-if-absent; placement is per
   `(database, mirror, target)` triple; `src/mirror/`).

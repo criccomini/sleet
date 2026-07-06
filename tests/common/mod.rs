@@ -79,7 +79,6 @@ impl Cluster {
             let options = NodeOptions {
                 node_id: node_id.into(),
                 services: services.to_vec(),
-                max_compaction_jobs: 1,
                 ..NodeOptions::default()
             };
             let token = token.clone();

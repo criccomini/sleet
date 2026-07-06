@@ -1362,7 +1362,6 @@ async fn soak_mirror_races_live_compaction_and_gc() {
         root.clone(),
         NodeOptions {
             node_id: "n1".into(),
-            max_compaction_jobs: 2,
             ..NodeOptions::default()
         },
         shutdown.clone(),

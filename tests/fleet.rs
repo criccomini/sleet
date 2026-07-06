@@ -106,7 +106,6 @@ async fn daemon_compacts_a_real_database() {
         NodeOptions {
             node_id: "n1".into(),
             services: Service::ALL.to_vec(),
-            max_compaction_jobs: 2,
             ..NodeOptions::default()
         },
         shutdown.clone(),
@@ -246,7 +245,6 @@ async fn gc_deletes_superseded_ssts() {
         NodeOptions {
             node_id: "n1".into(),
             services: Service::ALL.to_vec(),
-            max_compaction_jobs: 2,
             ..NodeOptions::default()
         },
         shutdown.clone(),
@@ -353,14 +351,12 @@ async fn coordinator_duel_self_resolves() {
     b.await.unwrap().unwrap();
 }
 
-/// The node-wide jobs semaphore gates workers: with no permit a worker
-/// never claims scheduled jobs, and after the queue drains the permit
-/// is released (the drained-stop path).
+/// A standalone worker claims and executes scheduled jobs: the queue
+/// drains while it runs.
 #[tokio::test(flavor = "multi_thread")]
-async fn worker_semaphore_gates_and_releases() {
+async fn worker_claims_and_executes_scheduled_jobs() {
     use sleet::config::ResolvedServices;
     use sleet::services::{queue_depth, run_coordinator, run_workers};
-    use tokio::sync::Semaphore;
 
     let dir = tempfile::tempdir().unwrap();
     let db_url = seed_database(dir.path(), "db1").await;
@@ -388,44 +384,21 @@ async fn worker_semaphore_gates_and_releases() {
     token.cancel();
     c.await.unwrap().unwrap();
 
-    // No permits: the worker sees the work but cannot claim it.
-    let jobs = Arc::new(Semaphore::new(0));
     let mut workers = ResolvedServices::default().workers;
     workers.compactions_poll_interval = Duration::from_millis(250);
     let worker_token = CancellationToken::new();
     let w = tokio::spawn({
         let db_url = db_url.clone();
-        let jobs = jobs.clone();
         let token = worker_token.clone();
         async move {
             let db = DatabaseHandle::open(&db_url).unwrap();
-            run_workers(&db, &workers, jobs, token).await
+            run_workers(&db, &workers, token).await
         }
     });
-    // "Never claims" has no event to poll for: soak eight 250ms
-    // polls, then check the queue is untouched.
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    {
-        let db = DatabaseHandle::open(&db_url).unwrap();
-        let depth = queue_depth(&db.admin).await.unwrap();
-        assert!(
-            depth.claimable > 0,
-            "worker must not claim without a permit: {depth:?}"
-        );
-        assert_eq!(depth.running, 0);
-    }
-
-    // Grant a permit: the job is claimed and executed, and once the
-    // queue drains for two checks the worker stops and releases it.
-    jobs.add_permits(1);
     poll_until("job claimed and executed", || async {
         let db = DatabaseHandle::open(&db_url).unwrap();
         let depth = queue_depth(&db.admin).await.ok()?;
         (depth.claimable == 0).then_some(())
-    })
-    .await;
-    poll_until("drained worker releases the permit", || async {
-        (jobs.available_permits() == 1).then_some(())
     })
     .await;
 

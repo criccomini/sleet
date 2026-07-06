@@ -21,9 +21,6 @@ Options:
           
           [default: gc,compactor-coordinator,compaction-workers,mirror]
 
-      --max-compaction-jobs <MAX_COMPACTION_JOBS>
-          Maximum databases compacting on this node at once. Default: the machine's available parallelism
-
       --max-mirror-jobs <MAX_MIRROR_JOBS>
           Maximum (database, target) mirror jobs copying or pruning on this node at once. Default: the machine's available parallelism
 

@@ -7,7 +7,6 @@
 //! by CAS. sleet only decides where these loops run.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use object_store::ObjectStore;
 use object_store::path::Path as StorePath;
@@ -24,20 +23,6 @@ use crate::config::{
     ResolvedWorkers,
 };
 use crate::registry;
-
-/// While a database is idle, polling backs off exponentially up to
-/// this ceiling: worker `.compactions` polls from
-/// `compactions_poll_interval`, continuous-mirror polls from the
-/// target's `poll`.
-pub(crate) const IDLE_POLL_MAX: Duration = Duration::from_secs(300);
-
-/// While the worker runs, sleet checks the queue every this many poll
-/// intervals (30s at the default 5s poll).
-const IDLE_CHECK_EVERY_POLLS: u32 = 6;
-
-/// Stop a running worker after this many consecutive empty queue
-/// checks.
-const DRAIN_EMPTY_CHECKS: u32 = 2;
 
 /// A service task failure.
 #[derive(Debug, thiserror::Error)]
@@ -128,79 +113,19 @@ pub async fn run_coordinator(
     Ok(())
 }
 
-/// Run a compaction worker for one database until cancelled, polling
-/// `.compactions` with exponential backoff while the database is idle:
-/// the worker itself only runs while there is work, so mostly-idle
-/// fleets cost one queue read per backed-off interval. `jobs` is the
-/// node-wide cap on databases compacting at once (`--max-compaction-jobs`).
+/// Run a compaction worker for one database until cancelled. The
+/// worker polls `.compactions` on `compactions_poll_interval` and
+/// executes what it claims, up to `max_concurrent_compactions` jobs.
 pub async fn run_workers(
     db: &DatabaseHandle,
     resolved: &ResolvedWorkers,
-    jobs: Arc<tokio::sync::Semaphore>,
     token: CancellationToken,
 ) -> Result<(), ServiceError> {
-    let base = resolved
-        .compactions_poll_interval
-        .max(Duration::from_millis(100));
-    let max_idle = IDLE_POLL_MAX.max(base);
-    let mut idle_poll = base;
-    loop {
-        if token.is_cancelled() {
-            return Ok(());
-        }
-        let depth = queue_depth(&db.admin).await?;
-        if depth.claimable > 0 || depth.running > 0 {
-            idle_poll = base;
-            let permit = tokio::select! {
-                _ = token.cancelled() => return Ok(()),
-                permit = jobs.clone().acquire_owned() => permit.expect("semaphore never closes"),
-            };
-            let result = run_worker_until_drained(db, resolved, &token).await;
-            drop(permit);
-            result?;
-        } else {
-            tokio::select! {
-                _ = token.cancelled() => return Ok(()),
-                _ = tokio::time::sleep(idle_poll) => {}
-            }
-            idle_poll = (idle_poll * 2).min(max_idle);
-        }
-    }
-}
-
-/// Run the SlateDB worker until the parent is cancelled or the queue
-/// has drained (`DRAIN_EMPTY_CHECKS` consecutive empty checks).
-async fn run_worker_until_drained(
-    db: &DatabaseHandle,
-    resolved: &ResolvedWorkers,
-    token: &CancellationToken,
-) -> Result<(), ServiceError> {
-    let worker_token = token.child_token();
     let options = worker_options(resolved);
-    let check_every = resolved.compactions_poll_interval * IDLE_CHECK_EVERY_POLLS;
-    let run = db
-        .admin
-        .run_compaction_worker_with_options(worker_token.clone(), options);
-    tokio::pin!(run);
-    let mut empty_checks = 0;
-    loop {
-        tokio::select! {
-            result = &mut run => return result.map_err(Into::into),
-            _ = tokio::time::sleep(check_every) => {
-                match queue_depth(&db.admin).await {
-                    Ok(depth) if depth.claimable == 0 && depth.running == 0 => {
-                        empty_checks += 1;
-                        if empty_checks >= DRAIN_EMPTY_CHECKS {
-                            worker_token.cancel();
-                        }
-                    }
-                    Ok(_) => empty_checks = 0,
-                    // Transient read failure: keep the worker running.
-                    Err(_) => {}
-                }
-            }
-        }
-    }
+    db.admin
+        .run_compaction_worker_with_options(token, options)
+        .await?;
+    Ok(())
 }
 
 /// Compaction queue depth for one database, from `.compactions`.
@@ -237,14 +162,13 @@ pub async fn run_service(
     db: &DatabaseHandle,
     service: crate::config::Service,
     resolved: &ResolvedServices,
-    jobs: Arc<tokio::sync::Semaphore>,
     token: CancellationToken,
 ) -> Result<(), ServiceError> {
     use crate::config::Service;
     match service {
         Service::Gc => run_gc(db, &resolved.gc, token).await,
         Service::CompactorCoordinator => run_coordinator(db, &resolved.coordinator, token).await,
-        Service::CompactionWorkers => run_workers(db, &resolved.workers, jobs, token).await,
+        Service::CompactionWorkers => run_workers(db, &resolved.workers, token).await,
         Service::Mirror => unreachable!("mirror assignments dispatch to mirror::run_mirror"),
     }
 }
@@ -325,6 +249,8 @@ fn codec(codec: CompressionCodec) -> slatedb::config::CompressionCodec {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::config::ResolvedServices;
 
@@ -351,43 +277,6 @@ mod tests {
         assert_eq!(worker.compactions_poll_interval, Duration::from_secs(5));
         assert_eq!(worker.heartbeat_bytes, 5 * 1024 * 1024);
         assert!(worker.compression_codec.is_none());
-    }
-
-    /// Idle backoff: with nothing to compact, worker polling doubles
-    /// toward the ceiling instead of polling at the base interval.
-    /// Under paused time, 1000 virtual seconds of a 1s base interval
-    /// would mean ~1000 reads without backoff; with it, wakeups follow
-    /// 1, 2, 4, ... capped at 300s, so only a handful of reads.
-    #[tokio::test(start_paused = true)]
-    async fn worker_polling_backs_off_while_idle() {
-        use crate::testing::{Op, TestStore};
-        let store = TestStore::in_memory();
-        let db = DatabaseHandle::from_parts(
-            "memory:///db",
-            store.clone(),
-            object_store::path::Path::from("db"),
-        );
-        let resolved = ResolvedWorkers {
-            compactions_poll_interval: Duration::from_secs(1),
-            ..ResolvedServices::default().workers
-        };
-        let token = tokio_util::sync::CancellationToken::new();
-        let jobs = Arc::new(tokio::sync::Semaphore::new(1));
-        let worker = tokio::spawn({
-            let token = token.clone();
-            async move { run_workers(&db, &resolved, jobs, token).await }
-        });
-
-        tokio::time::sleep(Duration::from_secs(1000)).await;
-        token.cancel();
-        worker.await.unwrap().unwrap();
-
-        let reads = store.counters().count(Op::List) + store.counters().count(Op::Get);
-        assert!(reads >= 8, "worker never polled: {reads} reads");
-        assert!(
-            reads <= 60,
-            "worker polled without backing off: {reads} reads in 1000s"
-        );
     }
 
     #[test]

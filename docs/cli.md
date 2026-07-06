@@ -36,7 +36,6 @@ Important options:
 | --------------------------- | ---------------------------------------------------- |
 | `--node-id <NODE_ID>`       | Required unique node identity.                       |
 | `--services <SERVICES>`     | Comma-separated service list.                        |
-| `--max-compaction-jobs <N>` | Databases compacting on this node at once.           |
 | `--max-mirror-jobs <N>`     | Mirror copy or prune jobs on this node at once.      |
 | `--rclone <PATH>`           | Binary for mirror targets using `copier = "rclone"`. |
 
@@ -54,8 +53,7 @@ Example:
 ```sh
 sleet run s3://ops/sleet \
   --node-id worker-1 \
-  --services compaction-workers \
-  --max-compaction-jobs 16
+  --services compaction-workers
 ```
 
 ## `sleet register`

@@ -39,8 +39,6 @@ pub struct NodeOptions {
     pub node_id: String,
     /// Services this node offers.
     pub services: Vec<Service>,
-    /// Maximum databases compacting on this node at once.
-    pub max_compaction_jobs: usize,
     /// Maximum `(database, target)` mirror jobs copying or pruning on
     /// this node at once.
     pub max_mirror_jobs: usize,
@@ -53,7 +51,6 @@ impl Default for NodeOptions {
         Self {
             node_id: String::new(),
             services: Service::ALL.to_vec(),
-            max_compaction_jobs: 1,
             max_mirror_jobs: 1,
             rclone: None,
         }
@@ -164,7 +161,6 @@ pub async fn run(
     heartbeat::validate_node_id(&options.node_id).map_err(DaemonError::NodeId)?;
     let node = Node {
         object_name: heartbeat::object_name(&options.node_id, &options.services),
-        jobs: Arc::new(Semaphore::new(options.max_compaction_jobs.max(1))),
         mirror_jobs: Arc::new(Semaphore::new(options.max_mirror_jobs.max(1))),
         states: TaskStates::default(),
         options,
@@ -178,7 +174,6 @@ struct Node {
     options: NodeOptions,
     object_name: String,
     root: FleetRoot,
-    jobs: Arc<Semaphore>,
     mirror_jobs: Arc<Semaphore>,
     states: TaskStates,
 }
@@ -343,7 +338,6 @@ impl Node {
             let handle = tokio::spawn(supervise(
                 key.clone(),
                 resolved.clone(),
-                self.jobs.clone(),
                 self.mirror_jobs.clone(),
                 self.options.rclone.clone(),
                 self.states.clone(),
@@ -367,11 +361,9 @@ impl Node {
 /// failure: wait one heartbeat interval (giving the rival time to
 /// refresh and stand down), then rerun; if the pair has actually moved,
 /// the daemon's next ownership recompute cancels this task.
-#[allow(clippy::too_many_arguments)]
 async fn supervise(
     key: Assignment,
     resolved: Arc<ResolvedServices>,
-    jobs: Arc<Semaphore>,
     mirror_jobs: Arc<Semaphore>,
     rclone: Option<String>,
     states: TaskStates,
@@ -383,7 +375,6 @@ async fn supervise(
         let url = url.clone();
         let target = target.clone();
         let resolved = resolved.clone();
-        let jobs = jobs.clone();
         let mirror_jobs = mirror_jobs.clone();
         let rclone = rclone.clone();
         async move {
@@ -404,7 +395,7 @@ async fn supervise(
                     .map_err(services::ServiceError::from)
             } else {
                 let db = DatabaseHandle::open(&url)?;
-                services::run_service(&db, service, &resolved, jobs, child).await
+                services::run_service(&db, service, &resolved, child).await
             }
         }
     };
@@ -504,7 +495,6 @@ mod tests {
         };
         Node {
             object_name: heartbeat::object_name(&options.node_id, &options.services),
-            jobs: Arc::new(Semaphore::new(1)),
             mirror_jobs: Arc::new(Semaphore::new(1)),
             states: TaskStates::default(),
             root: FleetRoot::from_parts(

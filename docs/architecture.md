@@ -135,11 +135,10 @@ Coordination cost scales mostly with node count:
 - each node LISTs `dbs/` every `config_poll`
 - assignments are computed in memory
 
-Database work scales with database count and configured poll intervals. Worker
-polling backs off while a database is idle. At very large registry sizes,
-`dbs/` LIST cardinality becomes the pressure point;
-[RFC 0001](../rfcs/0001-design.md) tracks an inventory-backed registry as
-future work.
+Database work scales with database count and configured poll intervals. At
+very large registry sizes, `dbs/` LIST cardinality becomes the pressure
+point; [RFC 0001](../rfcs/0001-design.md) tracks an inventory-backed registry
+as future work.
 
 ## Deeper reference
 

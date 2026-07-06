@@ -40,11 +40,6 @@ enum Command {
         )]
         services: Vec<Service>,
 
-        /// Maximum databases compacting on this node at once. Default:
-        /// the machine's available parallelism.
-        #[arg(long)]
-        max_compaction_jobs: Option<usize>,
-
         /// Maximum (database, target) mirror jobs copying or pruning on
         /// this node at once. Default: the machine's available
         /// parallelism.
@@ -159,7 +154,6 @@ async fn main() -> ExitCode {
             root,
             node_id,
             services,
-            max_compaction_jobs,
             max_mirror_jobs,
             rclone,
         } => {
@@ -176,7 +170,6 @@ async fn main() -> ExitCode {
             let options = NodeOptions {
                 node_id,
                 services,
-                max_compaction_jobs: max_compaction_jobs.unwrap_or_else(parallelism),
                 max_mirror_jobs: max_mirror_jobs.unwrap_or_else(parallelism),
                 rclone,
             };

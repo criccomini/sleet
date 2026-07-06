@@ -62,7 +62,6 @@ async fn footprint_with_tens_of_thousands_of_tasks() {
         NodeOptions {
             node_id: "n1".into(),
             services: vec![Service::Gc],
-            max_compaction_jobs: 4,
             ..NodeOptions::default()
         },
         shutdown.clone(),

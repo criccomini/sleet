@@ -203,12 +203,14 @@ settings:
 
 - `--node-id`
 - `--services`
-- `--max-compaction-jobs`
 - `--max-mirror-jobs`
 - `--rclone`
 
-Capacity caps default from the machine's available parallelism. A large fleet
-can run specialized nodes, for example worker-heavy machines with:
+`--max-mirror-jobs` defaults from the machine's available parallelism.
+Compaction concurrency is bounded per database by the resolved
+`compaction-workers` config (`max_concurrent_compactions`), not per node. A
+large fleet can run specialized nodes, for example worker-heavy machines
+with:
 
 ```sh
 sleet run <root> --node-id worker-1 --services compaction-workers
@@ -229,10 +231,10 @@ Compactor coordinators run SlateDB's standalone coordinator mode. A coordinator
 polls manifests, schedules jobs in `.compactions`, reclaims jobs whose worker
 heartbeat expired, and commits completed compactions to the manifest.
 
-Compaction workers poll `.compactions`, claim scheduled jobs with CAS, execute
-the compaction, heartbeat while working, and write back the result. Placement
-chooses who polls. Job claims choose who performs a specific job. Idle worker
-polling backs off per database.
+Compaction workers poll `.compactions` on `compactions_poll_interval`, claim
+scheduled jobs with CAS, execute the compaction, heartbeat while working, and
+write back the result. Placement chooses who polls. Job claims choose who
+performs a specific job.
 
 Mirroring copies immutable database objects to another root and commits
 target manifests. RFC 0002 defines its config and protocol.
@@ -298,9 +300,9 @@ per database. At large fleet sizes, listing `dbs/` is the first pressure
 point. An inventory-backed registry is future work.
 
 Database traffic scales with enabled services and their polling intervals.
-GC and coordinators poll each managed database. Workers back off while a
-database is idle. The current model starts one task per owned database and
-service. A multiplexed upstream poller could reduce task count later.
+GC, coordinators, and workers poll each managed database on their configured
+intervals. The current model starts one task per owned database and service.
+A multiplexed upstream poller could reduce task count later.
 
 ## Compatibility
 

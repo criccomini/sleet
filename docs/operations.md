@@ -29,8 +29,7 @@ Use `--services` to build specialized pools:
 ```sh
 sleet run s3://ops/sleet \
   --node-id compact-1 \
-  --services compaction-workers \
-  --max-compaction-jobs 32
+  --services compaction-workers
 
 sleet run s3://ops/sleet \
   --node-id mirror-1 \
@@ -38,9 +37,10 @@ sleet run s3://ops/sleet \
   --max-mirror-jobs 16
 ```
 
-`--max-compaction-jobs` caps how many databases compact on one node at the
-same time. `--max-mirror-jobs` caps concurrent mirror copy or prune jobs on
-one node. Both default to the machine's available parallelism.
+`--max-mirror-jobs` caps concurrent mirror copy or prune jobs on one node
+and defaults to the machine's available parallelism. Compaction concurrency
+is bounded per database by the `compaction-workers` config
+(`max_concurrent_compactions`), not per node.
 
 ## Logs
 
