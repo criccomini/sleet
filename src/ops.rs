@@ -16,7 +16,7 @@ use crate::response::{
     DatabaseStatus, MirrorRestoreResponse, MirrorStatus, MirrorSyncResponse, NodeStatus,
     QueueStatus, RegisterResponse, ServicePlacement, StatusResponse,
 };
-use crate::root::{ConfigPoller, FleetRoot, HeartbeatEntry, node_view};
+use crate::root::{ConfigPoller, FleetRoot, HeartbeatEntry, node_view, youngest_per_node};
 use crate::services::{self, DatabaseHandle};
 
 /// A one-shot subcommand failure.
@@ -305,17 +305,8 @@ async fn node_statuses(
     entries: &[HeartbeatEntry],
     timeout: std::time::Duration,
 ) -> Vec<NodeStatus> {
-    let mut youngest: BTreeMap<&str, &HeartbeatEntry> = BTreeMap::new();
-    for entry in entries {
-        match youngest.get(entry.node_id.as_str()) {
-            Some(existing) if existing.age <= entry.age => {}
-            _ => {
-                youngest.insert(&entry.node_id, entry);
-            }
-        }
-    }
     let mut nodes = Vec::new();
-    for entry in youngest.into_values() {
+    for entry in youngest_per_node(entries).into_values() {
         let body: Option<Heartbeat> = match root.store().get(&entry.location).await {
             Ok(get) => get
                 .bytes()

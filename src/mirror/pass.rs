@@ -28,9 +28,6 @@ use crate::services::DatabaseHandle;
 /// churn racing GC) before giving up and surfacing an error.
 const MAX_RESTARTS: usize = 5;
 
-/// Concurrent HEADs while WAL candidates are checked at the target.
-const HEAD_PARALLELISM: usize = 16;
-
 /// The name of the source pin checkpoint for a target.
 pub fn pin_name(target_name: &str) -> String {
     format!("sleet-mirror:{target_name}")
@@ -275,20 +272,8 @@ async fn diff_against_watermark(
 /// HEAD-check WAL candidates at the target: the tail usually copied
 /// them already, and WALs above W are never pruned, so a hit is final.
 async fn wal_misses(dest: &DatabaseHandle, wal: &BTreeSet<u64>) -> Result<Vec<u64>, MirrorError> {
-    use futures::{StreamExt, TryStreamExt};
-    let misses: Vec<Option<u64>> = futures::stream::iter(wal.iter().copied())
-        .map(|id| async move {
-            let path = object_path(dest, &layout::wal_rel(id));
-            match dest.store.head(&path).await {
-                Ok(_) => Ok(None),
-                Err(object_store::Error::NotFound { .. }) => Ok(Some(id)),
-                Err(e) => Err(MirrorError::from(e)),
-            }
-        })
-        .buffer_unordered(HEAD_PARALLELISM)
-        .try_collect()
-        .await?;
-    let mut misses: Vec<u64> = misses.into_iter().flatten().collect();
+    let mut misses =
+        layout::head_misses(dest, wal.iter().copied(), |id| layout::wal_rel(*id)).await?;
     misses.sort_unstable();
     Ok(misses)
 }

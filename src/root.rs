@@ -189,14 +189,11 @@ pub struct NodeView {
     pub age: Duration,
 }
 
-/// The live node set: heartbeats younger than `heartbeat_timeout`, the
-/// youngest name winning when a node briefly has two (a role change).
-pub fn node_view(entries: &[HeartbeatEntry], heartbeat_timeout: Duration) -> Vec<NodeView> {
+/// The youngest heartbeat per node id: when a node briefly has two
+/// names (a role change), the youngest wins.
+pub fn youngest_per_node(entries: &[HeartbeatEntry]) -> BTreeMap<&str, &HeartbeatEntry> {
     let mut by_id: BTreeMap<&str, &HeartbeatEntry> = BTreeMap::new();
     for entry in entries {
-        if entry.age >= heartbeat_timeout {
-            continue;
-        }
         match by_id.get(entry.node_id.as_str()) {
             Some(existing) if existing.age <= entry.age => {}
             _ => {
@@ -205,7 +202,14 @@ pub fn node_view(entries: &[HeartbeatEntry], heartbeat_timeout: Duration) -> Vec
         }
     }
     by_id
+}
+
+/// The live node set: heartbeats younger than `heartbeat_timeout`, the
+/// youngest name winning when a node briefly has two (a role change).
+pub fn node_view(entries: &[HeartbeatEntry], heartbeat_timeout: Duration) -> Vec<NodeView> {
+    youngest_per_node(entries)
         .into_values()
+        .filter(|e| e.age < heartbeat_timeout)
         .map(|e| NodeView {
             node_id: e.node_id.clone(),
             services: e.services.clone(),

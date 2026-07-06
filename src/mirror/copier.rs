@@ -17,9 +17,6 @@ use crate::services::DatabaseHandle;
 /// ones stream through a multipart upload.
 const MULTIPART_THRESHOLD: u64 = 8 * 1024 * 1024;
 
-/// Concurrent HEADs while the external copier probes the target.
-const HEAD_PARALLELISM: usize = 16;
-
 /// What one copy call moved.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Copied {
@@ -82,20 +79,8 @@ impl<'a> Copier<'a> {
                         .filter(|ulid| !present.contains(ulid))
                         .collect())
                 } else {
-                    let dest = self.dest;
-                    let misses: Vec<Option<String>> = futures::stream::iter(candidates)
-                        .map(|ulid| async move {
-                            let path = object_path(dest, &layout::compacted_rel(&ulid));
-                            match dest.store.head(&path).await {
-                                Ok(_) => Ok(None),
-                                Err(object_store::Error::NotFound { .. }) => Ok(Some(ulid)),
-                                Err(e) => Err(MirrorError::from(e)),
-                            }
-                        })
-                        .buffer_unordered(HEAD_PARALLELISM)
-                        .try_collect()
-                        .await?;
-                    Ok(misses.into_iter().flatten().collect())
+                    layout::head_misses(self.dest, candidates, |ulid| layout::compacted_rel(ulid))
+                        .await
                 }
             }
         }

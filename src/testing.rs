@@ -40,11 +40,6 @@ impl TestClock {
         let mut now = self.0.lock().expect("clock lock");
         *now += chrono::Duration::from_std(by).expect("duration fits");
     }
-
-    /// Set virtual time to `to`.
-    pub fn set(&self, to: DateTime<Utc>) {
-        *self.0.lock().expect("clock lock") = to;
-    }
 }
 
 impl Clock for TestClock {

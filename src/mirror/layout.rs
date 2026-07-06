@@ -11,8 +11,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
-use object_store::ObjectMeta;
 use object_store::path::Path as StorePath;
+use object_store::{ObjectMeta, ObjectStoreExt};
 use slatedb::{Checkpoint, VersionedManifest};
 
 use super::MirrorError;
@@ -45,6 +45,38 @@ pub fn compacted_rel(ulid: &str) -> String {
 /// The store path of a relative object name under a database root.
 pub fn object_path(db: &DatabaseHandle, rel: &str) -> StorePath {
     StorePath::from(format!("{}/{}", db.path, rel))
+}
+
+/// Concurrent HEADs while a candidate list is probed at a store.
+const HEAD_PARALLELISM: usize = 16;
+
+/// HEAD-probe `items` at `db`, `HEAD_PARALLELISM` at a time, and
+/// return the ones whose object (named by `rel`) is missing. A store
+/// error other than NotFound fails the probe.
+pub(crate) async fn head_misses<T, F>(
+    db: &DatabaseHandle,
+    items: impl IntoIterator<Item = T>,
+    rel: F,
+) -> Result<Vec<T>, MirrorError>
+where
+    F: Fn(&T) -> String,
+{
+    use futures::StreamExt;
+    let misses: Vec<Option<T>> = futures::stream::iter(items)
+        .map(|item| {
+            let path = object_path(db, &rel(&item));
+            async move {
+                match db.store.head(&path).await {
+                    Ok(_) => Ok(None),
+                    Err(object_store::Error::NotFound { .. }) => Ok(Some(item)),
+                    Err(e) => Err(MirrorError::from(e)),
+                }
+            }
+        })
+        .buffer_unordered(HEAD_PARALLELISM)
+        .try_collect()
+        .await?;
+    Ok(misses.into_iter().flatten().collect())
 }
 
 /// The manifest id an object name encodes, if it is a manifest.

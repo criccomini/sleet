@@ -25,15 +25,11 @@ use tracing::info;
 
 use crate::config::{MirrorMode, ResolvedMirror, ResolvedMirrorTarget};
 use crate::registry;
-use crate::services::DatabaseHandle;
+use crate::services::{DatabaseHandle, IDLE_POLL_MAX};
 
 pub use pass::{PassOutcome, sync_pass};
 pub use prune::{PruneReport, prune};
 pub use restore::{RestoreOutcome, RestorePoint, restore};
-
-/// While a continuous mirror is idle, polling backs off exponentially
-/// from the target's `poll` up to this ceiling.
-const IDLE_POLL_MAX: Duration = Duration::from_secs(300);
 
 /// A caught-up continuous mirror with retention set still prunes this
 /// often, so restore points age out without waiting for a commit.

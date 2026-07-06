@@ -25,9 +25,11 @@ use crate::config::{
 };
 use crate::registry;
 
-/// While a database is idle, worker polling backs off exponentially
-/// from `compactions_poll_interval` up to this ceiling.
-const IDLE_POLL_MAX: Duration = Duration::from_secs(300);
+/// While a database is idle, polling backs off exponentially up to
+/// this ceiling: worker `.compactions` polls from
+/// `compactions_poll_interval`, continuous-mirror polls from the
+/// target's `poll`.
+pub(crate) const IDLE_POLL_MAX: Duration = Duration::from_secs(300);
 
 /// While the worker runs, sleet checks the queue every this many poll
 /// intervals (30s at the default 5s poll).
