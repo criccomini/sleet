@@ -60,7 +60,7 @@ sleet run s3://ops/sleet \
 ## `sleet register`
 
 ```sh
-sleet register [OPTIONS] <ROOT> <URL>
+sleet register [OPTIONS] <ROOT> <DB>
 ```
 
 Creates the registry file for a database. The operation is create-only, so it does not overwrite operator edits.

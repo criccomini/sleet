@@ -1,12 +1,12 @@
 Register a database: write its dbs/<db>.toml registry file
 
-Usage: sleet register [OPTIONS] <ROOT> <URL>
+Usage: sleet register [OPTIONS] <ROOT> <DB>
 
 Arguments:
   <ROOT>
           Fleet root URL, e.g. s3://ops/sleet/
 
-  <URL>
+  <DB>
           Database URL, e.g. s3://bucket/db
 
 Options:

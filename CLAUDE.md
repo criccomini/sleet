@@ -64,7 +64,7 @@ when the two drift.
   stats from the body; letters: `c` coordinator, `g` gc, `m` mirror,
   `w` workers). Nodes are stateless; the only node-local config
   is flags.
-- Databases are registered manually, with `sleet register <root> <url>`
+- Databases are registered manually, with `sleet register <root> <db>`
   or by
   writing `dbs/<db>.toml` directly; auto-discovery is future work. Each
   `(database, service)` is placed by a frozen rendezvous ranking of the

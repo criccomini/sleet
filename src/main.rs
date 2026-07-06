@@ -82,7 +82,7 @@ enum Command {
         root: String,
 
         /// Database URL, e.g. s3://bucket/db.
-        url: String,
+        db: String,
 
         /// Output format.
         #[arg(long, value_enum, default_value = "text")]
@@ -211,12 +211,12 @@ async fn main() -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        Command::Register { root, url, format } => {
+        Command::Register { root, db, format } => {
             let root = match FleetRoot::open(&root) {
                 Ok(root) => root,
                 Err(e) => return fail(e),
             };
-            match ops::register(&root, &url).await {
+            match ops::register(&root, &db).await {
                 Ok(response) => emit(&response, format),
                 Err(e) => fail(e),
             }
