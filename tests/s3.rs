@@ -16,6 +16,10 @@ use sleet::ops;
 use sleet::root::{ConfigPoller, FleetRoot};
 use sleet::testing::{Op, TestStore};
 
+mod common;
+
+use common::db::{assert_closure_complete, handle, seed};
+
 fn minio_store(endpoint: &str) -> Arc<dyn object_store::ObjectStore> {
     Arc::new(
         AmazonS3Builder::new()
@@ -118,60 +122,6 @@ async fn s3_semantics_via_minio() {
     assert!(state.warnings.is_empty(), "{:?}", state.warnings);
 }
 
-/// The completeness oracle: the destination's latest manifest holds
-/// its own objects and, for every live checkpoint entry whose
-/// checkpoint still exists at the source, the pinned manifest and its
-/// objects (RFC 0002 §3).
-async fn assert_closure_complete(
-    source: &sleet::services::DatabaseHandle,
-    dest: &sleet::services::DatabaseHandle,
-) {
-    use sleet::mirror::layout;
-    let head = dest
-        .admin
-        .read_manifest(None)
-        .await
-        .unwrap()
-        .expect("destination head");
-    let src_cps: std::collections::BTreeSet<uuid::Uuid> = source
-        .admin
-        .read_manifest(None)
-        .await
-        .unwrap()
-        .expect("source head")
-        .checkpoints()
-        .iter()
-        .map(|cp| cp.id)
-        .collect();
-    let now = chrono::Utc::now();
-    let mut members = vec![head.id()];
-    for cp in head.checkpoints() {
-        if layout::checkpoint_live(cp, now)
-            && src_cps.contains(&cp.id)
-            && cp.manifest_id != head.id()
-        {
-            members.push(cp.manifest_id);
-        }
-    }
-    for id in members {
-        let manifest = dest
-            .admin
-            .read_manifest(Some(id))
-            .await
-            .unwrap()
-            .unwrap_or_else(|| panic!("pinned manifest {id} missing at the destination"));
-        for rel in layout::manifest_objects(&manifest).rel_names() {
-            assert!(
-                dest.store
-                    .head(&layout::object_path(dest, &rel))
-                    .await
-                    .is_ok(),
-                "{rel} missing at the destination (member {id})"
-            );
-        }
-    }
-}
-
 /// The mirror's commit protocol against real S3 semantics: a pass
 /// seeds a destination prefix with create-if-absent manifest commits,
 /// verify passes, a racing duplicate commit is harmless, and a forked
@@ -180,7 +130,6 @@ async fn assert_closure_complete(
 async fn s3_mirror_pass_and_divergence_via_minio() {
     use sleet::config::ResolvedMirrorTarget;
     use sleet::mirror;
-    use sleet::services::DatabaseHandle;
 
     let Ok(endpoint) = std::env::var("SLEET_S3_ENDPOINT") else {
         eprintln!("note: SLEET_S3_ENDPOINT unset; skipping MinIO mirror test");
@@ -193,40 +142,11 @@ async fn s3_mirror_pass_and_divergence_via_minio() {
         .as_nanos();
     let src_path = format!("mirror-{run}/src");
     let dst_path = format!("mirror-{run}/dst");
-    let source = DatabaseHandle::from_parts(
-        &format!("s3://sleet/{src_path}"),
-        store.clone(),
-        StorePath::from(src_path.clone()),
-    );
-    let dest = DatabaseHandle::from_parts(
-        &format!("s3://sleet/{dst_path}"),
-        store.clone(),
-        StorePath::from(dst_path.clone()),
-    );
+    let source = handle(store.clone(), &format!("s3://sleet/{src_path}"), &src_path);
+    let dest = handle(store.clone(), &format!("s3://sleet/{dst_path}"), &dst_path);
 
     // A real database in MinIO.
-    let writer = slatedb::Db::builder(source.path.clone(), source.store.clone())
-        .with_settings(slatedb::config::Settings {
-            compactor_options: None,
-            garbage_collector_options: None,
-            ..Default::default()
-        })
-        .build()
-        .await
-        .unwrap();
-    for key in 0..64 {
-        writer
-            .put(format!("k-{key}").as_bytes(), vec![7u8; 1024].as_slice())
-            .await
-            .unwrap();
-    }
-    writer
-        .flush_with_options(slatedb::config::FlushOptions {
-            flush_type: slatedb::config::FlushType::MemTable,
-        })
-        .await
-        .unwrap();
-    writer.close().await.unwrap();
+    seed(&source, 2).await;
 
     let settings = ResolvedMirrorTarget::default();
     let outcome = mirror::sync_pass(&source, &dest, "dr", &settings, None)
@@ -301,7 +221,6 @@ async fn s3_multipart_copy_of_a_large_sst_via_minio() {
     use futures::TryStreamExt;
     use sleet::config::ResolvedMirrorTarget;
     use sleet::mirror;
-    use sleet::services::DatabaseHandle;
 
     let Ok(endpoint) = std::env::var("SLEET_S3_ENDPOINT") else {
         eprintln!("note: SLEET_S3_ENDPOINT unset; skipping MinIO multipart test");
@@ -314,16 +233,8 @@ async fn s3_multipart_copy_of_a_large_sst_via_minio() {
         .as_nanos();
     let src_path = format!("multipart-{run}/src");
     let dst_path = format!("multipart-{run}/dst");
-    let source = DatabaseHandle::from_parts(
-        &format!("s3://sleet/{src_path}"),
-        store.clone(),
-        StorePath::from(src_path.clone()),
-    );
-    let dest = DatabaseHandle::from_parts(
-        &format!("s3://sleet/{dst_path}"),
-        store.clone(),
-        StorePath::from(dst_path.clone()),
-    );
+    let source = handle(store.clone(), &format!("s3://sleet/{src_path}"), &src_path);
+    let dest = handle(store.clone(), &format!("s3://sleet/{dst_path}"), &dst_path);
 
     // One memtable flush of ~12 MiB: a single L0 SST well above the
     // 8 MiB multipart threshold.

@@ -8,6 +8,9 @@
 // Each test binary compiles this module separately and uses a subset.
 #![allow(dead_code)]
 
+pub mod db;
+pub mod poll;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -154,22 +157,12 @@ impl Cluster {
 }
 
 /// Poll an async condition every 100ms for up to 30s.
-pub async fn poll_until<T, F, Fut>(what: &str, mut check: F) -> T
+pub async fn poll_until<T, F, Fut>(what: &str, check: F) -> T
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Option<T>>,
 {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    loop {
-        if let Some(value) = check().await {
-            return value;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timed out waiting for: {what}"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    poll::poll_until_within(what, Duration::from_secs(30), check).await
 }
 
 /// Expected single-owner pair count per node, straight from the pure

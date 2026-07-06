@@ -16,13 +16,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use object_store::ObjectStoreExt;
 use object_store::gcp::GoogleCloudStorageBuilder;
-use object_store::path::Path as StorePath;
 use sleet::config::ResolvedMirrorTarget;
 use sleet::mirror;
-use sleet::services::DatabaseHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+
+use common::db::{assert_closure_complete, handle, seed};
 
 fn gcs_store(endpoint: &str) -> Arc<dyn object_store::ObjectStore> {
     // A static dummy bearer: fake-gcs-server ignores auth, and
@@ -96,87 +97,11 @@ async fn try_create_bucket(host: &str) -> Result<(), String> {
     }
 }
 
-async fn seed(source: &DatabaseHandle, keys: u32) {
-    let writer = slatedb::Db::builder(source.path.clone(), source.store.clone())
-        .with_settings(slatedb::config::Settings {
-            compactor_options: None,
-            garbage_collector_options: None,
-            ..Default::default()
-        })
-        .build()
-        .await
-        .unwrap();
-    for key in 0..keys {
-        writer
-            .put(format!("k-{key}").as_bytes(), vec![7u8; 1024].as_slice())
-            .await
-            .unwrap();
-    }
-    writer
-        .flush_with_options(slatedb::config::FlushOptions {
-            flush_type: slatedb::config::FlushType::MemTable,
-        })
-        .await
-        .unwrap();
-    writer.close().await.unwrap();
-}
-
 fn run_id() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos()
-}
-
-/// The completeness oracle: the destination's latest manifest holds
-/// its own objects and, for every live checkpoint entry whose
-/// checkpoint still exists at the source, the pinned manifest and its
-/// objects (RFC 0002 §3).
-async fn assert_closure_complete(source: &DatabaseHandle, dest: &DatabaseHandle) {
-    use sleet::mirror::layout;
-    let head = dest
-        .admin
-        .read_manifest(None)
-        .await
-        .unwrap()
-        .expect("destination head");
-    let src_cps: std::collections::BTreeSet<uuid::Uuid> = source
-        .admin
-        .read_manifest(None)
-        .await
-        .unwrap()
-        .expect("source head")
-        .checkpoints()
-        .iter()
-        .map(|cp| cp.id)
-        .collect();
-    let now = chrono::Utc::now();
-    let mut members = vec![head.id()];
-    for cp in head.checkpoints() {
-        if layout::checkpoint_live(cp, now)
-            && src_cps.contains(&cp.id)
-            && cp.manifest_id != head.id()
-        {
-            members.push(cp.manifest_id);
-        }
-    }
-    for id in members {
-        let manifest = dest
-            .admin
-            .read_manifest(Some(id))
-            .await
-            .unwrap()
-            .unwrap_or_else(|| panic!("pinned manifest {id} missing at the destination"));
-        for rel in layout::manifest_objects(&manifest).rel_names() {
-            assert!(
-                dest.store
-                    .head(&layout::object_path(dest, &rel))
-                    .await
-                    .is_ok(),
-                "{rel} missing at the destination (member {id})"
-            );
-        }
-    }
 }
 
 /// The mirror's commit protocol against GCS semantics: a pass seeds a
@@ -193,17 +118,9 @@ async fn gcs_mirror_pass_and_divergence() {
     let run = run_id();
     let src_path = format!("mirror-{run}/src");
     let dst_path = format!("mirror-{run}/dst");
-    let source = DatabaseHandle::from_parts(
-        &format!("gs://sleet/{src_path}"),
-        store.clone(),
-        StorePath::from(src_path.clone()),
-    );
-    let dest = DatabaseHandle::from_parts(
-        &format!("gs://sleet/{dst_path}"),
-        store.clone(),
-        StorePath::from(dst_path.clone()),
-    );
-    seed(&source, 64).await;
+    let source = handle(store.clone(), &format!("gs://sleet/{src_path}"), &src_path);
+    let dest = handle(store.clone(), &format!("gs://sleet/{dst_path}"), &dst_path);
+    seed(&source, 2).await;
 
     let settings = ResolvedMirrorTarget::default();
     let outcome = mirror::sync_pass(&source, &dest, "dr", &settings, None)
@@ -281,17 +198,9 @@ async fn cross_store_mirror_s3_to_gcs() {
     let src_path = format!("cross-{run}/src");
     let dst_path = format!("cross-{run}/dst");
     let restore_path = format!("cross-{run}/restore");
-    let source = DatabaseHandle::from_parts(
-        &format!("s3://sleet/{src_path}"),
-        s3.clone(),
-        StorePath::from(src_path.clone()),
-    );
-    let dest = DatabaseHandle::from_parts(
-        &format!("gs://sleet/{dst_path}"),
-        gcs.clone(),
-        StorePath::from(dst_path.clone()),
-    );
-    seed(&source, 64).await;
+    let source = handle(s3.clone(), &format!("s3://sleet/{src_path}"), &src_path);
+    let dest = handle(gcs.clone(), &format!("gs://sleet/{dst_path}"), &dst_path);
+    seed(&source, 2).await;
 
     let settings = ResolvedMirrorTarget::default();
     let outcome = mirror::sync_pass(&source, &dest, "dr", &settings, None)
@@ -305,10 +214,10 @@ async fn cross_store_mirror_s3_to_gcs() {
 
     // Restore back out of the GCS backup into a fresh S3 root, open
     // the result, and scan every key.
-    let scratch = DatabaseHandle::from_parts(
-        &format!("s3://sleet/{restore_path}"),
+    let scratch = handle(
         s3.clone(),
-        StorePath::from(restore_path.clone()),
+        &format!("s3://sleet/{restore_path}"),
+        &restore_path,
     );
     mirror::restore(&dest, &scratch, mirror::RestorePoint::Latest)
         .await

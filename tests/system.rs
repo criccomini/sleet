@@ -9,6 +9,8 @@ use sleet::root::FleetRoot;
 use sleet::services::{DatabaseHandle, queue_depth};
 use sleet::{ops, registry};
 
+mod common;
+
 const SLEET: &str = env!("CARGO_BIN_EXE_sleet");
 
 fn spawn_node(root_url: &str, node_id: &str, services: &str) -> Child {
@@ -35,15 +37,14 @@ fn signal(child: &Child, sig: &str) {
     assert!(status.success());
 }
 
+/// Poll a sync condition every 100ms for up to 60s (subprocess
+/// startup and compaction on a file store).
 async fn poll_until<F: FnMut() -> bool>(what: &str, mut check: F) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-    while !check() {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timed out waiting for: {what}"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    common::poll::poll_until_within(what, Duration::from_secs(60), || {
+        let ready = check();
+        async move { ready.then_some(()) }
+    })
+    .await
 }
 
 /// SIGINT is a clean shutdown: the process exits zero and deletes its

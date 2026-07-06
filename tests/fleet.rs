@@ -14,6 +14,8 @@ use sleet::services::DatabaseHandle;
 use sleet::{ops, registry};
 use tokio_util::sync::CancellationToken;
 
+mod common;
+
 #[tokio::test]
 async fn register_and_status_roundtrip() {
     let root = FleetRoot::from_parts(
@@ -145,23 +147,14 @@ async fn daemon_compacts_a_real_database() {
     assert!(status.nodes.is_empty(), "{:?}", status.nodes);
 }
 
-/// Poll an async condition every 250ms for up to 60s.
-async fn poll_until<T, F, Fut>(what: &str, mut check: F) -> T
+/// Poll an async condition every 100ms for up to 60s (real compaction
+/// over local stores).
+async fn poll_until<T, F, Fut>(what: &str, check: F) -> T
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Option<T>>,
 {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-    loop {
-        if let Some(value) = check().await {
-            return value;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timed out waiting for: {what}"
-        );
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
+    common::poll::poll_until_within(what, Duration::from_secs(60), check).await
 }
 
 /// Create a real SlateDB database at `file://<dir>/<name>` with several
