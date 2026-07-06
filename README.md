@@ -181,7 +181,8 @@ Mirror modes:
 | --- | --- |
 | `continuous` | disaster recovery, migration, read replica targets |
 | `periodic` | restore-point backups |
-| one-shot sync | operator-triggered copy of one target |
+
+`sleet mirror sync` runs one pass on demand regardless of mode.
 
 Sleet supports builtin copies, rclone, and external bucket replication for
 data objects. Sleet always commits manifests itself.
