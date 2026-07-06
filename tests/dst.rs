@@ -26,8 +26,11 @@ use sleet::{ops, placement};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-const FAST: &str = "[node]\nheartbeat_interval = \"200ms\"\n\
-                    heartbeat_timeout = \"1s\"\nconfig_poll = \"400ms\"\n";
+/// Sim timing: tighter than the wall-clock suites' FAST (1s
+/// heartbeat_timeout, not 2s), because time here is virtual and
+/// shorter timeouts mean fewer ticks per scenario.
+const SIM_FAST: &str = "[node]\nheartbeat_interval = \"200ms\"\n\
+                        heartbeat_timeout = \"1s\"\nconfig_poll = \"400ms\"\n";
 
 /// One simulated fleet under virtual time.
 struct Sim {
@@ -44,7 +47,10 @@ impl Sim {
         let store = TestStore::in_memory_at(clock.clone());
         let root = FleetRoot::from_parts(store.clone(), StorePath::from("fleet"), "memory:///f")
             .with_clock(clock.clone());
-        store.put(&root.config_path(), FAST.into()).await.unwrap();
+        store
+            .put(&root.config_path(), SIM_FAST.into())
+            .await
+            .unwrap();
         Self {
             clock,
             store,

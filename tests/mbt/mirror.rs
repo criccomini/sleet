@@ -365,7 +365,7 @@ fn get_mirror_test_options() -> TestOptions {
 }
 
 #[test]
-fn test_mirror_model() -> Result<(), MbtError> {
+fn mirror_model_replays_on_the_real_code() -> Result<(), MbtError> {
     if std::env::var_os("SLEET_MBT_MIRROR").is_none() {
         eprintln!("note: SLEET_MBT_MIRROR unset; skipping mirror model-based test");
         return Ok(());

@@ -60,7 +60,7 @@ fn generate() {
     let dir = corpus_root().join(format!("v{}", env!("CARGO_PKG_VERSION")));
     std::fs::create_dir_all(&dir).unwrap();
     let heartbeat = serde_json::to_string_pretty(&sample_heartbeat()).unwrap();
-    std::fs::write(dir.join("heartbeat.json"), heartbeat).unwrap();
+    std::fs::write(dir.join("heartbeat.json"), heartbeat + "\n").unwrap();
     for (example, name) in [
         ("examples/sleet.toml", "config.toml"),
         ("examples/db.toml", "db.toml"),
