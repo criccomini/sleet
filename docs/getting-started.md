@@ -128,6 +128,7 @@ overrides.
 
 ## Next steps
 
-- Use [Operations](operations.md) to plan node roles, capacity, and failover behavior.
+- Use [Operations](operations.md) to plan node roles, capacity, and failover
+  behavior.
 - Use [Mirroring](mirroring.md) to configure disaster recovery, backups, or
   migration targets.
