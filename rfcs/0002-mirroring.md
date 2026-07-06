@@ -9,12 +9,12 @@ Depends on: RFC 0001
 The mirror service replicates a registered SlateDB database into another
 object-store root: another bucket, region, or cloud. It copies immutable
 objects and commits manifests at the target as the atomic step. The target
-is a SlateDB database root, but while mirroring is enabled, sleet is the
+is a SlateDB database root, but while mirroring is enabled, Sleet is the
 only process that writes target manifests.
 
 Mirroring supports disaster recovery, read replicas, backups, and
 migrations. All modes run the same sync pass. Mode and retention settings
-decide when the pass runs and what old target objects sleet later removes.
+decide when the pass runs and which old target objects Sleet later removes.
 
 This RFC extends RFC 0001. Placement, config layering, and the process model
 apply unchanged unless stated otherwise.
@@ -27,9 +27,9 @@ points or read replicas. The copy must remain readable at every committed
 manifest and must not depend on mirror state stored outside the source and
 target object stores.
 
-sleet already has a fleet scheduler. This RFC adds a mirror service that
-uses that scheduler while keeping the mirror protocol stateless. The
-target's highest manifest id is the watermark.
+Sleet schedules shared background services. This RFC adds a mirror service
+that uses the same scheduler while keeping the mirror protocol stateless.
+The target's highest manifest id is the watermark.
 
 ## 1. Goals
 
@@ -49,7 +49,7 @@ target's highest manifest id is the watermark.
 - No data-plane involvement: replica readers open the target directly.
 - No cross-root fencing. SlateDB's epochs fence within one root; nothing on
   the target side can stop a writer on the source. Stopping source writers
-  at failover is outside sleet.
+  at failover is outside Sleet.
 - No logical transformation: v1 copies bytes. Filtering, format changes, and
   re-compaction at the target are out (§11.3).
 - No mirror chains: a destination can never itself be a registered database
@@ -104,7 +104,7 @@ coordinator later started against the target builds fresh state) and
 and its own GC starts fresh). Zero-byte WAL fence objects are ordinary
 `wal/` objects and copy like any other.
 
-## 4. The Sync Pass
+## 4. The sync pass
 
 Every mode runs the same pass:
 
@@ -125,9 +125,9 @@ Every mode runs the same pass:
    checkpoint live in both pins the same immutable manifest already fetched
    for `L`, and one live only in `W` cannot contribute to `L`'s closure.
    What remains is the candidate list; the target's data directories are
-   never listed. WAL candidates are HEAD-checked: the tail (step 7) usually
-   copied them already, and WALs above `W` are never pruned, so a hit is
-   final. Compacted candidates are the copy list: the builtin and rclone
+   never listed. WAL candidates are HEAD-checked: the tail (step 7) often
+   copies them before the pass, and WALs above `W` are never pruned, so a
+   hit is final. Compacted candidates are the copy list: the builtin and rclone
    copiers copy them outright. Names are unique and content immutable, so a
    re-copy is harmless and restarts `min_age`. The external copier HEADs
    each compacted candidate and backfills the misses, which the pin makes
@@ -156,7 +156,7 @@ Every mode runs the same pass:
 7. **Tail** (continuous mode, runs between passes). Copy WAL SSTs above
    `L`'s `next_wal_sst_id` in ascending id order as they appear at the
    source. WAL ids are dense, so the tail poll is one GET of the next
-   expected id, nearly free when idle. SlateDB's replay discovers WALs by
+   expected id, cheap when idle. SlateDB's replay discovers WALs by
    probing the store past the manifest's recorded state
    (`TableStore::last_seen_wal_id`), so a writer opening the target later
    replays the copied tail exactly like one recovering from a crash. Copying
@@ -167,19 +167,19 @@ Only `L` and checkpoint-pinned manifests are protected at the source, so
 objects exclusive to unpinned intermediates may already be deleted. Skipping
 is safe because manifest id gaps are already normal.
 
-Ascending commit order is critical. A checkpoint pins the manifest that was
-latest at its creation, so an entry's `manifest_id` never exceeds the id of
-the manifest carrying it, and ascending order lands every referenced
-manifest before its referencer. Each transiently latest manifest during a
-commit is therefore complete; the only entries in it that can dangle are
-checkpoints that died before `L`, and those resolve nowhere at the source
-either. Readers reach checkpoints only through the latest manifest's list,
-and can already race a deletion between listing and opening.
+Ascending commit order preserves completeness. A checkpoint pins the
+manifest that was latest at its creation, so an entry's `manifest_id` never
+exceeds the id of the manifest carrying it, and ascending order lands every
+referenced manifest before its referencer. Each transiently latest manifest
+during a commit is therefore complete; the only entries in it that can
+dangle are checkpoints that died before `L`, and those resolve nowhere at
+the source either. Readers reach checkpoints only through the latest
+manifest's list and can already race a deletion between listing and opening.
 
 Duplicate mirror tasks are safe. Manifest commits use create-if-absent, and
 a race to write the same source manifest body is not a fork.
 
-## 5. Reading a Mirror
+## 5. Reading a mirror
 
 Replica readers open the target with `DbReader` in checkpoint-free mode, the
 upstream contribution this RFC depends on (§11.2): the reader polls the
@@ -217,11 +217,11 @@ cross-store transfer scales with ingest times one plus the compaction write
 amplification. A periodic interval longer than the compaction cycle copies
 only surviving SSTs. Request cost is independent of the target's size: a
 pass reads the closure's manifests and spends one operation per candidate
-(§4). Either way, a caught-up mirror costs one manifest read per poll and
-holds no checkpoints (§4), so mostly-idle databases stay cheap under
-fleet-wide targets (§9).
+(§4). A caught-up mirror costs one manifest read per poll and holds no
+checkpoints (§4), so mostly-idle databases stay cheap under fleet-wide
+targets (§9).
 
-## 7. Retention and Backups
+## 7. Retention and backups
 
 A target's committed manifests are its restore points. With a target's
 `retention` table set (§9), the pruner, in either mode, keeps two tiers:
@@ -292,16 +292,16 @@ that point.
 
 ## 8. Copiers
 
-`copier` selects who moves data objects. sleet always commits manifests; the
+`copier` selects who moves data objects. Sleet always commits manifests; the
 copier moves only `wal/` and `compacted/`.
 
-- **`builtin`**: sleet streams objects between the two stores itself,
+- **`builtin`**: Sleet streams objects between the two stores itself,
   `copy_parallelism` objects at a time.
-- **`rclone`**: sleet computes the object list per pass and drives
+- **`rclone`**: Sleet computes the object list per pass and drives
   `rclone copy --files-from` for the data directories, then commits
   manifests itself. rclone never touches `manifest/`. The binary path is a
   node flag (`--rclone`).
-- **`external`**: bucket replication configured outside sleet (S3 CRR/SRR,
+- **`external`**: bucket replication configured outside Sleet (S3 CRR/SRR,
   GCS Storage Transfer, Azure object replication) ships the data
   directories; the mirror task diffs the closure as usual, backfills missing
   objects through the builtin path, and commits manifests. Backfill covers
@@ -317,7 +317,7 @@ copier moves only `wal/` and `compacted/`.
   include-only. The caps also rule external copiers out as fleet-wide
   defaults (§9).
 
-## 9. Configuration and Placement
+## 9. Configuration and placement
 
 Mirroring is configured on the source: a database's `[mirror.targets]` table
 names its destinations, and `mirror` joins `services` like any other
@@ -334,9 +334,9 @@ with the prefix stripped, so the fleet target below mirrors
 Prefixes match at path-segment boundaries (`s3://user-data` does not capture
 `s3://user-database/x`), and stripping a fixed prefix cannot send two
 databases to the same place. For precedence the two fields travel together:
-a layer that sets either overrides both. A database no target applies to
-does not mirror; that is how a fleet target is scoped to one bucket or
-prefix, and `status` lists databases left uncovered (§10).
+a layer that sets either overrides both. A database with no applicable
+target does not mirror; that is how a fleet target is scoped to one bucket
+or prefix, and `status` lists databases left uncovered (§10).
 
 ```toml
 # sleet.toml: databases under s3://user-data mirror to the DR bucket
@@ -375,7 +375,7 @@ keep = "30d"
 
 Opting out is explicit, because per-field fall-through cannot unset an
 inherited target: `disabled` is an ordinary overridable field. A database
-mirrors iff its resolved services include `mirror` and at least one enabled
+mirrors when its resolved services include `mirror` and at least one enabled
 target applies; zero targets is a no-op, not an error. Removing or disabling
 a target stops that mirror and leaves the destination valid at its
 watermark. The target name is an identity: it keys placement and names the
@@ -394,43 +394,42 @@ source and destination stores; placement does not consider reachability.
 target)` and reports lag as manifests behind, WAL ids behind, and estimated
 seconds. Source and target sequence numbers are mapped through the sequence
 tracker. It also flags destination collisions and lists databases with no
-applicable target (§9). Mirror task state rides in the heartbeat body like
-other services.
+applicable target (§9). Mirror task state is reported in the heartbeat body
+like other services.
 
 A commit proves its closure by induction: what it shares with `W` was proven
 by `W`'s commit, and the pass copies or checks every candidate (§4). A
-deletion outside prune (§7) silently breaks the induction; re-checking a
-target's closures after the fact belongs in a SlateDB admin command (§11.6).
+deletion outside prune (§7) breaks the proof; re-checking a target's
+closures after the fact belongs in a SlateDB admin command (§11.6).
 
-## 11. Future Work
+## 11. Future work
 
-### 11.1 Projected Manifests
+### 11.1 Projected manifests
 
 Byte-copy makes the target passive. A projected mode would decode the source
 manifest and commit an equivalent one through the sequenced protocol at the
 target, preserving target-local state: reader-managed checkpoints, retention
 checkpoints, stock GC. The target becomes a first-class database while data
-objects stay byte-copied. Needs a public manifest write API upstream.
+objects stay byte-copied. This needs a public manifest write API upstream.
 
-### 11.2 Checkpoint-Free Reader (SlateDB Contribution)
+### 11.2 Checkpoint-free reader (SlateDB contribution)
 
-Reading a mirror (§5) depends on a `DbReader` mode to contribute upstream:
-open at the latest manifest with no checkpoint, poll for new manifests,
-write nothing. 0.14.1's reader offers only explicit checkpoints or a
-self-managed one committed to the manifest, and the latter violates
-single-writer (§3). The mirror already maintains a live manifest sequence at
-the target, so the mode slots in without protocol changes; replaying the WAL
-tail past the manifest would sharpen freshness from manifest cadence to WAL
-lag.
+Reading a mirror (§5) depends on an upstream `DbReader` mode that opens at
+the latest manifest with no checkpoint, polls for new manifests, and writes
+nothing. 0.14.1's reader offers only explicit checkpoints or a self-managed
+one committed to the manifest, and the latter violates single-writer (§3).
+The mirror maintains a live manifest sequence at the target, so the mode
+needs no protocol changes. Replaying the WAL tail past the manifest would
+improve freshness from manifest cadence to WAL lag.
 
-### 11.3 Logical Mirroring
+### 11.3 Logical mirroring
 
 Ship only the WAL and run an independent compactor at the target. This cuts
 cross-store transfer from ingest times write amplification to roughly ingest,
 at the cost of a physically divergent target and a second compaction
 protocol.
 
-### 11.4 Excluded Sources
+### 11.4 Excluded sources
 
 Clone sources can be supported by copying the parent's referenced SSTs to
 matching relative paths, or by inlining them. Databases with a separate WAL
@@ -445,27 +444,27 @@ live is manual: disable the target to stop the mirror, then open the
 destination; the first writer bumps `writer_epoch` and replays the copied
 WAL tail, and a coordinator bumps `compactor_epoch` and builds fresh
 compaction state. Epochs fence within one root only, so sequencing source
-writer shutdown around the switch stays outside sleet (§2).
+writer shutdown around the switch stays outside Sleet (§2).
 
-### 11.6 Closure Verification
+### 11.6 Closure verification
 
-Re-check a database's manifest closures (existence, sizes, bytes) against
-its root, as a SlateDB admin command: the closure walk is the same for a
-mirror target as for any database, so the check belongs upstream rather than
-in sleet. Entries of checkpoints retired at the source may dangle at a
+Add a SlateDB admin command that re-checks a database's manifest closures
+(existence, sizes, bytes) against its root. The closure walk is the same for
+a mirror target as for any database, so the check belongs upstream rather
+than in Sleet. Entries of checkpoints retired at the source may dangle at a
 target (§3) and would need a flag or a source to judge against.
 
-## Open Questions
+## Open questions
 
 1. Resolved: 0.14.1's public `VersionedManifest` accessors cover the
    closure (the root and segment trees, checkpoints, and the WAL window),
-   and sleet constructs object names itself; the name formats are frozen in
+   and Sleet constructs object names itself; the name formats are frozen in
    `src/mirror/layout.rs` and pinned by tests.
 2. Racing mirror tasks can briefly create two pin checkpoints; both expire,
    so this is waste, not a hazard. A create-if-name-absent checkpoint API
    upstream would remove it.
 3. Periodic scheduling keys off the target manifest's `LastModified`
-   (object-store clock). Coarse but stateless; is an explicit schedule anchor
-   worth new state?
-4. The WAL tail poll is one GET when caught up, but a badly lagged continuous
-   mirror probes many ids; at what lag should it switch to a LIST?
+   (object-store clock). This is coarse but stateless. Does an explicit
+   schedule anchor justify new state?
+4. The WAL tail poll is one GET when caught up, but a far-behind continuous
+   mirror probes many ids. At what lag should it switch to a LIST?

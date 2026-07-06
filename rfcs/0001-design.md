@@ -24,9 +24,9 @@ Sleet moves that work into a small fleet of nodes. Operators register the
 database roots they want managed. Nodes then split the work by hashing the
 registered database URLs against the live node set.
 
-The design assumes object storage is already the shared service every SlateDB
-deployment has. Adding ZooKeeper, etcd, or a custom coordinator would make
-safety depend on another system. Sleet avoids that.
+The design uses object storage, the shared service every SlateDB deployment
+already has. Adding ZooKeeper, etcd, or a custom coordinator would make
+safety depend on another system.
 
 ## Non-goals
 
@@ -115,8 +115,8 @@ The `[database]` shape includes:
 - `mirror`, defined by RFC 0002
 
 GC, coordinator, and worker settings map to SlateDB options. Sleet keeps the
-Rust serde types in `src/config.rs` as the source for the generated schema at
-`schema/config.schema.json`.
+Rust `serde` types in `src/config.rs` as the source for the generated schema
+at `schema/config.schema.json`.
 
 The loader checks constraints the schema cannot express, including:
 
@@ -150,7 +150,7 @@ The service letters are sorted:
 `node_id` must be 1 to 128 characters, using letters, numbers, `_`, and `-`.
 
 Placement uses only the heartbeat object name and `LastModified`. The body is
-for observability. It carries the Sleet version, SlateDB version, and service
+for observability. It carries the Sleet and SlateDB versions and service
 state summarized for `sleet status`. Readers ignore unknown fields in the
 body. The heartbeat `version` changes only for incompatible formats.
 
@@ -193,8 +193,8 @@ Removing a node moves the assignments it owned. Adding a node moves the
 assignments whose score it now wins. Nodes recompute ownership each heartbeat
 tick from the registry, resolved config, and live node set.
 
-The hash function, key encoding, and tie break are compatibility surface.
-Mixed-version fleets must compute the same owners.
+The hash function, key encoding, and tie break are part of the compatibility
+surface. Mixed-version fleets must compute the same owners.
 
 ## Process model
 
@@ -244,8 +244,8 @@ Sleet treats placement as an efficiency decision. Safety belongs to SlateDB.
 Temporary duplicate ownership can happen after stale reads, partitions, clock
 skew, or a node restart. GC deletes are idempotent. Coordinator manifests are
 fenced by `compactor_epoch`. Workers compete through `.compactions` claims.
-Mirror commits use create-if-absent and identical manifest bodies, covered in
-RFC 0002.
+RFC 0002 covers mirror commits: create-if-absent with identical manifest
+bodies.
 
 Temporary missing ownership can happen while views converge. Work waits for a
 later poll.
