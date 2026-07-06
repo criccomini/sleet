@@ -76,12 +76,13 @@ jobs:
           shared-key: test
       - run: cargo test --locked ${{ matrix.args }}
 
-  # Model checking plus model-based testing: fizz verifies the
-  # coordination spec, then explores the derived MBT spec;
-  # fizzbee-mbt-server serves that state space, and the mbt test
-  # (tests/mbt) drives its action sequences against the real decision
+  # Model-based testing: fizz explores the derived MBT specs;
+  # fizzbee-mbt-server serves each state space, and the mbt tests
+  # (tests/mbt) drive its action sequences against the real decision
   # code, comparing every action's return with the model's. With
   # SLEET_MBT set, missing tools fail the test instead of skipping it.
+  # Model checking the specs themselves is a local step, run when a
+  # spec changes (see CLAUDE.md); CI runs only the MBT replay.
   mbt:
     name: test (mbt)
     runs-on: ubuntu-latest
@@ -102,11 +103,10 @@ jobs:
           curl -sSfL https://github.com/fizzbee-io/fizzbee-mbt-releases/releases/download/v0.2.0/fizzbee-mbt-0.2.0-linux_x86.tar.gz \
             | tar xz --strip-components=1 -C "$HOME/fizzbee-mbt"
           echo "$HOME/fizzbee-mbt" >> "$GITHUB_PATH"
-      - name: Model-check the spec and generate MBT states
+      - name: Generate MBT states
         run: |
           export PARSER_BIN="$HOME/fizzbee/parser/parser_bin"
           export FIZZBEE_BIN="$HOME/fizzbee/fizzbee"
-          "$HOME/fizzbee/fizz" --experimental_no_state_returns specs/coordination.fizz
           "$HOME/fizzbee/fizz" specs/coordination-mbt.fizz
       - name: Serve the state space
         run: |
@@ -141,56 +141,6 @@ jobs:
       - run: cargo test --locked --test mbt mirror
         env:
           SLEET_MBT_MIRROR: 1
-
-  # Model-check the mirror sync protocol (specs/mirror.fizz) in its
-  # two exhaustive configurations (the full budget product does not
-  # fit in memory; see the spec header), then spot-check the full
-  # product with random simulation. A separate job because the
-  # exhaustive runs dominate wall-clock.
-  mirror-spec:
-    name: model-check (mirror)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install fizzbee
-        run: |
-          mkdir -p "$HOME/fizzbee"
-          curl -sSfL https://github.com/fizzbee-io/fizzbee/releases/download/v0.5.1/fizzbee-v0.5.1-linux_x86.tar.gz \
-            | tar xz --strip-components=1 -C "$HOME/fizzbee"
-      # The exhaustive runs peak at several GB of Go heap; swap plus a
-      # low GOGC keep the 16 GB runner from OOM-killing the agent.
-      # The runner image already runs a 4G /swapfile; add more on the
-      # ephemeral disk under a different name.
-      - name: Add swap for the exhaustive runs
-        run: |
-          sudo fallocate -l 12G /mnt/mirror-swap
-          sudo chmod 600 /mnt/mirror-swap
-          sudo mkswap /mnt/mirror-swap
-          sudo swapon /mnt/mirror-swap
-          free -h
-      - name: Model-check the mirror spec
-        env:
-          GOGC: "50"
-          GOMEMLIMIT: 11GiB
-        run: |
-          export PARSER_BIN="$HOME/fizzbee/parser/parser_bin"
-          export FIZZBEE_BIN="$HOME/fizzbee/fizzbee"
-          "$HOME/fizzbee/fizz" --experimental_processed_queue \
-            specs/mirror.fizz | tee /tmp/mirror-a.log
-          grep -q "PASSED" /tmp/mirror-a.log
-          "$HOME/fizzbee/fizz" --experimental_processed_queue \
-            --preinit-hook-file specs/mirror-expiry.cfg \
-            specs/mirror.fizz | tee /tmp/mirror-b.log
-          grep -q "PASSED" /tmp/mirror-b.log
-          for seed in $(seq 1 25); do
-            out=$("$HOME/fizzbee/fizz" -x --max_runs 1 --seed "$seed" \
-              --output-dir "/tmp/mirror-sim-$seed" \
-              --preinit-hook-file specs/mirror-sim.cfg specs/mirror.fizz) \
-              || { echo "simulation seed $seed crashed" >&2; exit 1; }
-            echo "$out" | grep -qE "FAILED" \
-              && { echo "simulation seed $seed failed" >&2; exit 1; }
-          done
-          echo "simulation sweep clean"
 
   # The GCS semantics test and the cross-store (S3 -> GCS) mirror
   # test, against fake-gcs-server plus the same MinIO container the

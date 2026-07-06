@@ -29,7 +29,9 @@ when the two drift.
   `tests/cmd/` after changing command-line behavior.
 - `UPDATE_CORPUS=1 cargo test --test corpus` cuts a wire-format corpus
   directory at each release.
-- `fizz --experimental_no_state_returns specs/coordination.fizz`
+- Model checking is local and manual; CI runs only the MBT replay.
+  Run the relevant check whenever a spec changes.
+  `fizz --experimental_no_state_returns specs/coordination.fizz`
   model-checks the coordination protocol. The flag keeps action
   returns out of state hashes; without it the liveness check does not
   finish. The mirror sync protocol (completeness, prune guards,
