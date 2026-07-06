@@ -864,8 +864,9 @@ async fn faulted_passes_converge_after_healing() {
     }
     assert_mirrored(&source, &dest).await;
     assert_closure_complete(&source, &dest).await;
-    // Expired or deleted pins only; a healed fleet leaves none live
-    // past their lifetime.
+    // Healed passes delete their pins; pins abandoned by faulted
+    // passes only expire. Outlive the 2s checkpoint_lifetime so both
+    // read as dead.
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_no_live_pins(&source, "dr").await;
 }
@@ -1284,6 +1285,8 @@ async fn caught_up_mirror_costs_one_list_and_one_probe_per_wakeup() {
     let dst_lists = dest_store.counters().count(Op::List);
     let dst_gets = dest_store.counters().count(Op::Get);
     let dst_puts = dest_store.counters().count(Op::Put);
+    // The idle window under measurement; the wakeup count it fits is
+    // asserted below.
     tokio::time::sleep(Duration::from_secs(3)).await;
     token.cancel();
     task.await.unwrap().unwrap();
@@ -2079,6 +2082,7 @@ async fn mirror_jobs_semaphore_gates_passes() {
         async move { mirror::run_mirror(&source, &dest, &target, jobs, None, token).await }
     });
 
+    // Six 100ms polls: a leaked permit would have committed by now.
     tokio::time::sleep(Duration::from_millis(600)).await;
     let dest = handle(dest_store.clone(), "memory:///dst", "dst");
     assert!(

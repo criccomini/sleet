@@ -39,6 +39,8 @@ async fn faulted_fleet_converges_after_healing() {
     }
 
     // Fault every operation type nodes use, deterministically seeded.
+    // 5s spans many FAST ticks (200ms heartbeats, 400ms config polls),
+    // so every operation type faults repeatedly.
     cluster.store.fail_probability(0.2, 42);
     tokio::time::sleep(Duration::from_secs(5)).await;
     assert!(!cluster.any_node_died(), "faults must never kill a node");

@@ -322,6 +322,8 @@ async fn coordinator_duel_self_resolves() {
         let m = db.admin.read_manifest(None).await.unwrap().unwrap();
         m.compactor_epoch()
     }
+    // Let a's 250ms polls acquire and bump the epoch before sampling
+    // it.
     tokio::time::sleep(Duration::from_secs(1)).await;
     let epoch_a = epoch(&db_url).await;
 
@@ -407,6 +409,8 @@ async fn worker_semaphore_gates_and_releases() {
             run_workers(&db, &workers, jobs, token).await
         }
     });
+    // "Never claims" has no event to poll for: soak eight 250ms
+    // polls, then check the queue is untouched.
     tokio::time::sleep(Duration::from_secs(2)).await;
     {
         let db = DatabaseHandle::open(&db_url).unwrap();
