@@ -55,6 +55,7 @@ See the following directories for more information:
 - [docs](docs): Sleet documentation.
 - [examples](examples): Example configuration files.
 - [rfcs](rfcs): Sleet design documents.
+- [schemas](schema): CLI, configuration, and heartbeat file JSON schemas.
 
 ## License
 
