@@ -14,6 +14,12 @@
 - [Fleet config example](../examples/sleet.toml)
 - [Database config example](../examples/db.toml)
 
+## Schemas
+
+- [Configuration schema](../schema/config.schema.json)
+- [CLI response schema](../schema/cli.schema.json)
+- [Heartbeat schema](../schema/heartbeat.schema.json)
+
 ## RFCs
 
 - [RFC 0001: Sleet fleet coordination](../rfcs/0001-design.md)
