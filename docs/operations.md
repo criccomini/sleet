@@ -86,19 +86,19 @@ The base command shows nodes, registered databases, and placement:
 sleet status s3://ops/sleet
 ```
 
-Add compaction queue depth:
+Check compaction queue depth:
 
 ```sh
 sleet status s3://ops/sleet --compactions
 ```
 
-Add mirror lag:
+Check mirror lag:
 
 ```sh
 sleet status s3://ops/sleet --mirrors
 ```
 
-Use JSON for automation:
+Use JSON output for automation:
 
 ```sh
 sleet status s3://ops/sleet --format json
@@ -106,21 +106,6 @@ sleet status s3://ops/sleet --format json
 
 The JSON response schema is
 [schema/cli.schema.json](../schema/cli.schema.json).
-
-## Read warnings first
-
-`sleet status` reports conditions that need operator attention. Common
-warnings include:
-
-| Warning shape                                     | Meaning                                                                         |
-| ------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `no live node offers ...`                         | A service is enabled for at least one database, but no live node advertises it. |
-| `has mirror enabled but no applicable target`     | The database enables `mirror`, but target scope does not match it.              |
-| `mirror destinations collide`                     | More than one source maps to the same mirror destination.                       |
-| `destination ... is itself a registered database` | A mirror target is also managed as a source, which can fork history.            |
-| registry alias or parse warnings                  | A `dbs/` file name is invalid or canonicalizes to another database.             |
-
-Status is derived from object storage. Nodes do not serve an API.
 
 ## Change capacity
 
@@ -150,8 +135,8 @@ For low-risk changes:
 2. Run `sleet status` and check warnings.
 3. Watch node logs for parse or validation errors.
 
-If a node cannot read a new config, it keeps the last good config. That avoids
-dropping all assignments because of a transient object-store failure.
+If a node cannot read a new config, it keeps the last good config, which avoids
+dropping all assignments.
 
 ## Operate mirrors carefully
 
@@ -175,7 +160,3 @@ The main recurring object-store operations are:
 - one `dbs/` LIST per node per `config_poll`
 - per-database service polls based on config
 - extra status reads when `--compactions` or `--mirrors` is used
-
-Mostly idle compaction workers back off polling up to five minutes. Continuous
-mirrors also back off while caught up, capped at five minutes unless the
-configured `poll` is larger.

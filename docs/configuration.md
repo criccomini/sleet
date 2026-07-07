@@ -62,8 +62,9 @@ count = 2
 max_concurrent_compactions = 4
 ```
 
-See the complete example in [../examples/sleet.toml](../examples/sleet.toml). A
-JSON spec is also available in [../schema/config.schema.json](../schema/config.schema.json).
+See the complete example in [../examples/sleet.toml](../examples/sleet.toml).
+A JSON spec is also available in
+[../schema/config.schema.json](../schema/config.schema.json).
 
 ## Per-database overrides
 
@@ -77,12 +78,14 @@ services = ["gc"]
 min_age = "30m"
 ```
 
-See the complete example in [../examples/db.toml](../examples/db.toml). A JSON
-spec is also available in [../schema/config.schema.json](../schema/config.schema.json).
+See the complete example in [../examples/db.toml](../examples/db.toml). A
+JSON spec is also available in
+[../schema/config.schema.json](../schema/config.schema.json).
 
 ## Services
 
-`services` define which services a node offers. Valid values are a CSV list of:
+`services` in `sleet.toml` or `dbs/<db>.toml` controls which services are
+enabled for each database. Valid values are:
 
 | Name                    | Effect                                          |
 | ----------------------- | ----------------------------------------------- |
@@ -91,9 +94,7 @@ spec is also available in [../schema/config.schema.json](../schema/config.schema
 | `compaction-workers`    | Poll `.compactions` and execute jobs.           |
 | `mirror`                | Run configured mirror targets.                  |
 
-If `services` is unset, all services are enabled by default. A node still has
-to offer the service through `sleet run --services` before it can own that
-work.
+If config `services` is unset, all database services are enabled by default.
 
 ## Important defaults
 
@@ -148,17 +149,11 @@ s3, s3a, gs, az, adl, azure, abfs, abfss, file, memory, http, https
 ```
 
 Sleet canonicalizes URLs by lowercasing scheme and host and removing trailing
-slashes. That keeps one database from being registered under two spellings.
+slashes so that `s3://bucket/db` and `S3://bucket/db/` are equivalent.
 
 ## Schemas
 
-Use the checked-in schemas for tooling:
+Sleet offers JSON schemas for config:
 
 - [schema/config.schema.json](../schema/config.schema.json) for `sleet.toml`
   and database config.
-- [schema/heartbeat.schema.json](../schema/heartbeat.schema.json) for
-  heartbeat bodies.
-- [schema/cli.schema.json](../schema/cli.schema.json) for `--format json`
-  responses.
-
-The schemas are generated from Rust types and drift-checked by tests.
