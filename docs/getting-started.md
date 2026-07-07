@@ -42,6 +42,22 @@ used by the `object_store` crate. Every node must be able to read and write
 the fleet root. A node must also be able to reach the databases and mirror
 destinations for the services it offers.
 
+For AWS, configure the process environment before running Sleet:
+
+```sh
+export AWS_ACCESS_KEY_ID=AKIA...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...
+export AWS_DEFAULT_REGION=us-west-2
+
+sleet register s3://ops/sleet s3://app-data/db
+sleet run s3://ops/sleet --node-id sleet-1
+```
+
+Omit `AWS_SESSION_TOKEN` when using long-lived access keys. When running on
+AWS with an instance, task, or pod role, set `AWS_DEFAULT_REGION` and let the
+runtime supply credentials.
+
 ## Register a database
 
 Register one database root:
