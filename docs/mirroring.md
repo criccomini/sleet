@@ -1,8 +1,8 @@
 # Mirroring
 
-The mirror service copies a SlateDB database to another object-store root.
-Sleet copies immutable data objects and commits manifests at the target as the
-atomic step.
+The mirror service copies a SlateDB database to another object-store root path.
+The object-store may be in the same or a different cloud provider. Sleet copies
+immutable data objects and commits manifests at the target atomically.
 
 ## Use cases
 
@@ -14,9 +14,6 @@ Mirroring supports four operator workflows:
 | Read replica target                | `continuous`                             |
 | Point-in-time backups              | `periodic` with retention                |
 | Bucket, region, or cloud migration | `continuous` plus a final manual cutover |
-
-The target is a SlateDB root, not a Sleet registry entry. The fleet root
-itself is not mirrored.
 
 ## Target configuration
 
@@ -35,12 +32,10 @@ poll = "10s"
 ```
 
 With `source_prefix`, a fleet-wide target maps databases under the prefix to
-the same relative path at the destination. For example:
-
-```text
-s3://user-data/tenant1/db1
-s3://dr-bucket/mirrors/tenant1/db1
-```
+the same relative path at the destination. For example,
+a database at `s3://user-data/tenant1/db1` with `source_prefix=s3://user-data`
+and a target URL of `s3://dr-bucket/mirrors` will mirror to
+`s3://dr-bucket/mirrors/tenant1/db1`.
 
 Without `source_prefix`, `url` is the exact destination for one database.
 
@@ -64,14 +59,13 @@ keep = "30d"
 
 ## Modes
 
-`continuous` runs sync passes on the `poll` cadence and tails WAL SSTs between
-passes. It is the right default for disaster recovery and migration.
+`continuous` syncs `.manifest` and compacted SST data using the `poll` cadence.
+In between, it tails WAL SSTs and copies them as they appear.
 
-`periodic` runs one pass every `interval`. Each committed manifest is a
-restore point. Periodic mode can avoid copying short-lived compaction output
-when the interval is longer than the compaction cycle.
+`periodic` syncs `.manifest` and compacted SST data every `interval`. Each
+committed manifest is a restore point.
 
-One-shot sync runs the same pass regardless of target mode:
+You may also trigger a single sync pass manually with `sleet mirror sync`:
 
 ```sh
 sleet mirror sync s3://ops/sleet s3://bucket/db backup
@@ -86,15 +80,13 @@ which may appear in checkpoint listings until then.
 
 ## Copiers
 
-Sleet always commits manifests. `copier` controls how data objects move:
-
 | Copier     | Behavior                                                                             |
 | ---------- | ------------------------------------------------------------------------------------ |
-| `builtin`  | Sleet streams `wal/` and `compacted/` objects itself.                                |
+| `builtin`  | Sleet copies `wal/` and `compacted/` objects itself.                                 |
 | `rclone`   | Sleet builds the file list and runs `rclone copy --files-from`.                      |
 | `external` | Bucket replication moves data objects; Sleet backfills misses and commits manifests. |
 
-For `rclone`, pass the binary path on nodes or one-shot sync:
+For `rclone`, you must pass the binary path:
 
 ```sh
 sleet run s3://ops/sleet --node-id mirror-1 --services mirror --rclone /usr/bin/rclone
@@ -103,12 +95,12 @@ sleet mirror sync s3://ops/sleet s3://bucket/db backup --rclone /usr/bin/rclone
 
 For `external`, configure replication for the database's `wal/` and
 `compacted/` prefixes only. Do not replicate `manifest/` (Sleet is the only
-manifest writer at the target), and do not replicate delete markers.
+manifest writer at the target).
 
 ## Retention and restore
 
-Without retention, Sleet does not prune target objects. Add retention to make
-a target act as a bounded backup set:
+Without retention, Sleet does not prune target objects. Data will grow
+unbounded. You may configure retention to keep only recent restore points.
 
 ```toml
 [mirror.targets.backup.retention]
@@ -131,7 +123,6 @@ sleet mirror restore gs://backups/db1 s3://restore/db1 --at 2026-07-03T12:00:00Z
 the newest restore point at or before that time. The timestamp mapping comes
 from the backup manifest sequence tracker, which samples at about 60 seconds
 with the stock SlateDB settings, so timestamp selection has that granularity.
-Restore never deletes and refuses a non-empty destination.
 
 ## Safety rules
 
@@ -142,9 +133,7 @@ While a target is being mirrored:
 - SlateDB GC must not run against the target
 - the target must not be registered as a Sleet source database
 - source writers must be stopped before manual promotion
-
-Sleet refuses a destination whose manifest history is ahead of the source.
-That usually means another writer or GC process wrote manifests at the target.
+- nothing (including DB readers) must write manifests into the target
 
 ## Reader note
 
@@ -152,9 +141,3 @@ A mirror target is kept as a valid SlateDB database at committed manifests.
 Tailing it as a live read replica depends on SlateDB reader support that does
 not write checkpoints at the target. The detailed design tracks that in
 [RFC 0002](../rfcs/0002-mirroring.md#112-checkpoint-free-reader-slatedb-contribution).
-
-## Deeper reference
-
-- [RFC 0002](../rfcs/0002-mirroring.md) describes the sync pass, pruning, and
-  future promotion command.
-- [src/mirror/](../src/mirror) contains the implementation.
