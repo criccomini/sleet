@@ -1,14 +1,9 @@
 # Sleet
 
-Sleet runs background services for fleets of
-[SlateDB](https://slatedb.io) databases.
-
-Sleet handles:
-
-- garbage collection
-- standalone compaction coordinators
-- distributed compaction workers
-- optional physical mirroring to another bucket
+Sleet is a lightweight fleet manager for [SlateDB](https://slatedb.io)
+databases. It coordinates nodes through object storage, assigns per-database
+services, and runs SlateDB maintenance work such as garbage collection,
+distributed compaction, and mirroring.
 
 ## Quick start
 
