@@ -14,9 +14,8 @@
 # alike, so the WAL tail and copier variants are not distinguished,
 # and the candidate list copies in one step (immutable objects, order
 # independent; the per-object interleavings are covered by the Rust
-# integration tests). One mirror task (racing tasks commit identical
-# bytes and are covered by integration tests); `keep` and `min_age`
-# are temporal,
+# integration tests). One mirror task (racing tasks are checked in
+# specs/mirror-race.fizz); `keep` and `min_age` are temporal,
 # so the pruner instead nondeterministically ages out all but the
 # latest manifest plus at most one chosen survivor, which includes
 # the most aggressive retention as a special case.

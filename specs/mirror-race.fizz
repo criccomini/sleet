@@ -1,0 +1,409 @@
+---
+# Duplicate mirror sync tasks (RFC 0002 §4): placement is advisory, so
+# two tasks can run the same (database, mirror, target) triple at once.
+# Safety rests on manifest commits using create-if-absent and racing
+# tasks writing identical bytes for the same id (§4: "Duplicate mirror
+# tasks are safe"). This model checks that claim: two tasks run full
+# passes (watermark, diff, pin, copy, ascending commit, unpin) against
+# one source and one target, with the code's racy shape kept:
+# - The commit list is frozen at diff time (pass.rs `present_manifests`),
+#   not re-listed per PUT, so a task PUTs ids a rival already landed and
+#   takes the compare-on-collision path.
+# - The re-diff after pinning runs against the watermark read at pass
+#   start; the rival may have advanced the target meanwhile.
+# - The commit step reads the source before the target PUT, so a source
+#   manifest gone before its PUT restarts the pass even when the target
+#   already has the id.
+#
+# Scope: pared down from specs/mirror.fizz to keep the two-task product
+# tractable: no pin expiry, no operator checkpoints, no target prune
+# (those interactions are per-task and checked there); objects and copy
+# lists collapse to one step as in mirror.fizz; GC sweeps are budgeted
+# (SWEEPS), which bounds the tasks' mutual restart churn. The code's
+# manifest cache is not modeled: reads are store-fresh, so the model
+# restarts at the diff where the code may restart one step later at
+# copy or commit.
+#
+# Checked claims (checked locally when the spec changes; CI does not
+# run this):
+# - TargetComplete: the completeness invariant (§3) in every state,
+#   including mid-commit of both tasks, with §4's refinement: entries
+#   of checkpoints retired at the source may dangle. The carve-out is
+#   needed even without expiry and operator deletes: a rival's pin
+#   deletion retires a checkpoint whose entry an already-committed
+#   manifest still carries (RetiredDangleExplored pins reachability).
+# - NoDivergence: a commit hitting an existing target manifest id
+#   always finds its own bytes; the Diverged wedge is unreachable
+#   without a foreign writer.
+# - RaceCommitExplored / OverlapExplored / PassRestartExplored: the
+#   id collision, concurrent passes at different heads, and the
+#   vanished-object and vanished-manifest restarts are explored, not
+#   vacuously absent.
+# - Converged (eventually always): the tasks' mutual pin/unpin churn
+#   terminates (each unpin syncs through the rival's pinless path);
+#   after the writer budget drains the target reaches the source's
+#   head with no pins left.
+#
+#   fizz --experimental_processed_queue specs/mirror-race.fizz
+options:
+  max_actions: 48
+  max_concurrent_actions: 1
+deadlock_detection: false
+liveness: strict
+---
+
+Phase = enum('IDLE', 'PIN', 'COPY', 'UNPIN')
+
+TASKS = ["a", "b"]
+
+# Id domains as in mirror.fizz, except checkpoint ids are ordinal
+# here, not nominal: nominal fresh() recycles freed ids, and a pin id
+# recycled while its retired entry still sits in an old target
+# manifest manufactures a shared-checkpoint match that UUIDs cannot
+# produce. Ordinal fresh() is a tail append, so ids never recur; the
+# order is never used. Checkpoint ids live on in committed target
+# manifests after unpin, so the limit bounds pins ever created.
+MANIFESTS = symmetry.ordinal(name="m", limit=20)
+OBJECTS = symmetry.ordinal(name="o", limit=6)
+CPS = symmetry.ordinal(name="cp", limit=8)
+
+# Writer and GC budgets. GC is budgeted in state, like every churn
+# source in mirror.fizz, because it is what couples the tasks into a
+# restart loop: a rival's unpin makes garbage, a sweep vanishes it out
+# of the other task's frozen list, the restart re-pins and unpins
+# again. Each restart consumes a sweep's vanish, so SWEEPS bounds the
+# loop. With GC unbudgeted the loop runs until the id domains exhaust
+# and the graph does not fit in memory (killed past 560k nodes on a
+# 16 GB machine). The exists assertions below fail if these budgets
+# stop reaching the raced behaviors, so a pass is not vacuous.
+WRITES = 2
+SWEEPS = 2
+
+# The one-level closure (§3) over live source manifests, for GC.
+atomic func closure_ids(head):
+    ids = [head]
+    for e in src_m[head].cps:
+        if e.pin != head and (e.pin in src_m) and (e.pin not in ids):
+            ids.append(e.pin)
+    return sorted(ids)
+
+atomic func closure_objects(head):
+    ids = closure_ids(head)
+    objs = set()
+    for i in ids:
+        for o in src_m[i].objects:
+            objs.add(o)
+    return objs
+
+# §4 step 3 as pass.rs computes it: the closure is read at the source
+# (a live entry's missing pin manifest fails the diff: the vanished-
+# mid-diff restart), proven is W's own objects plus the objects of
+# manifests pinned by checkpoints live in both W and L, and the commit
+# list (the closure minus W and those shared pins) is frozen here.
+atomic func compute_diff(l, w):
+    ids = [l]
+    for e in src_m[l].cps:
+        if e.pin != l and (e.pin not in ids):
+            if e.pin not in src_m:
+                return struct(ok=False, cand=set(), commits=[])
+            ids.append(e.pin)
+    cl = set()
+    for i in ids:
+        for o in src_m[i].objects:
+            cl.add(o)
+    proven = set()
+    present = []
+    if w != None:
+        for o in dst_m[w].objects:
+            proven.add(o)
+        present.append(w)
+        # Shared checkpoints walk W's entries and use W's pin id, as
+        # pass.rs does: the presence conclusion rests on W's own entry
+        # and target completeness, not on the entry found in L.
+        lcps = [x.cp for x in src_m[l].cps]
+        for e in dst_m[w].cps:
+            if (e.cp in lcps) and (e.pin in ids):
+                for o in src_m[e.pin].objects:
+                    proven.add(o)
+                if e.pin not in present:
+                    present.append(e.pin)
+    cand = set()
+    for o in cl:
+        if o not in proven:
+            cand.add(o)
+    commits = sorted([i for i in ids if i not in present])
+    return struct(ok=True, cand=cand, commits=commits)
+
+action Init:
+    m0 = MANIFESTS.fresh()
+    o0 = OBJECTS.fresh()
+    seed = set()
+    seed.add(o0)
+    src_m = {m0: struct(objects=seed, cps=set())}
+    src_objs = set()
+    src_objs.add(o0)
+    src_head = m0
+    dst_m = {}
+    dst_objs = set()
+    dst_head = None
+    phase = {}
+    wm = {}
+    pass_head = {}
+    pass_pin = {}
+    pending = {}
+    to_commit = {}
+    for t in TASKS:
+        phase[t] = Phase.IDLE
+        wm[t] = None
+        pass_head[t] = None
+        pass_pin[t] = None
+        pending[t] = set()
+        to_commit[t] = []
+    writes_left = WRITES
+    sweeps_left = SWEEPS
+    restarted = False
+    race_hit = False
+    diverged = False
+
+# The source writer: a new manifest referencing a fresh object,
+# sometimes dropping an old one (a flush, or a compaction rewrite).
+# Checkpoint entries carry forward, as in a real manifest CAS.
+atomic action WriterCommit:
+    require writes_left > 0
+    writes_left = writes_left - 1
+    base = src_m[src_head]
+    objs = set()
+    for o in base.objects:
+        objs.add(o)
+    novel = OBJECTS.fresh()
+    objs.add(novel)
+    src_objs.add(novel)
+    drop = oneof [False, True]
+    if drop:
+        victim = sorted([o for o in base.objects])[0]
+        objs.discard(victim)
+    src_head = MANIFESTS.fresh()
+    src_m[src_head] = struct(objects=objs, cps=base.cps)
+
+# Source GC: one sweep deletes everything outside the latest manifest's
+# closure, objects and manifests alike. This is what turns a rival's
+# unpin into a vanished-before-commit restart for a task still holding
+# the unpinned manifest in its frozen commit list. Budgeted in state
+# so liveness sees finitely many (see SWEEPS above).
+atomic action GcSweep:
+    require sweeps_left > 0
+    protected = closure_objects(src_head)
+    keep = closure_ids(src_head)
+    garbage_objs = [x for x in src_objs if x not in protected]
+    garbage_m = [i for i in src_m if i not in keep]
+    require len(garbage_objs) + len(garbage_m) > 0
+    sweeps_left = sweeps_left - 1
+    for o in garbage_objs:
+        src_objs.discard(o)
+    for m in garbage_m:
+        src_m.pop(m)
+
+# §4 steps 1-3: watermark, read, diff. Each task snapshots its own
+# watermark; target manifests are immutable and nothing here deletes
+# them, so reading dst_m[wm] later equals the code's held copy. With
+# no candidates everything the commit references is protected without
+# a pin: go straight to the commit steps.
+atomic fair action PassRead:
+    require src_head != dst_head
+    t = oneof [x for x in TASKS if phase[x] == Phase.IDLE]
+    d = compute_diff(src_head, dst_head)
+    if not d.ok:
+        restarted = True
+    else:
+        wm[t] = dst_head
+        pass_head[t] = src_head
+        if len(d.cand) == 0:
+            pending[t] = set()
+            to_commit[t] = d.commits
+            phase[t] = Phase.COPY
+        else:
+            phase[t] = Phase.PIN
+
+# §4 step 4: create the pin, adopt the manifest its creation commits
+# as L, and rediff against the watermark from pass start. A failed
+# rediff deletes the pin and restarts, committing one more source
+# manifest.
+atomic fair action PassPin:
+    t = oneof [x for x in TASKS if phase[x] == Phase.PIN]
+    base = src_m[src_head]
+    cps = set()
+    for e in base.cps:
+        cps.add(e)
+    cid = CPS.fresh()
+    newid = MANIFESTS.fresh()
+    cps.add(struct(cp=cid, pin=newid))
+    src_head = newid
+    src_m[src_head] = struct(objects=base.objects, cps=cps)
+    pass_pin[t] = cid
+    pass_head[t] = newid
+    d = compute_diff(newid, wm[t])
+    if not d.ok:
+        base2 = src_m[src_head]
+        cps2 = set()
+        for x in base2.cps:
+            if x.cp != cid:
+                cps2.add(x)
+        src_head = MANIFESTS.fresh()
+        src_m[src_head] = struct(objects=base2.objects, cps=cps2)
+        pass_pin[t] = None
+        pending[t] = set()
+        to_commit[t] = []
+        phase[t] = Phase.IDLE
+        restarted = True
+    else:
+        pending[t] = d.cand
+        to_commit[t] = d.commits
+        phase[t] = Phase.COPY
+
+# Copy the candidate list, one step as in mirror.fizz. This task's
+# own pin does not protect every candidate: objects reachable only
+# through a rival's checkpoint lose protection when the rival deletes
+# its pin, so GC can vanish them mid-copy and the pass restarts,
+# deleting the pin, which commits one more source manifest.
+atomic fair action PassCopy:
+    t = oneof [x for x in TASKS if phase[x] == Phase.COPY and len(pending[x]) > 0]
+    vanished = [o for o in pending[t] if o not in src_objs]
+    if len(vanished) == 0:
+        for o in pending[t]:
+            dst_objs.add(o)
+        pending[t] = set()
+    else:
+        base = src_m[src_head]
+        cps = set()
+        for x in base.cps:
+            if x.cp != pass_pin[t]:
+                cps.add(x)
+        src_head = MANIFESTS.fresh()
+        src_m[src_head] = struct(objects=base.objects, cps=cps)
+        pass_pin[t] = None
+        pending[t] = set()
+        to_commit[t] = []
+        phase[t] = Phase.IDLE
+        restarted = True
+
+# §4 step 5: walk the frozen commit list in ascending id order, one
+# PUT per step. The source read comes first: a vanished source
+# manifest restarts the pass (deleting the pin, if any) even when the
+# target already has the id. A PUT hitting an existing id is the
+# create-if-absent collision: identical bytes are success, different
+# bytes wedge the pass (NoDivergence checks the wedge is unreachable).
+atomic fair action PassCommitOne:
+    t = oneof [x for x in TASKS if phase[x] == Phase.COPY and len(pending[x]) == 0 and len(to_commit[x]) > 0]
+    i = to_commit[t][0]
+    if i not in src_m:
+        if pass_pin[t] != None:
+            base = src_m[src_head]
+            cps = set()
+            for x in base.cps:
+                if x.cp != pass_pin[t]:
+                    cps.add(x)
+            src_head = MANIFESTS.fresh()
+            src_m[src_head] = struct(objects=base.objects, cps=cps)
+            pass_pin[t] = None
+        pending[t] = set()
+        to_commit[t] = []
+        phase[t] = Phase.IDLE
+        restarted = True
+    else:
+        if i in dst_m:
+            race_hit = True
+            existing = dst_m[i]
+            if existing != src_m[i]:
+                diverged = True
+        else:
+            dst_m[i] = src_m[i]
+            if dst_head == None or i > dst_head:
+                dst_head = i
+        to_commit[t] = to_commit[t][1:]
+        if len(to_commit[t]) == 0:
+            if pass_pin[t] != None:
+                phase[t] = Phase.UNPIN
+            else:
+                phase[t] = Phase.IDLE
+
+# §4 step 6: unpin. The deletion writes one more source manifest; the
+# rival (or the next pass) commits it through the pinless path.
+atomic fair action PassUnpin:
+    t = oneof [x for x in TASKS if phase[x] == Phase.UNPIN]
+    base = src_m[src_head]
+    cps = set()
+    for x in base.cps:
+        if x.cp != pass_pin[t]:
+            cps.add(x)
+    src_head = MANIFESTS.fresh()
+    src_m[src_head] = struct(objects=base.objects, cps=cps)
+    pass_pin[t] = None
+    phase[t] = Phase.IDLE
+
+# The completeness invariant (§3), with §4's refinement: the target's
+# latest manifest always has its full closure present, in every state,
+# including mid-commit of either task. Entries of checkpoints retired
+# at the source may dangle (they resolve nowhere at the source
+# either); a rival's pin deletion is enough to retire one, so the
+# carve-out is load-bearing here even without expiry or operator
+# deletes. For live entries, ascending order within each frozen list
+# plus restart-on-vanish must land every referencee before its
+# referencer, whichever task gets there first.
+always assertion TargetComplete:
+    if dst_head == None:
+        return True
+    for o in dst_m[dst_head].objects:
+        if o not in dst_objs:
+            return False
+    src_cps = [x.cp for x in src_m[src_head].cps]
+    for e in dst_m[dst_head].cps:
+        if (e.cp in src_cps) and e.pin != dst_head:
+            if e.pin not in dst_m:
+                return False
+            for o in dst_m[e.pin].objects:
+                if o not in dst_objs:
+                    return False
+    return True
+
+# §4: racing tasks commit identical bytes; the Diverged wedge needs a
+# foreign writer, which this model does not have.
+always assertion NoDivergence:
+    return not diverged
+
+# Non-vacuity: the create-if-absent collision actually happens.
+exists assertion RaceCommitExplored:
+    return race_hit
+
+# Non-vacuity: both tasks are mid-pass at different heads at once.
+exists assertion OverlapExplored:
+    if phase["a"] == Phase.IDLE or phase["b"] == Phase.IDLE:
+        return False
+    return pass_head["a"] != pass_head["b"]
+
+# Non-vacuity: the vanished-object and vanished-manifest restarts are
+# explored.
+exists assertion PassRestartExplored:
+    return restarted
+
+# Non-vacuity: the §4 dangle TargetComplete tolerates is reachable: a
+# target head entry whose checkpoint died at the source, its pinned
+# manifest never committed.
+exists assertion RetiredDangleExplored:
+    if dst_head == None:
+        return False
+    src_cps = [x.cp for x in src_m[src_head].cps]
+    for e in dst_m[dst_head].cps:
+        if (e.cp not in src_cps) and e.pin != dst_head and (e.pin not in dst_m):
+            return True
+    return False
+
+# Convergence: the two tasks' pin/unpin churn terminates; after the
+# writer budget drains the target reaches the source's head, both
+# tasks go idle, and no pin checkpoints are left at the source.
+eventually always assertion Converged:
+    if dst_head == None or dst_head != src_head:
+        return False
+    for t in TASKS:
+        if phase[t] != Phase.IDLE:
+            return False
+    return len(src_m[src_head].cps) == 0

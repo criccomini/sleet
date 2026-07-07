@@ -178,6 +178,8 @@ manifest's list and can already race a deletion between listing and opening.
 
 Duplicate mirror tasks are safe. Manifest commits use create-if-absent, and
 a race to write the same source manifest body is not a fork.
+`specs/mirror-race.fizz` pins this: two interleaved passes preserve
+completeness and commit identical bytes on collision.
 
 ## 5. Reading a mirror
 

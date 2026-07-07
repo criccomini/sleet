@@ -38,11 +38,14 @@ when the two drift.
   convergence) is `fizz --experimental_processed_queue
   specs/mirror.fizz`, run twice: bare, and with `--preinit-hook-file
   specs/mirror-expiry.cfg` (the full budget product does not fit in
-  memory; the spec header explains the split). Add
-  `--experimental_no_graph` to reduce memory pressure on the
-  exhaustive runs. Spot-check the full product with `fizz -x
-  --max_runs 1 --seed <n> --preinit-hook-file specs/mirror-sim.cfg
-  specs/mirror.fizz`.
+  memory; the spec header explains the split). Racing duplicate
+  mirror tasks (create-if-absent commits, two concurrent passes) are
+  `fizz --experimental_processed_queue specs/mirror-race.fizz`, a
+  multi-hour run; start it when the machine is free.
+  (`--experimental_no_graph` would cut memory further, but fizz
+  refuses it for specs that declare liveness, which all of these do.)
+  Spot-check the full product with `fizz -x --max_runs 1 --seed <n>
+  --preinit-hook-file specs/mirror-sim.cfg specs/mirror.fizz`.
 - Model-based testing replays the spec's action sequences against the
   real decision code: `fizz specs/coordination-mbt.fizz`, then
   `fizzbee-mbt-server --states_file specs/out/latest &`, then
