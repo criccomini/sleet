@@ -3,10 +3,6 @@
 Sleet runs background services for fleets of
 [SlateDB](https://slatedb.io) databases.
 
-Point a pool of Sleet nodes at one object-store root. Register the SlateDB
-database roots you want managed. The nodes will read the registry and split
-the work.
-
 Sleet handles:
 
 - garbage collection
