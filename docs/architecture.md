@@ -1,8 +1,9 @@
 # Architecture
 
-Sleet is an object-store coordinated control plane for SlateDB background
-services. It is not a proxy. Readers and writers still open SlateDB databases
-directly.
+Sleet uses object storage as a coordination mechanism. It does not require a
+central server or database. Nodes read the same tree of objects and compute
+ownership of work locally. The tree contains a registry of databases, a
+registry of live nodes, and a configuration file.
 
 ## Model
 
@@ -43,8 +44,6 @@ Every node reads the same tree:
   nodes/<node-id>.<service-letters>.json
 ```
 
-The tree contains intent and liveness. It does not contain assignments.
-
 ## Placement
 
 Each node computes ownership locally from:
@@ -54,13 +53,17 @@ Each node computes ownership locally from:
 - the live node set from `nodes/`
 - the services each live node offers
 
-Sleet uses rendezvous hashing. For `gc` and `compactor-coordinator`, the
-top-ranked live node owns the `(database, service)` pair. For
-`compaction-workers`, the top `count` nodes poll the database's compaction
-queue. For mirroring, ownership is per `(database, mirror, target)` triple.
+Sleet uses rendezvous hashing to keep node assignments stable. Rendezvous
+hashing is a deterministic, stateless algorithm that ranks nodes for each
+database. Each node computes the same ranking and picks the highest-ranked
+live node for each service. The result is a mapping of databases to nodes and
+services. Adding or removing a node moves only the assignments affected by that
+node's rank.
 
-Adding or removing a node moves only the assignments affected by that node's
-rank. No node writes the result back to storage.
+For `gc` and `compactor-coordinator`, the top-ranked live node owns the
+`(database, service)` pair. For `compaction-workers`, the top `count` nodes
+run compaction workers for the `(database, service)` pair. For mirroring,
+ownership is per `(database, mirror, destination)` triple.
 
 ## Heartbeats and liveness
 
@@ -70,7 +73,7 @@ A node writes one heartbeat object every `heartbeat_interval`:
 nodes/sleet-1.cgmw.json
 ```
 
-The suffix letters name offered services:
+The suffix letters define the services the node offers:
 
 | Letter | Service                 |
 | ------ | ----------------------- |
@@ -79,11 +82,14 @@ The suffix letters name offered services:
 | `m`    | `mirror`                |
 | `w`    | `compaction-workers`    |
 
-Placement reads the object name and `LastModified`. The heartbeat body is for
-status output: node version, SlateDB version, and aggregate task state.
+The placement calculation uses the object name and `LastModified` object store
+metadata to determine the services offered and node liveness. The heartbeat body
+contains the node's `node_id` and a list of the services it offers. The body is
+not used for liveness or placement, but it is useful for debugging and
+monitoring.
 
 A node is live when its heartbeat is younger than `heartbeat_timeout`. A clean
-shutdown deletes the heartbeat, so peers can take over without waiting for
+shutdown deletes the heartbeat, so peers can take over without waiting for a
 timeout.
 
 ## Services
@@ -97,15 +103,14 @@ Sleet runs four service types:
 | `compaction-workers`    | Claims and executes SlateDB compaction jobs.                                 |
 | `mirror`                | Copies a database to configured mirror targets and commits target manifests. |
 
-Sleet only decides where service loops run. SlateDB provides the safety
-primitives:
+Sleet only decides which nodes service loops run. SlateDB is responsible for
+protecting the database from concurrent access:
 
-- manifest CAS for commits
+- `.manifest` CAS for commits
 - compactor epoch fencing for coordinators
 - `.compactions` CAS claims for workers
-- checkpoint-aware garbage collection
 
-Duplicate service execution can waste work. It should not corrupt a database.
+Duplicate service execution can waste work, but will never corrupt a database.
 
 ## Failure behavior
 
@@ -120,18 +125,17 @@ delayed until the next config or heartbeat poll. The usual handoff bounds are:
 | Change                               | Expected convergence                        |
 | ------------------------------------ | ------------------------------------------- |
 | Node dies without deleting heartbeat | about `heartbeat_timeout`                   |
-| Node exits cleanly                   | next heartbeat list                         |
+| Node exits cleanly                   | next `heartbeat_interval`                   |
 | Registry or config changes           | up to `config_poll` plus one heartbeat tick |
 
-Nodes must be able to reach the stores for their offered services. Placement
-does not test reachability.
+Nodes must be able to reach the stores for their offered services.
 
-## Scaling shape
+## Scaling
 
 Coordination cost scales mostly with node count:
 
-- each node PUTs one heartbeat per tick
-- each node LISTs `nodes/` per tick
+- each node PUTs one heartbeat per `heartbeat_interval`
+- each node LISTs `nodes/` per `heartbeat_interval`
 - each node LISTs `dbs/` every `config_poll`
 - assignments are computed in memory
 
@@ -140,12 +144,6 @@ very large registry sizes, `dbs/` LIST cardinality becomes the pressure
 point; [RFC 0001](../rfcs/0001-design.md) tracks an inventory-backed registry
 as future work.
 
-## Deeper reference
+## RFCs
 
-- [RFC 0001](../rfcs/0001-design.md) describes coordination, failure handling,
-  and scaling.
-- [RFC 0002](../rfcs/0002-mirroring.md) describes mirror invariants and
-  restore semantics.
-- [src/placement.rs](../src/placement.rs) contains the frozen rendezvous hash.
-- [src/heartbeat.rs](../src/heartbeat.rs) defines heartbeat naming and JSON
-  schema generation.
+See the [rfcs/](../rfcs/) directory for design documents.

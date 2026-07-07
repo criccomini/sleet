@@ -62,7 +62,8 @@ count = 2
 max_concurrent_compactions = 4
 ```
 
-The full example is [examples/sleet.toml](../examples/sleet.toml).
+See the complete example in [../examples/sleet.toml](../examples/sleet.toml). A
+JSON spec is also available in [../schema/config.schema.json](../schema/config.schema.json).
 
 ## Per-database overrides
 
@@ -76,11 +77,12 @@ services = ["gc"]
 min_age = "30m"
 ```
 
-The full example is [examples/db.toml](../examples/db.toml).
+See the complete example in [../examples/db.toml](../examples/db.toml). A JSON
+spec is also available in [../schema/config.schema.json](../schema/config.schema.json).
 
 ## Services
 
-`services` accepts these names:
+`services` define which services a node offers. Valid values are a CSV list of:
 
 | Name                    | Effect                                          |
 | ----------------------- | ----------------------------------------------- |

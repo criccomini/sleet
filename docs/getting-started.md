@@ -25,9 +25,10 @@ cargo run -- status s3://ops/sleet/
 
 ## Pick a fleet root
 
-Use `s3://ops/sleet` as the example fleet root.
+We use `s3://ops/sleet` as the example fleet root. In practice, you will need
+to pick a location that all nodes can read and write to.
 
-The root is not a SlateDB database. It is Sleet's own state tree. Sleet
+The Sleet root is not a SlateDB database. It is Sleet's own state tree. Sleet
 creates and reads objects under:
 
 ```text
@@ -41,6 +42,12 @@ Credentials come from the environment and object-store provider configuration
 used by the `object_store` crate. Every node must be able to read and write
 the fleet root. A node must also be able to reach the databases and mirror
 destinations for the services it offers.
+
+For specific environment variables, see:
+
+- [AmazonS3Builder::from_env](https://docs.rs/object_store/latest/object_store/aws/struct.AmazonS3Builder.html#method.from_env)
+- [MicrosoftAzureBuilder::from_env](https://docs.rs/object_store/latest/object_store/azure/struct.MicrosoftAzureBuilder.html#method.from_env)
+- [GoogleCloudStorageBuilder::from_env](https://docs.rs/object_store/latest/object_store/gcp/struct.GoogleCloudStorageBuilder.html#method.from_env)
 
 For AWS, configure the process environment before running Sleet:
 
@@ -73,9 +80,8 @@ canonical database URL:
 dbs/s3%3A%2F%2Fbucket%2Fdb.toml
 ```
 
-An empty registry file is valid. It means the database uses the fleet-wide
-defaults from `sleet.toml`, or Sleet's built-in defaults if `sleet.toml` is
-absent.
+An empty registry file means the database uses the fleet-wide defaults from
+`sleet.toml`, or Sleet's built-in defaults if `sleet.toml` is absent.
 
 ## Start a node
 
@@ -109,21 +115,26 @@ letters, numbers, `_`, and `-`.
 sleet status s3://ops/sleet
 ```
 
-Add queue and mirror reads when you need them:
+Sleet also offers detailed status flags for compaction and mirroring:
 
 ```sh
 sleet status s3://ops/sleet --compactions
 sleet status s3://ops/sleet --mirrors
-sleet status s3://ops/sleet --format json
 ```
 
 `--compactions` reads each database's `.compactions` state. `--mirrors` reads
-source and destination heads for each mirror target. Both flags make status
-more informative and more expensive.
+source and destination `.manifest` heads for each mirror target. Both flags
+make status more informative, but more expensive.
+
+JSON output format is supported for all commands with `--format json`:
+
+```sh
+sleet status s3://ops/sleet --format json
+```
 
 ## Add fleet policy
 
-Create `sleet.toml` at the fleet root when defaults are not enough:
+You may set fleet-wide defaults in `sleet.toml`:
 
 ```toml
 [node]
@@ -140,10 +151,3 @@ count = 2
 
 See [Configuration](configuration.md) for layering, defaults, and per-database
 overrides.
-
-## Next steps
-
-- Use [Operations](operations.md) to plan node roles, capacity, and failover
-  behavior.
-- Use [Mirroring](mirroring.md) to configure disaster recovery, backups, or
-  migration targets.

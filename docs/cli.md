@@ -1,7 +1,7 @@
 # CLI reference
 
-Sleet has one long-running command, `run`, and one-shot operator commands for
-registration, status, and mirrors.
+Sleet has one long-running command, `run`, and several one-shot operator
+commands for registration, status, and mirrors.
 
 ## Command overview
 
@@ -32,12 +32,12 @@ Runs a node until interrupted.
 
 Important options:
 
-| Option                      | Meaning                                              |
-| --------------------------- | ---------------------------------------------------- |
-| `--node-id <NODE_ID>`       | Required unique node identity.                       |
-| `--services <SERVICES>`     | Comma-separated service list.                        |
-| `--max-mirror-jobs <N>`     | Mirror copy or prune jobs on this node at once.      |
-| `--rclone <PATH>`           | Binary for mirror targets using `copier = "rclone"`. |
+| Option                      | Meaning                                                   |
+| --------------------------- | --------------------------------------------------------- |
+| `--node-id <NODE_ID>`       | Required unique node identity.                            |
+| `--services <SERVICES>`     | Comma-separated service list.                             |
+| `--max-mirror-jobs <N>`     | Mirror copy or prune jobs on this node at once.           |
+| `--rclone <PATH>`           | Binary for mirror destinations using `copier = "rclone"`. |
 
 Service names:
 
@@ -96,14 +96,14 @@ sleet status s3://ops/sleet --compactions --mirrors
 sleet mirror sync [OPTIONS] <ROOT> <DB> <TARGET>
 ```
 
-Runs one sync pass for one registered database and target. It prunes afterward
+Runs one sync pass for one registered database and destination. It prunes afterward
 when retention is set.
 
 ```sh
-sleet mirror sync s3://ops/sleet s3://bucket/db backup
+sleet mirror sync s3://ops/sleet s3://bucket/db s3://backups/db1
 ```
 
-Use `--rclone <PATH>` when the target uses `copier = "rclone"`.
+Use `--rclone <PATH>` when the destination uses `copier = "rclone"`.
 
 ## `sleet mirror restore`
 
@@ -126,5 +126,4 @@ SlateDB settings. If omitted, Sleet restores the backup's latest manifest.
 ## JSON outputs
 
 One-shot commands that accept `--format json` emit responses defined in
-[schema/cli.schema.json](../schema/cli.schema.json). Use the schema for
-automation instead of scraping text output.
+[schema/cli.schema.json](../schema/cli.schema.json).
