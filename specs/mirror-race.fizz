@@ -45,6 +45,9 @@
 #   head with no pins left.
 #
 #   fizz --experimental_processed_queue specs/mirror-race.fizz
+# Spot-check larger budgets with:
+#   fizz -x --max_runs 1 --seed <n> \
+#     --preinit-hook-file specs/mirror-race-sim.cfg specs/mirror-race.fizz
 options:
   max_actions: 48
   max_concurrent_actions: 1
@@ -72,12 +75,15 @@ CPS = symmetry.ordinal(name="cp", limit=8)
 # restart loop: a rival's unpin makes garbage, a sweep vanishes it out
 # of the other task's frozen list, the restart re-pins and unpins
 # again. Each restart consumes a sweep's vanish, so SWEEPS bounds the
-# loop. With GC unbudgeted the loop runs until the id domains exhaust
-# and the graph does not fit in memory (killed past 560k nodes on a
-# 16 GB machine). The exists assertions below fail if these budgets
-# stop reaching the raced behaviors, so a pass is not vacuous.
-WRITES = 2
-SWEEPS = 2
+# loop; with GC unbudgeted the loop runs until the id domains exhaust.
+# The defaults are sized to a 16 GB machine: liveness needs the full
+# graph, and jetsam kills the WRITES=2 SWEEPS=2 product past 700k
+# nodes. Larger budgets are spot-checked by simulation with
+# specs/mirror-race-sim.cfg. The exists assertions below fail if
+# these budgets stop reaching the raced behaviors, so a pass is not
+# vacuous.
+WRITES = 1
+SWEEPS = 1
 
 # The one-level closure (§3) over live source manifests, for GC.
 atomic func closure_ids(head):

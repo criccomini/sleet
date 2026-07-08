@@ -40,8 +40,9 @@ when the two drift.
   specs/mirror-expiry.cfg` (the full budget product does not fit in
   memory; the spec header explains the split). Racing duplicate
   mirror tasks (create-if-absent commits, two concurrent passes) are
-  `fizz --experimental_processed_queue specs/mirror-race.fizz`, a
-  multi-hour run; start it when the machine is free.
+  `fizz --experimental_processed_queue specs/mirror-race.fizz` (its
+  full budget product does not fit in memory either; spot-check it
+  with the same `fizz -x` form and `specs/mirror-race-sim.cfg`).
   (`--experimental_no_graph` would cut memory further, but fizz
   refuses it for specs that declare liveness, which all of these do.)
   Spot-check the full product with `fizz -x --max_runs 1 --seed <n>
