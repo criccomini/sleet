@@ -38,21 +38,37 @@
 # - RaceCommitExplored / OverlapExplored / PassRestartExplored: the
 #   id collision, concurrent passes at different heads, and the
 #   vanished-object and vanished-manifest restarts are explored, not
-#   vacuously absent.
-# - Converged (eventually always): the tasks' mutual pin/unpin churn
-#   terminates (each unpin syncs through the rival's pinless path);
-#   after the writer budget drains the target reaches the source's
-#   head with no pins left.
+#   vacuously absent. Checked by the WitnessReached runs; the exists
+#   forms are evaluated only under a graph, which no checked-in run
+#   builds.
+# - TerminalConverged: every action is monotone (budgets drain, ids
+#   only grow, the target only gains manifests and objects), so the
+#   state graph is a DAG and every behavior ends in a terminal state.
+#   This asserts terminal states are converged: writer drained, both
+#   tasks idle, heads equal, no pins left. Behaviors the allocation
+#   caps truncate end mid-pass and are tolerated there; NoStuckPass
+#   rejects the pass shape that could wedge with work left undone.
 #
-#   fizz --experimental_processed_queue specs/mirror-race.fizz
-# Spot-check larger budgets with:
-#   fizz -x --max_runs 1 --seed <n> \
-#     --preinit-hook-file specs/mirror-race-sim.cfg specs/mirror-race.fizz
+# The state graph does not fit in memory at any useful budget (~90
+# KB a node; even heavily reduced budgets pass 130k nodes on their
+# breadth alone), so the spec declares no liveness (which would need
+# the graph), every run drops the graph, and non-vacuity runs
+# through WitnessReached instead of the exists assertions (which are
+# skipped without a graph). The safety run (DFS: the BFS frontier
+# holds full states by the hundred thousand and blows the memory the
+# graph was evicted to save; the DFS stack stays tiny; ~2.5 h, ~12M
+# visited, ~2 GB):
+#   fizz --experimental_no_graph --exploration_strategy dfs \
+#     specs/mirror-race.fizz
+# Then one run per witness, seconds each, EXPECTED TO FAIL on
+# WitnessReached, which is what proves the raced behavior reachable:
+#   fizz --experimental_no_graph --preinit-hook 'WITNESS = "race"' \
+#     specs/mirror-race.fizz
+# and likewise for overlap, restart, and dangle.
 options:
   max_actions: 48
   max_concurrent_actions: 1
 deadlock_detection: false
-liveness: strict
 ---
 
 Phase = enum('IDLE', 'PIN', 'COPY', 'UNPIN')
@@ -64,11 +80,20 @@ TASKS = ["a", "b"]
 # recycled while its retired entry still sits in an old target
 # manifest manufactures a shared-checkpoint match that UUIDs cannot
 # produce. Ordinal fresh() is a tail append, so ids never recur; the
-# order is never used. Checkpoint ids live on in committed target
-# manifests after unpin, so the limit bounds pins ever created.
-MANIFESTS = symmetry.ordinal(name="m", limit=20)
+# order is never used.
+MANIFESTS = symmetry.ordinal(name="m", limit=12)
 OBJECTS = symmetry.ordinal(name="o", limit=6)
-CPS = symmetry.ordinal(name="cp", limit=8)
+CPS = symmetry.ordinal(name="cp", limit=6)
+
+# Allocation caps, the exploration bound alongside max_actions: an
+# action that would allocate past a cap is disabled, truncating the
+# behavior there (TerminalConverged tolerates mid-pass states for
+# exactly this reason). The caps are read into state at Init, so a
+# preinit hook can lower them per run; hooks cannot resize the
+# domains themselves (those are built at module load), so the domain
+# limits above must stay at or above the caps.
+M_CAP = 10
+CP_CAP = 5
 
 # Writer and GC budgets. GC is budgeted in state, like every churn
 # source in mirror.fizz, because it is what couples the tasks into a
@@ -76,14 +101,12 @@ CPS = symmetry.ordinal(name="cp", limit=8)
 # of the other task's frozen list, the restart re-pins and unpins
 # again. Each restart consumes a sweep's vanish, so SWEEPS bounds the
 # loop; with GC unbudgeted the loop runs until the id domains exhaust.
-# The defaults are sized to a 16 GB machine: liveness needs the full
-# graph, and jetsam kills the WRITES=2 SWEEPS=2 product past 700k
-# nodes. Larger budgets are spot-checked by simulation with
-# specs/mirror-race-sim.cfg. The exists assertions below fail if
-# these budgets stop reaching the raced behaviors, so a pass is not
-# vacuous.
-WRITES = 1
-SWEEPS = 1
+WRITES = 2
+SWEEPS = 2
+
+# Selects the witness a WitnessReached run must find; "" (the safety
+# run) leaves WitnessReached inert.
+WITNESS = ""
 
 # The one-level closure (§3) over live source manifests, for GC.
 atomic func closure_ids(head):
@@ -167,6 +190,11 @@ action Init:
         to_commit[t] = []
     writes_left = WRITES
     sweeps_left = SWEEPS
+    m_cap = M_CAP
+    cp_cap = CP_CAP
+    witness = WITNESS
+    m_used = 1
+    cp_used = 0
     restarted = False
     race_hit = False
     diverged = False
@@ -175,7 +203,7 @@ action Init:
 # sometimes dropping an old one (a flush, or a compaction rewrite).
 # Checkpoint entries carry forward, as in a real manifest CAS.
 atomic action WriterCommit:
-    require writes_left > 0
+    require writes_left > 0 and m_used < m_cap
     writes_left = writes_left - 1
     base = src_m[src_head]
     objs = set()
@@ -189,6 +217,7 @@ atomic action WriterCommit:
         victim = sorted([o for o in base.objects])[0]
         objs.discard(victim)
     src_head = MANIFESTS.fresh()
+    m_used = m_used + 1
     src_m[src_head] = struct(objects=objs, cps=base.cps)
 
 # Source GC: one sweep deletes everything outside the latest manifest's
@@ -214,7 +243,7 @@ atomic action GcSweep:
 # them, so reading dst_m[wm] later equals the code's held copy. With
 # no candidates everything the commit references is protected without
 # a pin: go straight to the commit steps.
-atomic fair action PassRead:
+atomic action PassRead:
     require src_head != dst_head
     t = oneof [x for x in TASKS if phase[x] == Phase.IDLE]
     d = compute_diff(src_head, dst_head)
@@ -234,14 +263,17 @@ atomic fair action PassRead:
 # as L, and rediff against the watermark from pass start. A failed
 # rediff deletes the pin and restarts, committing one more source
 # manifest.
-atomic fair action PassPin:
+atomic action PassPin:
+    require cp_used < cp_cap and m_used + 2 <= m_cap
     t = oneof [x for x in TASKS if phase[x] == Phase.PIN]
     base = src_m[src_head]
     cps = set()
     for e in base.cps:
         cps.add(e)
     cid = CPS.fresh()
+    cp_used = cp_used + 1
     newid = MANIFESTS.fresh()
+    m_used = m_used + 1
     cps.add(struct(cp=cid, pin=newid))
     src_head = newid
     src_m[src_head] = struct(objects=base.objects, cps=cps)
@@ -255,6 +287,7 @@ atomic fair action PassPin:
             if x.cp != cid:
                 cps2.add(x)
         src_head = MANIFESTS.fresh()
+        m_used = m_used + 1
         src_m[src_head] = struct(objects=base2.objects, cps=cps2)
         pass_pin[t] = None
         pending[t] = set()
@@ -271,7 +304,8 @@ atomic fair action PassPin:
 # through a rival's checkpoint lose protection when the rival deletes
 # its pin, so GC can vanish them mid-copy and the pass restarts,
 # deleting the pin, which commits one more source manifest.
-atomic fair action PassCopy:
+atomic action PassCopy:
+    require m_used < m_cap
     t = oneof [x for x in TASKS if phase[x] == Phase.COPY and len(pending[x]) > 0]
     vanished = [o for o in pending[t] if o not in src_objs]
     if len(vanished) == 0:
@@ -285,6 +319,7 @@ atomic fair action PassCopy:
             if x.cp != pass_pin[t]:
                 cps.add(x)
         src_head = MANIFESTS.fresh()
+        m_used = m_used + 1
         src_m[src_head] = struct(objects=base.objects, cps=cps)
         pass_pin[t] = None
         pending[t] = set()
@@ -298,7 +333,8 @@ atomic fair action PassCopy:
 # target already has the id. A PUT hitting an existing id is the
 # create-if-absent collision: identical bytes are success, different
 # bytes wedge the pass (NoDivergence checks the wedge is unreachable).
-atomic fair action PassCommitOne:
+atomic action PassCommitOne:
+    require m_used < m_cap
     t = oneof [x for x in TASKS if phase[x] == Phase.COPY and len(pending[x]) == 0 and len(to_commit[x]) > 0]
     i = to_commit[t][0]
     if i not in src_m:
@@ -309,6 +345,7 @@ atomic fair action PassCommitOne:
                 if x.cp != pass_pin[t]:
                     cps.add(x)
             src_head = MANIFESTS.fresh()
+            m_used = m_used + 1
             src_m[src_head] = struct(objects=base.objects, cps=cps)
             pass_pin[t] = None
         pending[t] = set()
@@ -334,7 +371,8 @@ atomic fair action PassCommitOne:
 
 # §4 step 6: unpin. The deletion writes one more source manifest; the
 # rival (or the next pass) commits it through the pinless path.
-atomic fair action PassUnpin:
+atomic action PassUnpin:
+    require m_used < m_cap
     t = oneof [x for x in TASKS if phase[x] == Phase.UNPIN]
     base = src_m[src_head]
     cps = set()
@@ -342,6 +380,7 @@ atomic fair action PassUnpin:
         if x.cp != pass_pin[t]:
             cps.add(x)
     src_head = MANIFESTS.fresh()
+    m_used = m_used + 1
     src_m[src_head] = struct(objects=base.objects, cps=cps)
     pass_pin[t] = None
     phase[t] = Phase.IDLE
@@ -376,25 +415,15 @@ always assertion TargetComplete:
 always assertion NoDivergence:
     return not diverged
 
-# Non-vacuity: the create-if-absent collision actually happens.
-exists assertion RaceCommitExplored:
-    return race_hit
-
-# Non-vacuity: both tasks are mid-pass at different heads at once.
-exists assertion OverlapExplored:
+# Both tasks mid-pass at different heads at once.
+atomic func overlap_now():
     if phase["a"] == Phase.IDLE or phase["b"] == Phase.IDLE:
         return False
     return pass_head["a"] != pass_head["b"]
 
-# Non-vacuity: the vanished-object and vanished-manifest restarts are
-# explored.
-exists assertion PassRestartExplored:
-    return restarted
-
-# Non-vacuity: the §4 dangle TargetComplete tolerates is reachable: a
-# target head entry whose checkpoint died at the source, its pinned
-# manifest never committed.
-exists assertion RetiredDangleExplored:
+# The §4 dangle TargetComplete tolerates: a target head entry whose
+# checkpoint died at the source, its pinned manifest never committed.
+atomic func dangle_now():
     if dst_head == None:
         return False
     src_cps = [x.cp for x in src_m[src_head].cps]
@@ -403,13 +432,73 @@ exists assertion RetiredDangleExplored:
             return True
     return False
 
-# Convergence: the two tasks' pin/unpin churn terminates; after the
-# writer budget drains the target reaches the source's head, both
-# tasks go idle, and no pin checkpoints are left at the source.
-eventually always assertion Converged:
-    if dst_head == None or dst_head != src_head:
-        return False
+# Non-vacuity as exists assertions, evaluated only when a run builds
+# the state graph, which no checked-in run does (the graph does not
+# fit in memory); the WitnessReached runs below prove the same
+# reachability without one. Kept for small-budget graph experiments.
+exists assertion RaceCommitExplored:
+    return race_hit
+
+exists assertion OverlapExplored:
+    v = overlap_now()
+    return v
+
+exists assertion PassRestartExplored:
+    return restarted
+
+exists assertion RetiredDangleExplored:
+    v = dangle_now()
+    return v
+
+# Non-vacuity under --experimental_no_graph: a witness run selects
+# one raced behavior with WITNESS and is EXPECTED TO FAIL here; the
+# reported violation (with its trace) is the proof the behavior is
+# reachable. A witness run that PASSES means the behavior became
+# unreachable: treat that as the spec being broken. The safety run
+# (WITNESS = "") leaves this inert.
+always assertion WitnessReached:
+    if witness == "race":
+        return not race_hit
+    if witness == "overlap":
+        v = overlap_now()
+        return not v
+    if witness == "restart":
+        return not restarted
+    if witness == "dangle":
+        v = dangle_now()
+        return not v
+    return True
+
+# Convergence as safety. Every action strictly drains a budget,
+# allocates an ordinal id, or grows the target (a full pass cycle
+# that changes nothing else lands at least one target manifest), so
+# the state graph is a DAG and every behavior ends in some terminal
+# state. Terminal states must be converged. Each early return marks
+# the state non-terminal or truncated: a writer with budget is
+# enabled or cap-blocked; a mid-pass task's next step is enabled
+# short of the caps (NoStuckPass rejects the one shape that would
+# wedge with work left undone), or cap-blocked; differing heads with
+# both tasks idle mean PassRead is enabled (it allocates nothing and
+# its diff cannot fail, GC protects the current head's closure).
+# Cap-blocked states end truncated behaviors, bounded away the way
+# max_actions bounds depth. What remains is terminal up to GC and
+# must have equal heads with no pin checkpoints left.
+always assertion TerminalConverged:
+    if writes_left > 0:
+        return True
     for t in TASKS:
         if phase[t] != Phase.IDLE:
-            return False
+            return True
+    if src_head != dst_head:
+        return True
     return len(src_m[src_head].cps) == 0
+
+# A task in COPY with no copies and no commits left would wedge (no
+# action returns it to IDLE). The diff never produces an empty pass:
+# the commit list always contains at least L, which is never in the
+# proven-present list. TerminalConverged leans on this.
+always assertion NoStuckPass:
+    for t in TASKS:
+        if phase[t] == Phase.COPY and len(pending[t]) == 0 and len(to_commit[t]) == 0:
+            return False
+    return True

@@ -40,13 +40,19 @@ when the two drift.
   specs/mirror-expiry.cfg` (the full budget product does not fit in
   memory; the spec header explains the split). Racing duplicate
   mirror tasks (create-if-absent commits, two concurrent passes) are
-  `fizz --experimental_processed_queue specs/mirror-race.fizz` (its
-  full budget product does not fit in memory either; spot-check it
-  with the same `fizz -x` form and `specs/mirror-race-sim.cfg`).
-  (`--experimental_no_graph` would cut memory further, but fizz
-  refuses it for specs that declare liveness, which all of these do.)
-  Spot-check the full product with `fizz -x --max_runs 1 --seed <n>
-  --preinit-hook-file specs/mirror-sim.cfg specs/mirror.fizz`.
+  `specs/mirror-race.fizz`: `fizz --experimental_no_graph
+  --exploration_strategy dfs specs/mirror-race.fizz` for safety
+  (about 2.5 hours; start it when the machine is free), then one
+  witness run per raced behavior, seconds each: `fizz
+  --experimental_no_graph --preinit-hook 'WITNESS = "<w>"'
+  specs/mirror-race.fizz` for w in race, overlap, restart, dangle.
+  Witness runs must FAIL on WitnessReached; that failure is the
+  reachability proof (the spec header explains: its state graph does
+  not fit in memory, so it declares no liveness, runs without the
+  graph via dfs, and cannot use exists assertions, which need one).
+  Spot-check the full mirror.fizz product with `fizz -x --max_runs 1
+  --seed <n> --preinit-hook-file specs/mirror-sim.cfg
+  specs/mirror.fizz`.
 - Model-based testing replays the spec's action sequences against the
   real decision code: `fizz specs/coordination-mbt.fizz`, then
   `fizzbee-mbt-server --states_file specs/out/latest &`, then
