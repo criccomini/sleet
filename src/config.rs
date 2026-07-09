@@ -344,8 +344,8 @@ pub struct WorkersOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_concurrent_compactions: Option<u32>,
 
-    /// How often workers poll `.compactions` for `Scheduled` jobs; sleet
-    /// backs the interval off exponentially while the database is idle.
+    /// How often SlateDB workers poll `.compactions` for `Scheduled` jobs.
+    /// Sleet passes this value through to SlateDB's worker options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compactions_poll_interval: Option<HumanDuration>,
 

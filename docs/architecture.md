@@ -82,11 +82,11 @@ The suffix letters define the services the node offers:
 | `m`    | `mirror`                |
 | `w`    | `compaction-workers`    |
 
-The placement calculation uses the object name and `LastModified` object store
-metadata to determine the services offered and node liveness. The heartbeat body
-contains the node's `node_id` and a list of the services it offers. The body is
-not used for liveness or placement, but it is useful for debugging and
-monitoring.
+The placement calculation uses the object name and `LastModified` object
+store metadata to determine the services offered and node liveness. It does
+not fetch the heartbeat body. `sleet status` reads the body for observability:
+`node_id`, heartbeat format version, Sleet version, SlateDB version, and
+per-service running/backoff task counts.
 
 A node is live when its heartbeat is younger than `heartbeat_timeout`. A clean
 shutdown deletes the heartbeat, so peers can take over without waiting for a

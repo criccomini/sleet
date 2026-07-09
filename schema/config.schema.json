@@ -600,7 +600,7 @@
           "minimum": 0
         },
         "compactions_poll_interval": {
-          "description": "How often workers poll `.compactions` for `Scheduled` jobs; sleet\nbacks the interval off exponentially while the database is idle.",
+          "description": "How often SlateDB workers poll `.compactions` for `Scheduled` jobs.\nSleet passes this value through to SlateDB's worker options.",
           "anyOf": [
             {
               "$ref": "#/$defs/HumanDuration"

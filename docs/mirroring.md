@@ -86,7 +86,8 @@ which may appear in checkpoint listings until then.
 | `rclone`   | Sleet builds the file list and runs `rclone copy --files-from`.                      |
 | `external` | Bucket replication moves data objects; Sleet backfills misses and commits manifests. |
 
-For `rclone`, you must pass the binary path:
+By default Sleet runs `rclone` from `PATH`. Use `--rclone <PATH>` when a node
+or one-shot sync should call a different binary:
 
 ```sh
 sleet run s3://ops/sleet --node-id mirror-1 --services mirror --rclone /usr/bin/rclone
