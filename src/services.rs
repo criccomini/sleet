@@ -74,7 +74,7 @@ impl DatabaseHandle {
     pub fn open(url: &str) -> Result<Self, ServiceError> {
         let canonical = registry::canonicalize_database_url(url)?;
         let parsed = url::Url::parse(&canonical).expect("canonical URL reparses");
-        let (store, path) = object_store::parse_url(&parsed)?;
+        let (store, path) = crate::store::parse_url(&parsed)?;
         Ok(Self::from_parts(url, store.into(), path))
     }
 

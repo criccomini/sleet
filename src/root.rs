@@ -72,7 +72,7 @@ impl FleetRoot {
     pub fn open(url: &str) -> Result<Self, OpenError> {
         let canonical = registry::canonicalize_url(url)?;
         let parsed = url::Url::parse(&canonical).expect("canonical URL reparses");
-        let (store, prefix) = object_store::parse_url(&parsed)?;
+        let (store, prefix) = crate::store::parse_url(&parsed)?;
         Ok(Self::from_parts(store.into(), prefix, &canonical))
     }
 

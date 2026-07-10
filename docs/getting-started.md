@@ -38,10 +38,11 @@ s3://ops/sleet/
   nodes/
 ```
 
-Credentials come from the environment and object-store provider configuration
-used by the `object_store` crate. Every node must be able to read and write
-the fleet root. A node must also be able to reach the databases and mirror
-destinations for the services it offers.
+Credentials and object-store provider options come from the process
+environment used by the `object_store` crate. Sleet applies the same process
+environment when it opens the fleet root, each database, and each mirror
+destination. Every node must therefore run with credentials that can access
+the fleet root and every store required by the services it offers.
 
 For specific environment variables, see:
 

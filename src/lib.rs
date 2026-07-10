@@ -27,6 +27,8 @@ pub mod root;
 pub mod services;
 pub mod testing;
 
+mod store;
+
 /// The slatedb version compiled into this binary (from Cargo.lock via
 /// build.rs), carried in heartbeat bodies.
 pub const SLATEDB_VERSION: &str = env!("SLATEDB_VERSION");
