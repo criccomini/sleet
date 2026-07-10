@@ -2,6 +2,10 @@
 
 All notable changes to Sleet are documented in this file.
 
+## Unreleased
+
+- Add a checksum-verified installer for prebuilt Linux and macOS CLI releases.
+
 ## 0.1.0 - 2026-07-10
 
 Initial release.

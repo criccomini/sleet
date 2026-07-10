@@ -24,6 +24,10 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Check installer
+        run: |
+          sh -n install.sh tests/install.sh
+          sh tests/install.sh
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo check --locked --no-default-features --lib

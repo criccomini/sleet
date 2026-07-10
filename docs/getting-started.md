@@ -5,7 +5,33 @@ assumes you already have a database root in object storage.
 
 ## Install or build the binary
 
-Install a released version from crates.io:
+Install the latest prebuilt release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/criccomini/sleet/main/install.sh | sh
+```
+
+The installer supports Linux x86-64, macOS x86-64, and macOS Arm64. It
+downloads the matching GitHub Release archive, verifies its SHA-256 checksum,
+and installs `sleet` into `~/.local/bin`. Make sure that directory is on your
+`PATH`.
+
+Set `SLEET_VERSION` to install a specific version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/criccomini/sleet/main/install.sh \
+  | SLEET_VERSION=v0.1.0 sh
+```
+
+Set `SLEET_INSTALL_DIR` to choose another destination:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/criccomini/sleet/main/install.sh \
+  | SLEET_INSTALL_DIR=/usr/local/bin sh
+```
+
+The destination must be writable by the current user. You can instead install
+a released version from crates.io:
 
 ```sh
 cargo install sleet --locked

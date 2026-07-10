@@ -7,7 +7,14 @@ distributed compaction, and mirroring.
 
 ## Quick start
 
-Install the CLI from crates.io:
+Install a prebuilt CLI release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/criccomini/sleet/main/install.sh | sh
+```
+
+The installer verifies the release checksum and writes the binary to
+`~/.local/bin`. You can also install the CLI from crates.io:
 
 ```sh
 cargo install sleet --locked
