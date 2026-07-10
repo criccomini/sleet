@@ -36,12 +36,9 @@ The same operations are available through the Rust API:
 ```rust,no_run
 use sleet::{Fleet, StatusOptions};
 
-# async fn example() -> Result<(), sleet::Error> {
 let fleet = Fleet::open("s3://path/to/sleet/state")?;
 let status = fleet.status(StatusOptions::default()).await?;
 println!("{} databases", status.databases.len());
-# Ok(())
-# }
 ```
 
 By default, nodes offer all services:
