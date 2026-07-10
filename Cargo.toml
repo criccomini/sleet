@@ -5,11 +5,15 @@ edition = "2024"
 description = "A fleet manager for SlateDB databases"
 license = "MIT"
 
+[features]
+default = ["cli"]
+cli = ["dep:clap", "dep:tracing-subscriber"]
+
 [dependencies]
 async-trait = "0.1.89"
 bytes = "1.12.0"
 chrono = "0.4.45"
-clap = { version = "4.6.1", features = ["derive"] }
+clap = { version = "4.6.1", features = ["derive"], optional = true }
 futures = "0.3.32"
 humantime = "2.3.0"
 object_store = { version = "0.14", features = ["aws", "gcp", "azure", "http"] }
@@ -24,7 +28,7 @@ tokio-util = { version = "0.7.18", features = ["rt"] }
 toml = "1.1.2"
 tracing = "0.1.44"
 uuid = "1"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"], optional = true }
 url = "2.5.8"
 
 [dev-dependencies]
@@ -38,3 +42,8 @@ trycmd = "1.2.0"
 [[bench]]
 name = "coordination"
 harness = false
+
+[[bin]]
+name = "sleet"
+path = "src/main.rs"
+required-features = ["cli"]

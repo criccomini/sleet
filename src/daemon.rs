@@ -51,9 +51,40 @@ impl Default for NodeOptions {
         Self {
             node_id: String::new(),
             services: Service::ALL.to_vec(),
-            max_mirror_jobs: 1,
+            max_mirror_jobs: std::thread::available_parallelism().map_or(4, |p| p.get()),
             rclone: None,
         }
+    }
+}
+
+impl NodeOptions {
+    /// Options for a node with the given identity and otherwise default
+    /// settings. Validation happens when the node is run.
+    pub fn new(node_id: impl Into<String>) -> Self {
+        Self {
+            node_id: node_id.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Set the services this node offers. An empty list is allowed.
+    pub fn with_services(mut self, services: impl IntoIterator<Item = Service>) -> Self {
+        self.services = services.into_iter().collect();
+        self
+    }
+
+    /// Set the maximum concurrent mirror jobs. Zero is treated as one,
+    /// matching the daemon's existing behavior.
+    pub fn with_max_mirror_jobs(mut self, max_mirror_jobs: usize) -> Self {
+        self.max_mirror_jobs = max_mirror_jobs.max(1);
+        self
+    }
+
+    /// Set the rclone binary used by targets configured with the rclone
+    /// copier.
+    pub fn with_rclone(mut self, rclone: impl Into<String>) -> Self {
+        self.rclone = Some(rclone.into());
+        self
     }
 }
 

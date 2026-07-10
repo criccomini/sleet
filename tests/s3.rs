@@ -34,6 +34,44 @@ fn minio_store(endpoint: &str) -> Arc<dyn object_store::ObjectStore> {
     )
 }
 
+/// The supported URL path, used by both the CLI and Rust facade, passes
+/// AWS credentials, region, and endpoint settings from the environment.
+#[test]
+fn environment_options_open_an_s3_fleet() {
+    let Ok(endpoint) = std::env::var("SLEET_S3_ENDPOINT") else {
+        eprintln!("note: SLEET_S3_ENDPOINT unset; skipping MinIO test");
+        return;
+    };
+    let prefix = format!(
+        "api-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_sleet"))
+        .args([
+            "status",
+            &format!("s3://sleet/{prefix}"),
+            "--format",
+            "json",
+        ])
+        .env("AWS_ENDPOINT_URL_S3", endpoint)
+        .env("AWS_ALLOW_HTTP", "true")
+        .env("AWS_ACCESS_KEY_ID", "minioadmin")
+        .env("AWS_SECRET_ACCESS_KEY", "minioadmin")
+        .env("AWS_DEFAULT_REGION", "us-east-1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "sleet status failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status["databases"].as_array().unwrap().len(), 0);
+}
+
 /// Register (conditional create), ETag-cached polling, and
 /// >1000-entry LIST pagination against real S3 semantics.
 #[tokio::test(flavor = "multi_thread")]

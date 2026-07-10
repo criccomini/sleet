@@ -116,19 +116,9 @@ fn default_config_poll() -> HumanDuration {
 // Declaration order is the canonical listing order (`Ord`,
 // `Service::ALL`, status output).
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    clap::ValueEnum,
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 #[serde(rename_all = "kebab-case")]
 pub enum Service {
     /// Garbage collection.

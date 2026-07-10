@@ -3,12 +3,11 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
-use sleet::config::Service;
-use sleet::daemon::{self, NodeOptions};
 use sleet::render::Render;
-use sleet::root::FleetRoot;
-use sleet::{heartbeat, ops};
-use tokio_util::sync::CancellationToken;
+use sleet::{
+    CancellationToken, Fleet, MirrorSyncOptions, NodeOptions, RestorePoint, Service, StatusOptions,
+    mirror_restore,
+};
 
 #[derive(Parser)]
 #[command(
@@ -29,7 +28,7 @@ enum Command {
         root: String,
 
         /// Node identity; must be unique within the fleet.
-        #[arg(long, value_parser = heartbeat::validate_node_id)]
+        #[arg(long, value_parser = sleet::heartbeat::validate_node_id)]
         node_id: String,
 
         /// Services this node offers.
@@ -166,15 +165,15 @@ async fn main() -> ExitCode {
                     dup.as_str()
                 ));
             }
-            let parallelism = || std::thread::available_parallelism().map_or(4, |p| p.get());
-            let options = NodeOptions {
-                node_id,
-                services,
-                max_mirror_jobs: max_mirror_jobs.unwrap_or_else(parallelism),
-                rclone,
-            };
-            let root = match FleetRoot::open(&root) {
-                Ok(root) => root,
+            let mut options = NodeOptions::new(node_id).with_services(services);
+            if let Some(max_mirror_jobs) = max_mirror_jobs {
+                options = options.with_max_mirror_jobs(max_mirror_jobs);
+            }
+            if let Some(rclone) = rclone {
+                options = options.with_rclone(rclone);
+            }
+            let fleet = match Fleet::open(&root) {
+                Ok(fleet) => fleet,
                 Err(e) => return fail(e),
             };
             let shutdown = CancellationToken::new();
@@ -184,7 +183,7 @@ async fn main() -> ExitCode {
                     trigger.cancel();
                 }
             });
-            match daemon::run(root, options, shutdown).await {
+            match fleet.run_node(options, shutdown).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => fail(e),
             }
@@ -195,21 +194,24 @@ async fn main() -> ExitCode {
             mirrors,
             format,
         } => {
-            let root = match FleetRoot::open(&root) {
-                Ok(root) => root,
+            let fleet = match Fleet::open(&root) {
+                Ok(fleet) => fleet,
                 Err(e) => return fail(e),
             };
-            match ops::status(&root, compactions, mirrors).await {
+            let options = StatusOptions::default()
+                .with_compactions(compactions)
+                .with_mirrors(mirrors);
+            match fleet.status(options).await {
                 Ok(response) => emit(&response, format),
                 Err(e) => fail(e),
             }
         }
         Command::Register { root, db, format } => {
-            let root = match FleetRoot::open(&root) {
-                Ok(root) => root,
+            let fleet = match Fleet::open(&root) {
+                Ok(fleet) => fleet,
                 Err(e) => return fail(e),
             };
-            match ops::register(&root, &db).await {
+            match fleet.register(&db).await {
                 Ok(response) => emit(&response, format),
                 Err(e) => fail(e),
             }
@@ -222,11 +224,15 @@ async fn main() -> ExitCode {
                 rclone,
                 format,
             } => {
-                let root = match FleetRoot::open(&root) {
-                    Ok(root) => root,
+                let fleet = match Fleet::open(&root) {
+                    Ok(fleet) => fleet,
                     Err(e) => return fail(e),
                 };
-                match ops::mirror_sync(&root, &db, &target, rclone.as_deref()).await {
+                let mut options = MirrorSyncOptions::default();
+                if let Some(rclone) = rclone {
+                    options = options.with_rclone(rclone);
+                }
+                match fleet.sync_mirror(&db, &target, options).await {
                     Ok(response) => emit(&response, format),
                     Err(e) => fail(e),
                 }
@@ -237,15 +243,11 @@ async fn main() -> ExitCode {
                 at,
                 format,
             } => {
-                let at = match at
-                    .as_deref()
-                    .map(sleet::mirror::RestorePoint::parse)
-                    .transpose()
-                {
-                    Ok(at) => at.unwrap_or(sleet::mirror::RestorePoint::Latest),
+                let at = match at.as_deref().map(RestorePoint::parse).transpose() {
+                    Ok(at) => at.unwrap_or(RestorePoint::Latest),
                     Err(e) => return fail(e),
                 };
-                match ops::mirror_restore(&backup, &dest, at).await {
+                match mirror_restore(&backup, &dest, at).await {
                     Ok(response) => emit(&response, format),
                     Err(e) => fail(e),
                 }

@@ -3,6 +3,7 @@
 ## Docs
 
 - [Getting started](getting-started.md)
+- [Rust API](rust-api.md)
 - [Architecture](architecture.md)
 - [Configuration](configuration.md)
 - [Operations](operations.md)

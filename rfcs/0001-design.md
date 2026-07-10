@@ -198,8 +198,9 @@ surface. Mixed-version fleets must compute the same owners.
 
 ## Process model
 
-`sleet run <root>` is a Tokio process. Command-line flags cover node-local
-settings:
+`sleet run <root>` is a Tokio process. The Rust API runs the same node loop
+through `Fleet::run_node`; its caller owns the runtime, tracing subscriber,
+and cancellation signal. Command-line flags cover node-local settings:
 
 - `--node-id`
 - `--services`
@@ -218,7 +219,13 @@ sleet run <root> --node-id worker-1 --services compaction-workers
 
 Each owned assignment runs as a supervised task. Sleet starts and cancels
 tasks as placement changes. One-shot commands read object storage and exit.
-Nodes do not serve an HTTP API.
+The `Fleet` Rust facade exposes the same one-shot operations in process.
+Nodes do not serve a network API.
+
+The CLI and Rust facade open the fleet root, databases, and mirror
+destinations from their URLs. Credentials and provider settings come from
+the process environment. One process therefore needs access to every store
+that its offered services may own.
 
 ## Services
 
@@ -287,7 +294,8 @@ is a short compaction stall.
 - mirror lag when `--mirrors` is set
 
 The daemon writes structured logs per service assignment. It does not expose
-metrics or an API.
+metrics or a network API. Programs can derive the same status in process
+through the Rust facade.
 
 ## Scaling
 
@@ -313,6 +321,9 @@ The following formats are stable once a release depends on them:
 - service letters
 - rendezvous hash keys and tie break
 - JSON schemas generated from config, heartbeat, and CLI response types
+
+The supported Rust facade follows the crate's semantic version. Internal
+protocol modules and test seams are not part of that compatibility surface.
 
 New heartbeat body fields are compatible because readers ignore unknown
 fields. Config parsing rejects unknown fields, so removing or renaming a
