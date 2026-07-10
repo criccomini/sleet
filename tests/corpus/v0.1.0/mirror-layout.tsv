@@ -1,0 +1,4 @@
+manifest	manifest/00000000000000000042.manifest
+manifest	manifest/18446744073709551615.manifest
+wal	wal/00000000000000000007.sst
+compacted	compacted/01J79C21YKR31J2BS1EFXJZ7MR.sst

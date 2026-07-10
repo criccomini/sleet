@@ -3,9 +3,15 @@
 This guide starts one Sleet node against one registered SlateDB database. It
 assumes you already have a database root in object storage.
 
-## Build the binary
+## Install or build the binary
 
-From the repository root:
+Install a released version from crates.io:
+
+```sh
+cargo install sleet --locked
+```
+
+To build from a source checkout instead, run from the repository root:
 
 ```sh
 cargo build --release

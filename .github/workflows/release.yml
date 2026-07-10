@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify tag and package version match
+        run: |
+          package_version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "sleet") | .version')
+          test "v${package_version}" = "${GITHUB_REF_NAME}"
+      - run: cargo publish --dry-run --locked
+
+  build:
+    needs: validate
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package binary
+        run: |
+          archive="sleet-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir "${archive}"
+          cp "target/${{ matrix.target }}/release/sleet" "${archive}/"
+          cp README.md LICENSE "${archive}/"
+          tar -czf "${archive}.tar.gz" "${archive}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sleet-${{ matrix.target }}
+          path: sleet-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: validate
+    # The first crate version must be published manually before crates.io
+    # allows this repository to be configured as a trusted publisher.
+    if: github.ref_name != 'v0.1.0'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+      - run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  release:
+    needs: [build, publish]
+    if: >-
+      always() && needs.build.result == 'success' &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sleet-*
+          path: dist
+          merge-multiple: true
+      - name: Write checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}" dist/*
+          --repo "${GITHUB_REPOSITORY}"
+          --verify-tag
+          --title "Sleet ${GITHUB_REF_NAME}"
+          --generate-notes

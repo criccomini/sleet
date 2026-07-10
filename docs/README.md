@@ -4,6 +4,7 @@
 
 - [Getting started](getting-started.md)
 - [Rust API](rust-api.md)
+- [Releasing](releasing.md)
 - [Architecture](architecture.md)
 - [Configuration](configuration.md)
 - [Operations](operations.md)

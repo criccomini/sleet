@@ -2,8 +2,28 @@
 name = "sleet"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
 description = "A fleet manager for SlateDB databases"
 license = "MIT"
+repository = "https://github.com/criccomini/sleet"
+documentation = "https://docs.rs/sleet"
+readme = "README.md"
+keywords = ["slatedb", "database", "compaction", "object-storage", "distributed-systems"]
+categories = ["database", "command-line-utilities"]
+publish = ["crates-io"]
+include = [
+    "src/**",
+    "build.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "docs/**",
+    "examples/**",
+    "rfcs/**",
+    "schema/**",
+]
 
 [features]
 default = ["cli"]

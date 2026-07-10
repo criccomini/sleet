@@ -35,3 +35,18 @@ include_size_threshold = 4.0
 count = 2                              # worker nodes per database
 max_sst_size = 268435456               # 256 MiB
 max_subcompactions = 4
+
+# Mirror targets (RFC 0002). Fleet-wide targets apply to every
+# database a target's scope covers; dbs/<db>.toml overrides per field,
+# matched by target name. Databases under s3://user-data mirror to the
+# DR bucket at the same relative path.
+[database.mirror.targets.dr]
+url = "s3://dr-bucket/mirrors"
+source_prefix = "s3://user-data"
+mode = "continuous"             # continuous | periodic
+copier = "builtin"              # builtin | rclone | external
+poll = "10s"                    # continuous: pass and tail cadence
+# interval = "24h"              # periodic: cadence between passes
+# min_age = "300s"              # prune deletion age floor
+# checkpoint_lifetime = "15m"   # source pin checkpoint TTL
+# copy_parallelism = 8          # builtin: concurrent object copies

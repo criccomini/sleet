@@ -7,6 +7,12 @@ distributed compaction, and mirroring.
 
 ## Quick start
 
+Install the CLI from crates.io:
+
+```sh
+cargo install sleet --locked
+```
+
 Register a SlateDB database:
 
 ```sh
@@ -56,6 +62,7 @@ sleet run s3://path/to/sleet/state \
 
 See the following directories for more information:
 
+- [Changelog](CHANGELOG.md): Release history.
 - [docs](docs): Sleet documentation.
 - [examples](examples): Example configuration files.
 - [rfcs](rfcs): Sleet design documents.
