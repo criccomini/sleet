@@ -62,7 +62,6 @@ sleet run s3://path/to/sleet/state \
 
 See the following directories for more information:
 
-- [Changelog](CHANGELOG.md): Release history.
 - [docs](docs): Sleet documentation.
 - [examples](examples): Example configuration files.
 - [rfcs](rfcs): Sleet design documents.
