@@ -181,19 +181,21 @@ retention, copiers, restore points, and promotion constraints.
 The `sleet` crate exposes the same operations for applications that want to
 run a node or inspect a fleet in process:
 
-```rust,no_run
+```rust
 use sleet::{Fleet, StatusOptions};
 
-# async fn example() -> Result<(), sleet::Error> {
-let fleet = Fleet::open("s3://ops/sleet")?;
-fleet.register("s3://data/orders").await?;
+#[tokio::main]
+async fn main() -> Result<(), sleet::Error> {
+    let fleet = Fleet::open("s3://ops/sleet")?;
+    fleet.register("s3://data/orders").await?;
 
-let status = fleet
-    .status(StatusOptions::default().with_compactions(true))
-    .await?;
-println!("{} databases", status.databases.len());
-# Ok(())
-# }
+    let status = fleet
+        .status(StatusOptions::default().with_compactions(true))
+        .await?;
+    println!("{} databases", status.databases.len());
+
+    Ok(())
+}
 ```
 
 Disable the default `cli` feature for library-only builds. See the
