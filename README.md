@@ -5,40 +5,6 @@ databases from a shared pool of nodes. A deployment with one database per user
 may have thousands of database roots. Sleet lets the same pool garbage-collect,
 compact, and mirror all of them.
 
-Every node reads the same object-store root, discovers the registered
-databases and live nodes, and computes its assignments with rendezvous hashing.
-Sleet stores no assignment state and runs no leader election. SlateDB's
-manifest CAS, epoch fencing, and compaction job claims keep duplicate work
-safe while nodes converge on the same view.
-
-```text
-                    ┌────────────────────┐
-                    │    object store    │
-                    │  s3://ops/sleet/   │
-                    ├────────────────────┤
-                    │ sleet.toml         │
-                    │ dbs/*.toml         │
-                    │ nodes/*.json       │
-                    └────────────────────┘
-                               ▲
-                               │ read/write
-         ┌─────────────────────┼─────────────────────┐
-         ▼                     ▼                     ▼
-   ┌────────────┐       ┌────────────┐       ┌────────────┐
-   │ sleet node │       │ sleet node │       │ sleet node │
-   └─────┬──────┘       └─────┬──────┘       └─────┬──────┘
-         │                     │                     │
-         └─────────────────────┼─────────────────────┘
-                               │ services
-                               ▼
-                    ┌────────────────────┐
-                    │ SlateDB databases  │
-                    └────────────────────┘
-```
-
-Sleet manages background work only. Applications continue to open SlateDB
-database roots directly.
-
 ## Services
 
 | Service | Work |
