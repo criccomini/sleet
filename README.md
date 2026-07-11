@@ -12,17 +12,28 @@ manifest CAS, epoch fencing, and compaction job claims keep duplicate work
 safe while nodes converge on the same view.
 
 ```text
-                         object store
-                    s3://ops/sleet/
-                    ├── sleet.toml
-                    ├── dbs/*.toml
-                    └── nodes/*.json
-                           │
-             ┌─────────────┼─────────────┐
-             │             │             │
-        sleet node     sleet node     sleet node
-             │             │             │
-             └──── SlateDB databases ────┘
+                    ┌────────────────────┐
+                    │    object store    │
+                    │  s3://ops/sleet/   │
+                    ├────────────────────┤
+                    │ sleet.toml         │
+                    │ dbs/*.toml         │
+                    │ nodes/*.json       │
+                    └────────────────────┘
+                               ▲
+                               │ read/write
+         ┌─────────────────────┼─────────────────────┐
+         ▼                     ▼                     ▼
+   ┌────────────┐       ┌────────────┐       ┌────────────┐
+   │ sleet node │       │ sleet node │       │ sleet node │
+   └─────┬──────┘       └─────┬──────┘       └─────┬──────┘
+         │                     │                     │
+         └─────────────────────┼─────────────────────┘
+                               │ services
+                               ▼
+                    ┌────────────────────┐
+                    │ SlateDB databases  │
+                    └────────────────────┘
 ```
 
 Sleet manages background work only. Applications continue to open SlateDB
