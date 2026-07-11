@@ -5,18 +5,6 @@ databases from a shared pool of nodes. A deployment with one database per user
 may have thousands of database roots. Sleet lets the same pool garbage-collect,
 compact, and mirror all of them.
 
-## Services
-
-| Service | Work |
-| --- | --- |
-| `gc` | Run SlateDB garbage collection. |
-| `compactor-coordinator` | Schedule compactions and commit completed results. |
-| `compaction-workers` | Claim and execute jobs from `.compactions`. |
-| `mirror` | Copy databases to other object-store roots. |
-
-Nodes offer all four services by default. Each database can enable a subset,
-and nodes can form specialized pools with `--services`.
-
 ## Quick start
 
 Install the latest prebuilt release:
@@ -57,6 +45,18 @@ sleet status s3://ops/sleet
 Credentials and provider settings come from the process environment recognized
 by the Rust `object_store` crate. A node needs access to the fleet root and to
 every database or mirror destination its offered services may own.
+
+## Services
+
+| Service | Work |
+| --- | --- |
+| `gc` | Run SlateDB garbage collection. |
+| `compactor-coordinator` | Schedule compactions and commit completed results. |
+| `compaction-workers` | Claim and execute jobs from `.compactions`. |
+| `mirror` | Copy databases to other object-store roots. |
+
+Nodes offer all four services by default. Each database can enable a subset,
+and nodes can form specialized pools with `--services`.
 
 ## Fleet configuration
 
