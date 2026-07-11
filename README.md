@@ -201,17 +201,12 @@ Disable the default `cli` feature for library-only builds. See the
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md): installation, credentials, and a
-  first node.
-- [Architecture](docs/architecture.md): placement, heartbeats, failure
-  behavior, and scaling.
-- [CLI reference](docs/cli.md): commands, options, and output formats.
-- [Operations](docs/operations.md): capacity, logs, registry changes, and cost
-  controls.
-- [RFC 0001](rfcs/0001-design.md): fleet coordination protocol.
-- [RFC 0002](rfcs/0002-mirroring.md): mirror protocol and safety invariants.
-- [Examples](examples): complete fleet and per-database configuration.
-- [Schemas](schema): configuration, heartbeat, and CLI response schemas.
+See the following directories for more information:
+
+- [docs](docs): Sleet documentation.
+- [examples](examples): Example configuration files.
+- [rfcs](rfcs): Sleet design documents.
+- [schemas](schema): CLI, configuration, and heartbeat file JSON schemas.
 
 ## License
 
