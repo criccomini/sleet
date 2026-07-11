@@ -1,9 +1,9 @@
 # Sleet
 
 Sleet runs [SlateDB](https://slatedb.io) background services for a fleet of
-databases. A pool of stateless Sleet nodes handles garbage collection,
-distributed compaction, and mirroring without adding a coordinator or metadata
-database.
+databases from a shared pool of nodes. A deployment with one database per user
+may have thousands of database roots. Sleet lets the same pool garbage-collect,
+compact, and mirror all of them.
 
 Every node reads the same object-store root, discovers the registered
 databases and live nodes, and computes its assignments with rendezvous hashing.
@@ -142,10 +142,14 @@ and destination heads to report lag. JSON responses follow
 
 ## Mirroring
 
-The mirror service copies immutable SlateDB objects to another bucket, region,
-or cloud, then commits source manifests at the destination. Continuous targets
-tail the WAL between sync passes. Periodic targets create restore points that
-can be retained and restored later.
+The mirror service incrementally copies a SlateDB database to another
+object-store root, including roots in another region or cloud. Sleet can copy
+objects itself, invoke `rclone`, or work with cloud replication services.
+
+Before committing a manifest, Sleet ensures the destination contains every SST
+and checkpoint manifest it references. Each new destination head is loadable
+as soon as it appears. Continuous targets tail the WAL between sync passes.
+Periodic targets create restore points that can be retained and restored later.
 
 ```toml
 [database]
@@ -208,18 +212,6 @@ Disable the default `cli` feature for library-only builds. See the
 - [RFC 0002](rfcs/0002-mirroring.md): mirror protocol and safety invariants.
 - [Examples](examples): complete fleet and per-database configuration.
 - [Schemas](schema): configuration, heartbeat, and CLI response schemas.
-
-## Development
-
-Sleet requires Rust 1.89 or newer.
-
-```sh
-cargo test
-cargo fmt
-cargo clippy --all-targets
-```
-
-The RFCs under [rfcs](rfcs) are the design source of truth.
 
 ## License
 
